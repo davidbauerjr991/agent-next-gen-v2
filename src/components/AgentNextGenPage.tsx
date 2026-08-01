@@ -2213,21 +2213,30 @@ function nextCustomerSortDirection(current: SortDirection): SortDirection {
 }
 
 // Proportional `flex-[n]` ratios — same shape as DataManagement.stories.tsx's
-// own `columnConfig` — not a fixed `min-w-[…]` per column, so the table
-// shrinks/grows to fill exactly whatever width is available instead of
-// demanding a wide floor no container here needs to accommodate.
-const CUSTOMER_COLUMN_CONFIG: Record<CustomerColKey, { label: string; flex: string }> = {
-  contactNumber: { label: "Contact Number", flex: "flex-1" },
-  channels:      { label: "Channels",       flex: "flex-1" },
-  firstName:     { label: "First Name",     flex: "flex-1" },
-  lastName:      { label: "Last Name",      flex: "flex-1" },
-  group:         { label: "Group",          flex: "flex-[0.7]" },
-  firstPhone:    { label: "First Phone",    flex: "flex-[1.2]" },
-  emailAddress:  { label: "Email Address",  flex: "flex-[1.6]" },
-  address1:      { label: "Address 1",      flex: "flex-[1.6]" },
-  city:          { label: "City",           flex: "flex-1" },
-  state:         { label: "State",          flex: "flex-[0.6]" },
-  postalCode:    { label: "Postal Code",    flex: "flex-[0.8]" },
+// own `columnConfig` — so the table shrinks/grows to fill exactly whatever
+// width is available. `minWidth` is a per-column readability floor: lyra-ui's
+// `Table` has no CSS min-width of its own (only `resize.totalWidth`, which
+// stays unset until a column is actually drag-resized — see table.tsx), so
+// with only `flex-[n]` every column just keeps shrinking with the
+// container, no floor, until labels/values are truncated to 1-2 characters.
+// This floor is what triggers a real horizontal scrollbar on the `overflow-
+// auto` wrapper below once the container gets narrower than the columns'
+// combined minimums, instead of squishing text unreadably. (Class strings
+// below are written out in full, not built from the numbers via template
+// literals — Tailwind's build only picks up `min-w-[…]` utilities that
+// appear literally in source.)
+const CUSTOMER_COLUMN_CONFIG: Record<CustomerColKey, { label: string; flex: string; minWidth: string }> = {
+  contactNumber: { label: "Contact Number", flex: "flex-1",      minWidth: "min-w-[120px]" },
+  channels:      { label: "Channels",       flex: "flex-1",      minWidth: "min-w-[150px]" },
+  firstName:     { label: "First Name",     flex: "flex-1",      minWidth: "min-w-[100px]" },
+  lastName:      { label: "Last Name",      flex: "flex-1",      minWidth: "min-w-[100px]" },
+  group:         { label: "Group",          flex: "flex-[0.7]",  minWidth: "min-w-[90px]" },
+  firstPhone:    { label: "First Phone",    flex: "flex-[1.2]",  minWidth: "min-w-[140px]" },
+  emailAddress:  { label: "Email Address",  flex: "flex-[1.6]",  minWidth: "min-w-[200px]" },
+  address1:      { label: "Address 1",      flex: "flex-[1.6]",  minWidth: "min-w-[180px]" },
+  city:          { label: "City",           flex: "flex-1",      minWidth: "min-w-[100px]" },
+  state:         { label: "State",          flex: "flex-[0.6]",  minWidth: "min-w-[70px]" },
+  postalCode:    { label: "Postal Code",    flex: "flex-[0.8]",  minWidth: "min-w-[100px]" },
 };
 
 const CUSTOMER_ALL_COLUMN_DEFS: { key: string; label: string }[] = Object.entries(CUSTOMER_COLUMN_CONFIG).map(
@@ -2367,7 +2376,7 @@ function CustomersListView() {
                 return (
                   <SortableTableHead
                     key={key}
-                    className={cn(col.flex, "relative")}
+                    className={cn(col.flex, col.minWidth, "relative")}
                     sortDirection={dirFor(key)}
                     onSort={() => handleSort(key)}
                     columnKey={key}
@@ -2400,7 +2409,11 @@ function CustomersListView() {
                   />
                 </TableCell>
                 {columnOrder.map((key: CustomerColKey) => (
-                  <TableCell key={key} columnKey={key} className={CUSTOMER_COLUMN_CONFIG[key].flex}>
+                  <TableCell
+                    key={key}
+                    columnKey={key}
+                    className={cn(CUSTOMER_COLUMN_CONFIG[key].flex, CUSTOMER_COLUMN_CONFIG[key].minWidth)}
+                  >
                     {key === "channels" ? <CustomerChannelCell channels={row.channels} /> : row[key]}
                   </TableCell>
                 ))}
