@@ -5215,13 +5215,24 @@ export function AgentNextGenPage({
   // session-status pill itself reads/writes via `handleInteractionStatusChange`
   // — so there's nothing left for a local draft to own for that field.
   const [outcomeDraftKey, setOutcomeDraftKey] = useState<string | null>(null);
+  // Which of the two triggers actually opened the popover currently named by
+  // `outcomeDraftKey` — the LeftNav `ChannelRow` Outcome button and the
+  // transcript's own `TranscriptSessionSeparator` Outcome button key off the
+  // exact same `${interactionId}:${channelKey}` value for the active channel
+  // (so both stay in sync on the same shared draft), but that meant clicking
+  // either one satisfied BOTH `outcomeDraftKey === key` checks and popped
+  // open two popovers at once (reported via screenshot). Each trigger's own
+  // `open` now additionally requires this to match its own source, so only
+  // the one actually clicked shows as open — the underlying draft (tags/
+  // disposition/summary) still stays the same shared state either way.
+  const [outcomeDraftSource, setOutcomeDraftSource] = useState<"leftnav" | "transcript" | null>(null);
   const buildDefaultOutcomeDraft = () => ({
     tags: ["Technical", "Account"],
     dispositionCode: OUTCOME_DISPOSITION_OPTIONS[0].value,
     summary: OUTCOME_DEFAULT_SUMMARY,
   });
   const [outcomeDraft, setOutcomeDraft] = useState(buildDefaultOutcomeDraft);
-  const handleOutcomeOpenChange = (key: string, open: boolean) => {
+  const handleOutcomeOpenChange = (key: string, open: boolean, source: "leftnav" | "transcript") => {
     if (open) {
       // Reset to a fresh draft every time a (possibly different) channel's
       // popover opens — no real backend here to load a previously-saved
@@ -5229,16 +5240,24 @@ export function AgentNextGenPage({
       // rather than carrying over whatever the last channel's draft had.
       setOutcomeDraft(buildDefaultOutcomeDraft());
       setOutcomeDraftKey(key);
-    } else if (outcomeDraftKey === key) {
+      setOutcomeDraftSource(source);
+    } else if (outcomeDraftKey === key && outcomeDraftSource === source) {
       setOutcomeDraftKey(null);
+      setOutcomeDraftSource(null);
     }
   };
   // "Approve & Save"/"Cancel" both just close the popover — there's no real
   // backend here to persist an outcome to, same no-op placeholder state
   // every other not-yet-wired action in this file starts from (e.g. Consult
   // / Transfer — see rule #30's own note in CLAUDE.md).
-  const handleOutcomeSave = () => setOutcomeDraftKey(null);
-  const handleOutcomeCancel = () => setOutcomeDraftKey(null);
+  const handleOutcomeSave = () => {
+    setOutcomeDraftKey(null);
+    setOutcomeDraftSource(null);
+  };
+  const handleOutcomeCancel = () => {
+    setOutcomeDraftKey(null);
+    setOutcomeDraftSource(null);
+  };
   const contactHistoryByRange = useMemo(
     () => buildContactHistoryByRange(dismissedContactHistory),
     [dismissedContactHistory]
@@ -7098,8 +7117,8 @@ export function AgentNextGenPage({
                     // false}` already hides the whole button (and this along
                     // with it) there.
                     outcome: {
-                      open: outcomeDraftKey === outcomeKey,
-                      onOpenChange: (open: boolean) => handleOutcomeOpenChange(outcomeKey, open),
+                      open: outcomeDraftKey === outcomeKey && outcomeDraftSource === "leftnav",
+                      onOpenChange: (open: boolean) => handleOutcomeOpenChange(outcomeKey, open, "leftnav"),
                       // Same options list AND same underlying value as the
                       // session-status pill's own dropdown
                       // (`TranscriptSessionSeparator`, fed by
@@ -7427,8 +7446,8 @@ export function AgentNextGenPage({
                         // `${interactionId}:${channelKey}` scheme that
                         // call site uses) — see `InteractionTranscript`'s
                         // own outcome props' doc comment.
-                        outcomeOpen={outcomeDraftKey === activeChannelOutcomeKey}
-                        onOutcomeOpenChange={(open) => handleOutcomeOpenChange(activeChannelOutcomeKey!, open)}
+                        outcomeOpen={outcomeDraftKey === activeChannelOutcomeKey && outcomeDraftSource === "transcript"}
+                        onOutcomeOpenChange={(open) => handleOutcomeOpenChange(activeChannelOutcomeKey!, open, "transcript")}
                         outcomeTags={outcomeDraft.tags}
                         onOutcomeTagsChange={(tags) => setOutcomeDraft((d) => ({ ...d, tags }))}
                         outcomeDispositionCode={outcomeDraft.dispositionCode}
