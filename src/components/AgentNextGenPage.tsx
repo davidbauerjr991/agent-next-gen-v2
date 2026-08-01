@@ -5624,6 +5624,22 @@ export function AgentNextGenPage({
   // `panelVariant`'s two states was active before entering fullscreen is
   // preserved (untouched) and simply resumes when fullscreen exits.
   const [panelFullScreen, setPanelFullScreen] = useState(false);
+  // Exit the shared panel's fullscreen whenever the agent navigates away
+  // from the current main-content context — clicking a different
+  // assignment card, Home, or Settings (and starting/selecting any new
+  // interaction, e.g. via CreateNew/Outbound) all funnel through
+  // `activeInteractionId`/`showSettings` changing, so one effect here
+  // covers every one of those call sites instead of threading
+  // `setPanelFullScreen(false)` through each of them individually — same
+  // "effect rather than touching every call site" approach `showSettings`'s
+  // own reset (right above, near `activeInteractionId`'s own declaration)
+  // already uses. `panelVariant` itself is untouched, so the panel simply
+  // resumes whichever of "docked"/"float" it was in before fullscreen,
+  // exactly like exiting via the toggle button itself.
+  useEffect(() => {
+    setPanelFullScreen(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeInteractionId, showSettings]);
   // `containerRef` is the CONTENT container — everything to the right of
   // LeftNav (its own JSX comment further down calls it "Content area"),
   // also used elsewhere for AI/Notifications float positioning. This is
