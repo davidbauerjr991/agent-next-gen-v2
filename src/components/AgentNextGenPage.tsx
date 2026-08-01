@@ -5692,6 +5692,15 @@ export function AgentNextGenPage({
   const panelFloatTop  = useRef<number | null>(null);
   const panelRef       = useRef<HTMLDivElement>(null);
   const panelAnimTimer = useRef<ReturnType<typeof setTimeout>>();
+  // The docked width to restore on the NEXT re-dock — captured at the
+  // moment the panel actually leaves "docked" (see
+  // `handlePanelVariantChange`/`handleFullScreenToDragMode` below), so a
+  // resize that happens while floating never leaks back into the docked
+  // column width, per explicit request ("re-dock to the original width...
+  // even after being resized"). Deliberately a ref, not state — this is
+  // write-once-per-undock/read-once-per-redock bookkeeping, not something
+  // that should ever trigger its own render.
+  const panelDockedWidthBeforeUndock = useRef<number | null>(null);
   const [screenPopApp, setScreenPopApp] = useState("");
   // Search panel's own query — separate from `searchQuery` (contact
   // history search elsewhere in this file) since this is a distinct,
@@ -6626,11 +6635,27 @@ export function AgentNextGenPage({
   // undocking. The old "only one of five may be docked" exclusivity check
   // (`dockPanelExclusively`) is gone — with a single shared container
   // there's only ever one panel to dock in the first place.
+  //
+  // Width works the other direction: undocking (docked -> float) is when
+  // `panelDockedWidthBeforeUndock` gets captured (guarded on the FROM state
+  // actually being "docked" — `panelVariant` here still holds the
+  // pre-update value — so this only fires on a genuine docked -> float
+  // transition, not e.g. `handleFullScreenToDragMode`'s own "float -> float"
+  // no-op call), and docking (float -> docked) is when it's restored,
+  // discarding whatever width the panel was resized to while floating, per
+  // explicit request.
   const handlePanelVariantChange = (v: DraggableVariant) => {
-    if (v === "docked" && panelRef.current) {
-      const r = panelRef.current.getBoundingClientRect();
-      panelFloatLeft.current = r.left;
-      panelFloatTop.current  = r.top;
+    if (v === "docked") {
+      if (panelRef.current) {
+        const r = panelRef.current.getBoundingClientRect();
+        panelFloatLeft.current = r.left;
+        panelFloatTop.current  = r.top;
+      }
+      if (panelDockedWidthBeforeUndock.current !== null) {
+        setPanelWidth(panelDockedWidthBeforeUndock.current);
+      }
+    } else if (v === "float" && panelVariant === "docked") {
+      panelDockedWidthBeforeUndock.current = panelWidth;
     }
     setPanelVariant(v);
   };
@@ -6653,8 +6678,16 @@ export function AgentNextGenPage({
   // as its own `defaultWidth`/`defaultHeight` at that fresh mount. Toggling
   // back out of float from here works exactly like any other float panel —
   // `Draggable`'s own built-in dock button re-docks it to the side, same as
-  // always (`handlePanelVariantChange`, above).
+  // always (`handlePanelVariantChange`, above) — including restoring
+  // `panelDockedWidthBeforeUndock`, captured here too (only when this was
+  // entered from an actually-docked panel, mirroring
+  // `handlePanelVariantChange`'s own guard) so re-docking afterward still
+  // returns to the real pre-undock width rather than
+  // `SHARED_PANEL_MAX_WIDTH`.
   const handleFullScreenToDragMode = () => {
+    if (panelVariant === "docked") {
+      panelDockedWidthBeforeUndock.current = panelWidth;
+    }
     setPanelWidth(SHARED_PANEL_MAX_WIDTH);
     setPanelHeight(computePanelHeight());
     setPanelFullScreen(false);
