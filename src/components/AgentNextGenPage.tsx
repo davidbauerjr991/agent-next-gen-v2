@@ -50,8 +50,7 @@ import {
   AgentWelcomeMessage,
   TabList,
   Tab,
-  ChannelToggle,
-  ChannelToggleGroup,
+  ChannelTab,
   Popover,
   Menu,
   WarningIconSolid,
@@ -6848,143 +6847,87 @@ export function AgentNextGenPage({
                 // dismissed (`activeInteractionId` clears).
                 <>
                   {showPageHeader && (
-                    <PageHeader
-                      // Hovering this record icon reveals the Customer
-                      // Information side panel; clicking it is a real on/off
-                      // toggle via the shared `PanelPinButton` atom — same
-                      // trigger the panel's own internal pin button uses.
-                      // Mirrors `AgentNextGenTemplate.stories.tsx`'s
-                      // reference pattern for its own record-header icon.
-                      icon={
-                        showPanelToggle && (
-                          <span
-                            onMouseEnter={onSidePanelHoverStart}
-                            onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
-                          >
-                            <PanelPinButton
-                              pinned={sidePanelPinned}
-                              onToggle={handleSidePanelIconToggle}
-                              icon={<User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
-                              pinnedLabel={sidePanelToggleLabel ?? "Unpin Customer Information"}
-                              unpinnedLabel={sidePanelToggleLabel ?? "Pin Customer Information"}
+                    // ── Record header, replaced with a tab bar ──
+                    // Per explicit request: the old `PageHeader` (customer
+                    // name/id title + a `ChannelToggleGroup` pill cluster in
+                    // `titleSuffix`) is gone entirely — the name/id already
+                    // live in the pinned Customer Information `SidePanel`'s
+                    // own header now, so repeating them here was redundant.
+                    // This row is just: the Customer Information toggle
+                    // icon, a divider, then a single `TabList` that both
+                    // reopens Customer History (as its own leading tab) and
+                    // replaces `ChannelToggleGroup`'s job of switching
+                    // between open channels — real `Tab`s now, not toggle
+                    // pills. `ChannelTab`/`TabList` are safe to bring back
+                    // here (this row's ONLY content, not squeezed into a
+                    // `titleSuffix` slot alongside a title block) — it
+                    // doesn't have the "no real width to fill" problem that
+                    // sank the earlier `ChannelTab`/`TabList` attempt (see
+                    // git history/CONTRIBUTING.md): that one was cramming
+                    // the exact same tabs into `PageHeader`'s slim
+                    // `titleSuffix` slot, not replacing the header outright.
+                    <div className="flex min-h-[68px] items-center gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6">
+                      {showPanelToggle && (
+                        <span
+                          onMouseEnter={onSidePanelHoverStart}
+                          onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
+                        >
+                          <PanelPinButton
+                            pinned={sidePanelPinned}
+                            onToggle={handleSidePanelIconToggle}
+                            icon={<User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
+                            pinnedLabel={sidePanelToggleLabel ?? "Unpin Customer Information"}
+                            unpinnedLabel={sidePanelToggleLabel ?? "Pin Customer Information"}
+                          />
+                        </span>
+                      )}
+                      <div className="h-8 w-px bg-lyra-border-subtle shrink-0" aria-hidden="true" />
+                      <TabList overflowMenu className="flex-1 min-w-0">
+                        {/* "Customer History" — per explicit request, this
+                            tab doesn't navigate anywhere of its own; it's a
+                            second trigger for the same Customer Information
+                            side panel the icon above already toggles (this
+                            one's `active` state just mirrors whether that
+                            panel is currently open, same as any other
+                            toggled `Tab`). */}
+                        <Tab
+                          active={sidePanelOpen}
+                          onClick={handleSidePanelIconToggle}
+                          icon={<History className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
+                        >
+                          Customer History
+                        </Tab>
+                        {activeInteraction.channels.map((c) => {
+                          const key = c.id ?? c.type;
+                          return (
+                            <ChannelTab
+                              key={key}
+                              type={c.type}
+                              address={c.addressLabel}
+                              messageCount={c.messageCount}
+                              interactionId={c.interactionId}
+                              active={(activeInteraction.currentChannelId ?? activeInteraction.channels[activeInteraction.channels.length - 1]?.id) === key}
+                              onClick={() => handleChannelSelect(activeInteraction.id, key)}
+                              onDismiss={() => {
+                                if (activeInteraction.channels.length > 1) handleDismissChannel(activeInteraction.id, c);
+                                else handleDismissInteraction(activeInteraction.id);
+                              }}
+                              // Closed (reopened-from-history) interaction —
+                              // read-only, no kebab here either. See
+                              // `ActiveInteraction.closed`'s own doc comment.
+                              showMenu={!activeInteraction.closed}
                             />
-                          </span>
-                        )
-                      }
-                      iconAriaHidden={false}
-                      title={activeInteraction.customerName ?? "Customer"}
-                      subtitle={activeInteraction.recordId}
-                      // One toggle per open channel, to the right of the
-                      // customer name — back to `ChannelToggle`/
-                      // `ChannelToggleGroup` (`ToggleGroup`-style segmented
-                      // pill) per explicit request, reverting the brief
-                      // `ChannelTab`/`TabList` detour: `Tab`'s 48px-tall
-                      // row/bottom-border design never sat right embedded in
-                      // a single-line header row (screenshots showed it
-                      // rendering as a squished/disjointed fragment even
-                      // after widening its available space via
-                      // `titleSuffixGrow` and dropping its border) —
-                      // `ChannelToggle` was already purpose-built to sit
-                      // compactly inline here, which is why it's the one
-                      // going back in, not a third alternative. `titleSuffix`
-                      // stays at its default `shrink-0` (snug against the
-                      // name) — no `titleSuffixGrow` needed for a compact
-                      // pill cluster, only for `Tab`'s own row-based sizing.
-                      // Same per-channel behavior as always (kebab menu,
-                      // address + message-count/id tooltip, kept in sync
-                      // with the matching `InteractionNavItem` card via
-                      // currentChannelId/handleChannelSelect — see that
-                      // field's own doc comment). Shown even with just one
-                      // channel open — the toggle still surfaces that
-                      // channel's kebab actions (Unassign & Dismiss/Consult/
-                      // Transfer/etc.), not just a way to switch between
-                      // multiple. A plain vertical divider (matching
-                      // `panelToggle`'s own left-side divider elsewhere in
-                      // this component) separates the title from the toggle
-                      // cluster so the two don't visually run together.
-                      //
-                      // The trailing "+" after the toggle group is the exact
-                      // same Add Channel control every `InteractionNavItem`
-                      // card already has (`headerAction={getHeaderAction(
-                      // interaction.id)}` a few hundred lines up) — reusing
-                      // `getHeaderAction` here (not a second hand-built
-                      // button) means it's the identical `OutboundAddButton`,
-                      // scoped to this same contact's own supported
-                      // channels. Picking a channel here shows its whole
-                      // detail form (Select Channel/Address/Skill/Start
-                      // Interaction) right in this same popover now, not the
-                      // LeftNav's separate "New Outbound" `CreateNew`
-                      // instance — see `OutboundAddButton`'s own doc comment
-                      // in create-new.tsx for why that hand-off was removed
-                      // (it was popping the form up next to the LeftNav
-                      // instead of by the "+" the agent actually clicked, per
-                      // explicit request). No new plumbing needed here; this
-                      // is just a second place the hook's existing result
-                      // gets rendered.
-                      titleSuffix={
-                        activeInteraction.channels.length > 0 && (
-                          <div className="flex items-center gap-3">
-                            {/* Hidden below 768px of the header's own width
-                                (`lyra-page-header-suffix-divider`, see
-                                lyra-tokens.css's "Page header title-suffix
-                                wrap" family) — this divider only reads as a
-                                separator between the title and the toggle
-                                group while both share one line; once the
-                                group wraps to its own row below, a lone
-                                vertical bar floating there with nothing to
-                                actually divide just looks like a rendering
-                                glitch. */}
-                            <div className="lyra-page-header-suffix-divider h-6 w-px bg-lyra-border-subtle" aria-hidden="true" />
-                            <ChannelToggleGroup
-                              // Add Channel "+" lives inside this same
-                              // bordered/rounded shell now (per explicit
-                              // request), via `action` — not another
-                              // `ChannelToggle` child, so it doesn't get
-                              // cloned with `isFirst`/`role="radio"` or the
-                              // active-pill treatment. `ml-0.5` (2px) is its
-                              // own separation from the last pill — plain
-                              // whitespace per a screenshot of the target
-                              // look, not the divider rule `ChannelToggle`
-                              // uses between its own items (tried that
-                              // first; see `action`'s own doc comment in
-                              // channel-row.tsx). Primary/solid treatment —
-                              // same tokens as `Button`'s `variant="default"`
-                              // (button.tsx) — rather than the ghost look
-                              // every other icon button here defaults to,
-                              // per explicit request to make this one read
-                              // as the primary action in the row.
-                              action={getHeaderAction(
-                                activeInteraction.id,
-                                "ml-0.5 h-9 w-9 bg-lyra-bg-primary text-lyra-fg-on-primary hover:bg-lyra-state-hover-primary active:bg-lyra-state-pressed-primary"
-                              )}
-                            >
-                              {activeInteraction.channels.map((c) => {
-                                const key = c.id ?? c.type;
-                                return (
-                                  <ChannelToggle
-                                    key={key}
-                                    type={c.type}
-                                    address={c.addressLabel}
-                                    messageCount={c.messageCount}
-                                    interactionId={c.interactionId}
-                                    active={(activeInteraction.currentChannelId ?? activeInteraction.channels[activeInteraction.channels.length - 1]?.id) === key}
-                                    onClick={() => handleChannelSelect(activeInteraction.id, key)}
-                                    onDismiss={() => {
-                                      if (activeInteraction.channels.length > 1) handleDismissChannel(activeInteraction.id, c);
-                                      else handleDismissInteraction(activeInteraction.id);
-                                    }}
-                                    // Closed (reopened-from-history) interaction —
-                                    // read-only, no kebab here either. See
-                                    // `ActiveInteraction.closed`'s own doc comment.
-                                    showMenu={!activeInteraction.closed}
-                                  />
-                                );
-                              })}
-                            </ChannelToggleGroup>
-                          </div>
-                        )
-                      }
-                    />
+                          );
+                        })}
+                      </TabList>
+                      {/* Same Add Channel control every `InteractionNavItem`
+                          card already has (`getHeaderAction`) — a plain
+                          trailing icon button now, sitting after the tab
+                          row instead of embedded inside `ChannelToggleGroup`'s
+                          own bordered shell (there's no such shell here to
+                          embed it in anymore). */}
+                      {getHeaderAction(activeInteraction.id)}
+                    </div>
                   )}
                   {/* Body row: transcript+composer column. Customer
                       Information now renders as a `SidePanel` docked left of
