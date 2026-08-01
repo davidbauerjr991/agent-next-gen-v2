@@ -5635,7 +5635,11 @@ export function AgentNextGenPage({
   // own reset (right above, near `activeInteractionId`'s own declaration)
   // already uses. `panelVariant` itself is untouched, so the panel simply
   // resumes whichever of "docked"/"float" it was in before fullscreen,
-  // exactly like exiting via the toggle button itself.
+  // exactly like exiting via the toggle button itself. NOTE: this alone
+  // doesn't cover clicking the card that's ALREADY the active one — that
+  // sets the same `activeInteractionId`, no value change, so this effect
+  // doesn't fire — see the assignment card's own `onClick` (further down),
+  // which calls `setPanelFullScreen(false)` directly for that reason.
   useEffect(() => {
     setPanelFullScreen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -7692,7 +7696,19 @@ export function AgentNextGenPage({
                     key={interaction.id}
                     customerName={interaction.customerName}
                     active={activeInteractionId === interaction.id}
-                    onClick={() => setActiveInteractionId(interaction.id)}
+                    // Exits fullscreen directly here (not just via the
+                    // `activeInteractionId`-keyed effect near
+                    // `panelFullScreen`'s own declaration) because clicking
+                    // the ALREADY-active card sets the same id — no value
+                    // change, so that effect wouldn't fire, and the click
+                    // would otherwise silently do nothing while the shared
+                    // panel is covering the content the agent just clicked
+                    // to see. Harmless/redundant on a real switch, where
+                    // the effect would already handle it.
+                    onClick={() => {
+                      setActiveInteractionId(interaction.id);
+                      setPanelFullScreen(false);
+                    }}
                     awaitingResponse={channels.some((c) => c.awaitingResponse)}
                     elapsed={formatElapsedTime(clockTick - earliestStart)}
                     expanded={navOpen}
