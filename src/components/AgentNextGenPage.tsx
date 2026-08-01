@@ -7152,8 +7152,19 @@ export function AgentNextGenPage({
       onWidthChange={setPanelWidth}
       onResizeStateChange={setPanelIsResizing}
       className={cn(
-        "rounded-lyra-lg border border-lyra-border-subtle bg-lyra-bg-surface-base",
-        panelVariant === "float" ? "shadow-lg" : "h-full"
+        "rounded-lyra-lg border border-lyra-border-subtle",
+        // Floating (undocked) gets a 10%-opacity background per explicit
+        // request — plain `bg-lyra-bg-surface-base/10` can't work here since
+        // Tailwind can't generate opacity-modified utilities for our
+        // `var(--lyra-color-*)` tokens (same root cause as the Modal
+        // backdrop's own `color-mix()` override, overlay.tsx/
+        // AgentNextGenPage.tsx doc comments), so `color-mix()` directly
+        // against the same `--lyra-color-bg-surface-base` variable the
+        // plain utility itself resolves to (tailwind-preset.ts) is used
+        // instead. Docked keeps the normal fully-opaque background.
+        panelVariant === "float"
+          ? "shadow-lg bg-[color-mix(in_srgb,var(--lyra-color-bg-surface-base)_10%,transparent)]"
+          : "h-full bg-lyra-bg-surface-base"
       )}
       renderHeaderControls={({ gripProps, dockButtonProps, dockIcon, variant: dVariant }) => (
         <>
