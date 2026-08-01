@@ -5359,8 +5359,9 @@ export function AgentNextGenPage({
   // wrapper, `CreateNew` stays `pinnedHeader`'s sole direct child. Once the
   // popover's open transition has settled, it finds the outbound search
   // field by its placeholder (`OUTBOUND_CONFIG.searchPlaceholder`, defined
-  // below) and focuses it directly. A closing click just fails the query
-  // harmlessly (nothing to focus once the content's unmounted).
+  // below), suppresses the browser's own autofill suggestions on it (see
+  // inline comment), and focuses it directly. A closing click just fails
+  // the query harmlessly (nothing to focus once the content's unmounted).
   useEffect(() => {
     const CREATE_NEW_TRIGGER_LABEL = "New Outbound";
     const onDocumentClick = (e: MouseEvent) => {
@@ -5373,7 +5374,18 @@ export function AgentNextGenPage({
           const input = document.querySelector<HTMLInputElement>(
             `input[placeholder="${OUTBOUND_CONFIG.searchPlaceholder}"]`
           );
-          input?.focus();
+          if (!input) return;
+          // The placeholder text itself contains "email" (part of
+          // OUTBOUND_CONFIG.searchPlaceholder's own copy, "Enter phone,
+          // email or search term"), which is enough for Chrome's autofill
+          // heuristic to treat this as a saved-address field and show a
+          // suggestions dropdown the moment it's focused — distracting on
+          // a field that's never meant to hold the user's OWN contact info.
+          // Set before `.focus()` (same synchronous tick) so Chrome sees
+          // autocomplete="off" at the moment focus fires, rather than
+          // after it's already computed suggestions.
+          input.setAttribute("autocomplete", "off");
+          input.focus();
         }, 50);
       });
     };
