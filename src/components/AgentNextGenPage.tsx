@@ -6936,18 +6936,25 @@ export function AgentNextGenPage({
                           the start of the row. */}
                       {showPanelToggle && !sidePanelOpen && (
                         <>
-                          <span
-                            onMouseEnter={onSidePanelHoverStart}
-                            onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
+                          {/* Plain outlined icon `Button`, not a
+                              `PanelPinButton` — per explicit request, this
+                              needs a bordered "outline" look with no
+                              persistent active/selected background at all
+                              (`PanelPinButton` has no outline variant, and
+                              always paints a selected bg once `pinned` and a
+                              custom `icon` are both set — see its own doc
+                              comment). Plain `onClick`, no hover-preview
+                              wiring either: hover-to-preview only matters
+                              while the panel might already be showing, and
+                              this button only renders while it's closed. */}
+                          <Button
+                            variant="outline"
+                            size="icon-md"
+                            onClick={handleSidePanelIconToggle}
+                            title={sidePanelToggleLabel ?? "Open Customer Information"}
                           >
-                            <PanelPinButton
-                              pinned={sidePanelPinned}
-                              onToggle={handleSidePanelIconToggle}
-                              icon={<User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
-                              pinnedLabel={sidePanelToggleLabel ?? "Unpin Customer Information"}
-                              unpinnedLabel={sidePanelToggleLabel ?? "Pin Customer Information"}
-                            />
-                          </span>
+                            <User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                          </Button>
                           <div className="h-8 w-px bg-lyra-border-subtle shrink-0" aria-hidden="true" />
                         </>
                       )}
