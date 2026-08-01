@@ -7256,18 +7256,19 @@ export function AgentNextGenPage({
                     // git history/CONTRIBUTING.md): that one was cramming
                     // the exact same tabs into `PageHeader`'s slim
                     // `titleSuffix` slot, not replacing the header outright.
-                    // `items-end` (not `-center`) — per explicit follow-up:
-                    // this row's own `border-b` (just below) is the ONLY
-                    // border now, not a second one stacked under `TabList`'s
-                    // own (which only ever spanned its own box width, not
-                    // this whole row, hence the previous "two lines" bug).
-                    // `TabList`'s own border is suppressed below
-                    // (`border-b-0`) so there's exactly one line, and
-                    // bottom-aligning every child here (instead of centering)
-                    // is what makes that ONE line land flush with the tabs'
-                    // own underline instead of sitting lower, under empty
-                    // space beneath a vertically-centered `TabList`.
-                    <div className="flex min-h-[68px] items-end gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6">
+                    // Back to `items-center` (per explicit follow-up —
+                    // `items-end` threw off the icon button/divider's
+                    // vertical centering relative to the tab labels).
+                    // `TabList` alone opts OUT of that centering via its own
+                    // `self-stretch` below, so it's still the one child that
+                    // fills this row's full height — `Tab`'s own internal
+                    // `items-center` (tabs.tsx) keeps each label/icon
+                    // centered within its now-taller box either way, so
+                    // nothing looks squished. That's what lets `TabList`'s
+                    // (suppressed) own border coincide with this row's own
+                    // `border-b` below, without needing to sacrifice the
+                    // icon button/divider's normal centered look to get it.
+                    <div className="flex min-h-[68px] items-center gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6">
                       {/* Only shown while the panel itself is closed — once
                           it's open, this same icon would just sit there
                           doing nothing useful next to a panel that's
@@ -7293,6 +7294,7 @@ export function AgentNextGenPage({
                           <Button
                             variant="outline"
                             size="icon-md"
+                            className="shrink-0"
                             onClick={handleSidePanelIconToggle}
                             title={sidePanelToggleLabel ?? "Open Customer Information"}
                           >
@@ -7305,8 +7307,19 @@ export function AgentNextGenPage({
                           bottom border (which only ever spans its own box,
                           not this whole row) so the row's own full-width
                           `border-b` above is the single, sole underline,
-                          not a second, shorter one stacked on top of it. */}
-                      <TabList overflowMenu className="flex-1 min-w-0 border-b-0">
+                          not a second, shorter one stacked on top of it.
+                          `self-stretch` — the row itself is back to
+                          `items-center` (see its own comment above), but
+                          TabList alone still fills the row's full height,
+                          so its own (suppressed) border position — and
+                          each Tab's own bottom edge, where the active blue
+                          indicator sits — lines up with this row's border
+                          exactly, instead of sitting above it under a
+                          gap. `Tab`'s own internal `items-center`
+                          (tabs.tsx) keeps each tab's label/icon centered
+                          within its now-taller box, so nothing looks
+                          squished by this. */}
+                      <TabList overflowMenu className="flex-1 min-w-0 self-stretch border-b-0">
                         {/* "Customer History" — a separate, independently
                             selectable tab, NOT another trigger for the
                             Customer Information side panel (that's the
