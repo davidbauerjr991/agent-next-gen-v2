@@ -2958,15 +2958,28 @@ function TranscriptSessionSeparator({
       className="sticky top-0 z-[1] bg-lyra-bg-surface-base"
     >
       <AccordionPrimitive.Item value={session.id}>
-        <div className="flex items-center gap-3 py-2">
+        <div className="flex flex-wrap items-center gap-3 py-2">
           {/* Flat, left-aligned customer/case info — no wrapping pill
               border/background and no flanking divider lines (per earlier
               design update matching the reference screenshot): plain inline
               content with "|" separators. The status tag itself moved to
               the far right (see the Consult/Transfer + Outcome cluster
               below) — customer name + channel address now sit here, in
-              its old spot, per explicit request. */}
-          <div className="shrink-0 flex items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
+              its old spot, per explicit request.
+
+              `flex-wrap` on the row above — per explicit follow-up request,
+              when the container narrows this cluster and the Consult/
+              Transfer + Outcome + status tag cluster should break onto
+              their own line rather than clipping/overflowing (an earlier
+              overflow-hidden/truncate attempt was the wrong read of the
+              request — undone here). This cluster itself keeps
+              `whitespace-nowrap` so its own text doesn't ALSO break
+              mid-phrase (e.g. mid phone number) before the two clusters
+              even try wrapping onto separate lines. The right-hand
+              cluster's own `ml-auto` still right-aligns it, whether that's
+              on this same line (room permitting) or on the wrapped second
+              line. */}
+          <div className="flex items-center gap-1.5 whitespace-nowrap lyra-body-sm text-lyra-fg-secondary">
             {customerName && <span className="text-lyra-fg-default">{customerName}</span>}
             {channelAddress && (
               <>
