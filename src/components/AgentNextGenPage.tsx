@@ -5113,6 +5113,12 @@ function CustomerInformationSidePanel({
         </TabList>
       }
       width={width}
+      // 325 — explicit min-width for this panel's drag-resize handle, per
+      // explicit request. `SidePanel`'s own default (`minWidth = 200`,
+      // side-panel.tsx) is too narrow for this panel's own content
+      // (field labels/values, Latest Interaction card, etc.) to stay
+      // legible once dragged all the way down.
+      minWidth={325}
       onWidthChange={onWidthChange}
       onResizeStateChange={onResizeStateChange}
     >
