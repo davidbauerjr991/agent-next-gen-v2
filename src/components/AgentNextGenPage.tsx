@@ -5418,6 +5418,15 @@ export function AgentNextGenPage({
   const [panelHeight,     setPanelHeight]     = useState(860);
   const [panelIsResizing, setPanelIsResizing] = useState(false);
   const containerRef  = useRef<HTMLDivElement>(null);
+  // The "Body: LeftNav + Content" row (both the nav and everything to its
+  // right sit inside this one div, see its own JSX comment further down) —
+  // measured via ResizeObserver so `isNavNarrow` below reacts to this row's
+  // own box width, a real container query, rather than the whole browser
+  // viewport (`window.innerWidth`), which it used before this was pointed
+  // out as a mismatch: a wide browser window with this app embedded in a
+  // narrower panel/iframe never actually gave the nav less room under the
+  // old window-width check.
+  const bodyContainerRef = useRef<HTMLDivElement>(null);
   const panelFloatLeft = useRef<number | null>(null);
   const panelFloatTop  = useRef<number | null>(null);
   const panelRef       = useRef<HTMLDivElement>(null);
@@ -5630,17 +5639,31 @@ export function AgentNextGenPage({
     });
   };
 
-  // Track window width for nav overlay breakpoint
+  // Track window width — still drives `isCompactHeader` below.
   useEffect(() => {
     const onResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const isNavNarrow = windowWidth < 768;
+  // Nav overlay breakpoint — a real container query on the "Body: LeftNav +
+  // Content" row itself (`bodyContainerRef`, see its own doc comment above)
+  // rather than the browser viewport, so this reacts to the actual space
+  // this app is given regardless of window size.
+  const [bodyContainerWidth, setBodyContainerWidth] = useState(9999);
+  useEffect(() => {
+    const el = bodyContainerRef.current;
+    if (!el) return;
+    setBodyContainerWidth(el.getBoundingClientRect().width);
+    const ro = new ResizeObserver(([entry]) => setBodyContainerWidth(entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const isNavNarrow = bodyContainerWidth < 768;
   const isCompactHeader = windowWidth < 760;
 
-  // Auto-collapse the expanded nav when viewport drops below 768px
+  // Auto-collapse the expanded nav when the container drops below 768px
   useEffect(() => {
     if (isNavNarrow && navOpen) setNavOpen(false);
   }, [isNavNarrow]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -7031,8 +7054,10 @@ export function AgentNextGenPage({
       />
 
       {/* ── Body: LeftNav + Content ── */}
-      {/* overflow-hidden ensures docked panels never push layout past the viewport */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      {/* overflow-hidden ensures docked panels never push layout past the viewport.
+          ref measured by `bodyContainerRef` (see its own doc comment) — this
+          row's own width drives `isNavNarrow`'s container query. */}
+      <div ref={bodyContainerRef} className="flex flex-1 min-h-0 overflow-hidden">
 
         <LeftNav
           items={buildNavItems(
