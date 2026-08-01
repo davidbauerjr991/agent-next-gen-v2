@@ -140,6 +140,8 @@ import {
   Send,
   ArrowUpRight,
   CircleCheck,
+  Maximize2,
+  Minimize2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -5044,11 +5046,28 @@ function CustomerInformationPanelBody({
    never had. `allowFullScreen`/`exitFullScreenSignal`/`onOverlayModeChange`
    don't carry over — `SidePanel` has no "full screen" or "floating
    overlay" concept of its own; an unpinned panel simply shows/hides on
-   hover instead. */
+   hover instead.
+
+   Full-screen (per explicit follow-up request) is instead built entirely
+   here, without touching `SidePanel` itself: the caller passes `pinned={
+   false}` (always an unpinned/floating overlay while full-screen — pushing
+   the main column over via docked/pinned mode wouldn't read as "overlay
+   full screen within its parent container") and `width` equal to the
+   parent `Container`'s own measured width (`sidePanelContainerWidth`,
+   already tracked for the narrow-container guard) instead of the normal
+   drag-resized width, so the panel's own existing unpinned/absolute
+   rendering branch (side-panel.tsx) covers the whole container edge to
+   edge. `key`'d by the caller so this remounts on toggle — `SidePanel`'s
+   internal drag-resize hook (`usePanelDragResize`) latches onto whatever
+   width a manual drag last set and ignores further external `width` prop
+   changes afterward, so a fresh mount is the reliable way to make it pick
+   up the new controlled width instead of possibly ignoring it. */
 function CustomerInformationSidePanel({
   open,
   pinned,
   onClose,
+  fullScreen,
+  onToggleFullScreen,
   onMouseEnter,
   onMouseLeave,
   customerName,
@@ -5068,6 +5087,12 @@ function CustomerInformationSidePanel({
    *  comment). `SidePanel`'s `onPinToggle` prop is deliberately left unset
    *  below so its internal default button doesn't also render. */
   onClose?: () => void;
+  /** Whether the panel is currently overlaying the whole parent Container
+   *  edge to edge — purely a rendering choice the caller makes (see this
+   *  component's own doc comment above); only used here to pick the
+   *  Maximize2/Minimize2 icon and label on the toggle button below. */
+  fullScreen?: boolean;
+  onToggleFullScreen?: () => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
   customerName?: string;
@@ -5110,15 +5135,39 @@ function CustomerInformationSidePanel({
       // own `icon && pinned` branch): this is a momentary close action, not
       // a toggle with a persistent on/off state to reflect.
       headerActions={
-        onClose && (
-          <PanelPinButton
-            pinned={false}
-            onToggle={onClose}
-            icon={<PanelLeftClose className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
-            pinnedLabel="Close Customer Information"
-            unpinnedLabel="Close Customer Information"
-          />
-        )
+        <>
+          {/* Full-screen toggle — same `PanelPinButton` atom as the close
+              button below (just another icon/label/handler over the shared
+              "small icon button in a panel header" shape), per explicit
+              request. `pinned={false}` here too, for the same reason the
+              close button hardcodes it: this toggles between two distinct
+              states (full-screen on/off) but isn't a pin, so it shouldn't
+              wear `PanelPinButton`'s "currently active" highlight either. */}
+          {onToggleFullScreen && (
+            <PanelPinButton
+              pinned={false}
+              onToggle={onToggleFullScreen}
+              icon={
+                fullScreen ? (
+                  <Minimize2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                ) : (
+                  <Maximize2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                )
+              }
+              pinnedLabel={fullScreen ? "Exit Full Screen" : "Full Screen"}
+              unpinnedLabel={fullScreen ? "Exit Full Screen" : "Full Screen"}
+            />
+          )}
+          {onClose && (
+            <PanelPinButton
+              pinned={false}
+              onToggle={onClose}
+              icon={<PanelLeftClose className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
+              pinnedLabel="Close Customer Information"
+              unpinnedLabel="Close Customer Information"
+            />
+          )}
+        </>
       }
       // Plain default `"wide"` mode (no `overflowBreakpoint` override) —
       // same behavior as every other `TabList` in the app; see the
@@ -5134,6 +5183,10 @@ function CustomerInformationSidePanel({
         </TabList>
       }
       width={width}
+      // Hides the drag-resize handle while full-screen — its width is
+      // fully caller-controlled in that state (see this component's own
+      // doc comment), not something the agent should be able to drag.
+      resizable={!fullScreen}
       // 325 — explicit min-width for this panel's drag-resize handle, per
       // explicit request. `SidePanel`'s own default (`minWidth = 200`,
       // side-panel.tsx) is too narrow for this panel's own content
@@ -5616,6 +5669,14 @@ export function AgentNextGenPage({
   // matching the old InteriorPanel's `maxWidth` default) — per explicit
   // request.
   const [sidePanelWidth, setSidePanelWidth] = useState(340);
+  // Full-screen toggle (per explicit request) — see
+  // `CustomerInformationSidePanel`'s own doc comment for how this actually
+  // renders (an unpinned overlay sized to the parent Container's own
+  // measured width, `sidePanelContainerWidth`, rather than the normal
+  // drag-resized `sidePanelWidth`). Reset to `false` whenever the panel is
+  // explicitly closed (`handleSidePanelClose` below) — a freshly reopened
+  // panel shouldn't silently reopen full-screen from a previous session.
+  const [sidePanelFullScreen, setSidePanelFullScreen] = useState(false);
   const sidePanelHoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // The agent's own last explicit open/closed choice (the header's
   // "Customer History" toggle icon while pinned, or the panel's own close
@@ -5681,6 +5742,7 @@ export function AgentNextGenPage({
   // quietly unpinned it first.
   const handleSidePanelClose = () => {
     setSidePanelOpen(false);
+    setSidePanelFullScreen(false);
     lastSidePanelOpenChoice.current = false;
   };
   // Click on the header's toggle icon — always opens/closes the panel, in
@@ -7268,20 +7330,36 @@ export function AgentNextGenPage({
             <div className="flex flex-1 overflow-hidden min-h-0">
               {showPanelToggle && activeInteraction && (
                 <CustomerInformationSidePanel
+                  // Forces a fresh mount whenever full-screen toggles — see
+                  // this component's own doc comment for why (the internal
+                  // drag-resize hook otherwise latches onto a stale width
+                  // and ignores the new controlled `width` below).
+                  key={sidePanelFullScreen ? "fullscreen" : "normal"}
                   open={sidePanelOpen}
-                  pinned={effectiveSidePanelPinned}
+                  // Always unpinned (floating overlay) while full-screen —
+                  // per explicit request this should overlay the parent
+                  // Container, not push the tab row/transcript column over
+                  // via docked mode.
+                  pinned={sidePanelFullScreen ? false : effectiveSidePanelPinned}
                   // Always shown, even in the narrow-container overlay mode
                   // — per explicit request, an agent who's opened it as a
                   // floating overlay still needs a way to close it again
                   // from inside the panel itself, not just the (now-hidden
                   // while open) header toggle icon.
                   onClose={handleSidePanelClose}
+                  fullScreen={sidePanelFullScreen}
+                  onToggleFullScreen={() => setSidePanelFullScreen((v) => !v)}
                   onMouseEnter={onSidePanelHoverStart}
                   onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
                   customerName={activeInteraction.customerName}
                   recordId={activeInteraction.recordId}
                   channels={activeInteraction.channels}
-                  width={sidePanelWidth}
+                  // Full-screen substitutes the parent Container's own
+                  // measured width (`sidePanelContainerWidth` — already
+                  // tracked for the narrow-container guard) for the normal
+                  // drag-resized width, so the panel's unpinned/absolute
+                  // rendering covers the whole container edge to edge.
+                  width={sidePanelFullScreen ? sidePanelContainerWidth : sidePanelWidth}
                   onWidthChange={setSidePanelWidth}
                   onResizeStateChange={setSidePanelResizing}
                 />
