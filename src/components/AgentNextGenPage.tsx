@@ -5083,6 +5083,7 @@ function CustomerInformationSidePanel({
   recordId,
   channels,
   width,
+  containerWidth,
   onWidthChange,
   onResizeStateChange,
 }: {
@@ -5108,6 +5109,12 @@ function CustomerInformationSidePanel({
   recordId: string;
   channels: TrackedChannel[];
   width: number;
+  /** The parent Container's own currently measured width
+   *  (`sidePanelContainerWidth`, already tracked for the narrow-container
+   *  guard) — per explicit request, this panel must never render wider
+   *  than that, docked or full-screen, so both `width` and `maxWidth`
+   *  below are clamped against it. */
+  containerWidth: number;
   onWidthChange: (width: number) => void;
   onResizeStateChange?: (isResizing: boolean) => void;
 }) {
@@ -5124,6 +5131,14 @@ function CustomerInformationSidePanel({
     () => buildLatestNote(customerName, recordId),
     [customerName, recordId]
   );
+
+  // Never render wider than the parent Container actually is, docked or
+  // full-screen — see `containerWidth`'s own doc comment. `Math.max(0, ...)`
+  // guards the pathological case of a container narrower than any usable
+  // width at all; `SidePanel` itself already treats a 0/near-0 width
+  // sanely (see its own `open ? currentWidth : 0` branches).
+  const clampedWidth = Math.max(0, Math.min(width, containerWidth));
+  const clampedMaxWidth = Math.max(0, Math.min(425, containerWidth));
 
   return (
     <SidePanel
@@ -5191,7 +5206,7 @@ function CustomerInformationSidePanel({
           ))}
         </TabList>
       }
-      width={width}
+      width={clampedWidth}
       // Hides the drag-resize handle while full-screen — its width is
       // fully caller-controlled in that state (see this component's own
       // doc comment), not something the agent should be able to drag.
@@ -5202,6 +5217,11 @@ function CustomerInformationSidePanel({
       // (field labels/values, Latest Interaction card, etc.) to stay
       // legible once dragged all the way down.
       minWidth={325}
+      // 425 was `SidePanel`'s own implicit default max-width (never passed
+      // explicitly before) — now clamped against `containerWidth` too, so
+      // a manual drag can't resize past the parent Container's own current
+      // width either (see `clampedMaxWidth`'s own doc comment above).
+      maxWidth={clampedMaxWidth}
       onWidthChange={onWidthChange}
       onResizeStateChange={onResizeStateChange}
     >
@@ -5718,6 +5738,27 @@ export function AgentNextGenPage({
   // interaction applying `lastSidePanelOpenChoice`).
   const isSidePanelContainerNarrow = sidePanelContainerWidth < 768;
   const effectiveSidePanelPinned = isSidePanelContainerNarrow ? false : sidePanelPinned;
+
+  // Auto full-screen — per explicit request, an OPEN panel automatically
+  // goes full-screen once the container narrows down to 425px (the
+  // panel's own normal max width — see `CustomerInformationSidePanel`'s
+  // `maxWidth`), rather than staying docked/overlaid at a width that no
+  // longer comfortably fits its own content next to the interaction
+  // column. Only forces full-screen ON when this crosses that threshold
+  // (or when the panel opens while already at/under it) — deliberately
+  // does NOT force it back OFF when the container widens back out again,
+  // and does nothing at all if the agent has already manually exited
+  // full-screen since the last such crossing (the effect only re-fires
+  // when one of its own two dependencies actually changes value, not on
+  // every render), so a manual "Exit Full Screen" click while still
+  // narrow isn't immediately fought and re-applied.
+  const isSidePanelAtMaxWidthBreakpoint = sidePanelContainerWidth <= 425;
+  useEffect(() => {
+    if (isSidePanelAtMaxWidthBreakpoint && sidePanelOpen) {
+      setSidePanelFullScreen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSidePanelAtMaxWidthBreakpoint, sidePanelOpen]);
 
   // Used to force-close (and reset pinned) whenever the agent left the
   // interaction view entirely (dismissing it, or navigating to Desk/
@@ -7364,6 +7405,7 @@ export function AgentNextGenPage({
                   // drag-resized width, so the panel's unpinned/absolute
                   // rendering covers the whole container edge to edge.
                   width={sidePanelFullScreen ? sidePanelContainerWidth : sidePanelWidth}
+                  containerWidth={sidePanelContainerWidth}
                   onWidthChange={setSidePanelWidth}
                   onResizeStateChange={setSidePanelResizing}
                 />
