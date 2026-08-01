@@ -2874,6 +2874,8 @@ function TransferIcon() {
 
 function TranscriptSessionSeparator({
   session,
+  customerName,
+  channelAddress,
   open,
   onToggle,
   statusMenuOpen,
@@ -2886,6 +2888,12 @@ function TranscriptSessionSeparator({
   outcome,
 }: {
   session: TranscriptSession;
+  /** Shown at the far left of this row, ahead of the message/case info —
+   *  see `InteractionTranscript`'s own `customerName`/`channelAddress`
+   *  prop doc comments for why these two moved here from the status tag's
+   *  old spot. */
+  customerName?: string;
+  channelAddress?: string;
   open: boolean;
   onToggle: () => void;
   /** This session's own message (chat bubble) count — shown as "{n}
@@ -2951,125 +2959,21 @@ function TranscriptSessionSeparator({
     >
       <AccordionPrimitive.Item value={session.id}>
         <div className="flex items-center gap-3 py-2">
-          {/* Flat, left-aligned status/case info — no wrapping pill
-              border/background and no flanking divider lines (per design
-              update matching the reference screenshot): plain inline
-              content with "|" separators between the status tag, message
-              count, and "# caseId · date" instead of a bordered pill
-              centered between two hr lines. */}
+          {/* Flat, left-aligned customer/case info — no wrapping pill
+              border/background and no flanking divider lines (per earlier
+              design update matching the reference screenshot): plain inline
+              content with "|" separators. The status tag itself moved to
+              the far right (see the Consult/Transfer + Outcome cluster
+              below) — customer name + channel address now sit here, in
+              its old spot, per explicit request. */}
           <div className="shrink-0 flex items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
-            <Popover
-              open={statusMenuOpen}
-              onOpenChange={onStatusMenuOpenChange}
-              placement="bottom"
-              align="start"
-              className="w-72"
-              // The menu view wants Menu's own full-bleed rows (no inset —
-              // `bare` already gives each row its own `p-1` breathing room);
-              // the confirm view wants the normal 20px `content` inset for
-              // its plain description paragraph. One Popover instance
-              // serves both bodies (see this component's own doc comment
-              // above), so `bodyPadding` just tracks whichever view is
-              // showing right now rather than being fixed to one value.
-              bodyPadding={statusMenuView === "confirm"}
-              // `header`/`footer` are real `Popover` slots (`PanelHeader`
-              // for the icon+title row, a plain button row for Close/
-              // Cancel) — only supplied for the confirm view; the menu view
-              // has neither, it's just `content`.
-              header={
-                statusMenuView === "confirm" ? (
-                  <PanelHeader
-                    title="Close Contact?"
-                    icon={
-                      <WarningIconSolid
-                        className="h-5 w-5 text-lyra-status-critical-strong"
-                        aria-hidden="true"
-                      />
-                    }
-                    bordered={false}
-                    className="px-5 pb-0"
-                  />
-                ) : undefined
-              }
-              footer={
-                statusMenuView === "confirm" ? (
-                  <div className="flex items-center justify-end gap-2 px-5 pb-4 pt-1">
-                    <Button variant="destructive" size="md" onClick={onConfirmClose}>
-                      Close
-                    </Button>
-                    <Button variant="outline" size="md" onClick={onCancelClose}>
-                      Cancel
-                    </Button>
-                  </div>
-                ) : undefined
-              }
-              content={
-                statusMenuView === "confirm" ? (
-                  <p className="pb-2 pt-1 lyra-body-md text-lyra-fg-secondary">
-                    Closing a contact cannot be undone. Are you sure you want to close this contact?
-                  </p>
-                ) : (
-                  <Menu
-                    bare
-                    items={TRANSCRIPT_SESSION_STATUS_OPTIONS.map((option) => ({
-                      id: option.label,
-                      label: option.label,
-                      active: option.label === session.status,
-                      icon: (
-                        <span
-                          aria-hidden="true"
-                          className="block h-2 w-2 rounded-full"
-                          style={{ backgroundColor: option.dotColor }}
-                        />
-                      ),
-                      onClick: () => onSelectStatus(option.label),
-                    }))}
-                  />
-                )
-              }
-            >
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={isClosed}
-                aria-haspopup="menu"
-                aria-expanded={statusMenuOpen}
-                // `hover:bg-transparent active:bg-transparent` overrides
-                // `ghost`'s own default hover/press background — the
-                // wrapping pill div now owns the one, whole-pill hover look
-                // (see that div's own comment); without this, this
-                // Button's own hover would additionally darken just the
-                // status-tag half of the pill on top of that.
-                className="h-auto shrink-0 rounded-full p-0 hover:bg-transparent active:bg-transparent disabled:opacity-100"
-              >
-                <Tag
-                  label={session.status}
-                  variant={TRANSCRIPT_SESSION_STATUS_VARIANT[session.status] ?? "neutral"}
-                  shape="pill"
-                  // The dropdown affordance lives INSIDE the pill, in the
-                  // same trailing slot `Tag`'s own remove-button ("×") uses
-                  // — `trailingIcon` (tag.tsx), not a sibling icon next to
-                  // the Tag, which is why `tag.tsx` gained that prop rather
-                  // than composing a second element here. Purely decorative
-                  // (no `onClick` of its own): the whole pill is already
-                  // this `Button`'s child, so a real nested button here
-                  // would be invalid HTML and steal the click. Dropped for
-                  // a Closed pill (see `isClosed`'s own doc comment) — once
-                  // locked, this isn't a dropdown trigger anymore, so
-                  // nothing here should suggest it still is. Rotates the
-                  // same way `Select`'s own chevron does (select.tsx) while
-                  // the popover is open, rather than a plain static glyph.
-                  trailingIcon={
-                    !isClosed && (
-                      <ChevronDown
-                        className={cn("transition-transform", statusMenuOpen && "rotate-180")}
-                        strokeWidth={1.5}
-                      />
-                    )
-                  }
-                />
-              </Button>
-            </Popover>
+            {customerName && <span className="text-lyra-fg-default">{customerName}</span>}
+            {channelAddress && (
+              <>
+                <span aria-hidden="true">|</span>
+                <span>{channelAddress}</span>
+              </>
+            )}
             <span aria-hidden="true">|</span>
             {/* "# caseId · date" + the expand/collapse chevron — only for a
                 session that isn't Closed. A Closed session's Session
@@ -3337,6 +3241,116 @@ function TranscriptSessionSeparator({
                 <CircleCheck className="h-4 w-4 text-lyra-status-info-strong" strokeWidth={1.5} />
               </Button>
             )}
+            {/* Status tag — moved to the far right of the Consult/Transfer +
+                Outcome cluster (was previously the leading element at the
+                far left of this row) per explicit request. Same Popover/
+                Menu/confirm-view behavior as before, just relocated. */}
+            <Popover
+              open={statusMenuOpen}
+              onOpenChange={onStatusMenuOpenChange}
+              placement="bottom"
+              align="end"
+              className="w-72"
+              // The menu view wants Menu's own full-bleed rows (no inset —
+              // `bare` already gives each row its own `p-1` breathing room);
+              // the confirm view wants the normal 20px `content` inset for
+              // its plain description paragraph. One Popover instance
+              // serves both bodies (see this component's own doc comment
+              // above), so `bodyPadding` just tracks whichever view is
+              // showing right now rather than being fixed to one value.
+              bodyPadding={statusMenuView === "confirm"}
+              // `header`/`footer` are real `Popover` slots (`PanelHeader`
+              // for the icon+title row, a plain button row for Close/
+              // Cancel) — only supplied for the confirm view; the menu view
+              // has neither, it's just `content`.
+              header={
+                statusMenuView === "confirm" ? (
+                  <PanelHeader
+                    title="Close Contact?"
+                    icon={
+                      <WarningIconSolid
+                        className="h-5 w-5 text-lyra-status-critical-strong"
+                        aria-hidden="true"
+                      />
+                    }
+                    bordered={false}
+                    className="px-5 pb-0"
+                  />
+                ) : undefined
+              }
+              footer={
+                statusMenuView === "confirm" ? (
+                  <div className="flex items-center justify-end gap-2 px-5 pb-4 pt-1">
+                    <Button variant="destructive" size="md" onClick={onConfirmClose}>
+                      Close
+                    </Button>
+                    <Button variant="outline" size="md" onClick={onCancelClose}>
+                      Cancel
+                    </Button>
+                  </div>
+                ) : undefined
+              }
+              content={
+                statusMenuView === "confirm" ? (
+                  <p className="pb-2 pt-1 lyra-body-md text-lyra-fg-secondary">
+                    Closing a contact cannot be undone. Are you sure you want to close this contact?
+                  </p>
+                ) : (
+                  <Menu
+                    bare
+                    items={TRANSCRIPT_SESSION_STATUS_OPTIONS.map((option) => ({
+                      id: option.label,
+                      label: option.label,
+                      active: option.label === session.status,
+                      icon: (
+                        <span
+                          aria-hidden="true"
+                          className="block h-2 w-2 rounded-full"
+                          style={{ backgroundColor: option.dotColor }}
+                        />
+                      ),
+                      onClick: () => onSelectStatus(option.label),
+                    }))}
+                  />
+                )
+              }
+            >
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={isClosed}
+                aria-haspopup="menu"
+                aria-expanded={statusMenuOpen}
+                className="h-auto shrink-0 rounded-full p-0 disabled:opacity-100"
+              >
+                <Tag
+                  label={session.status}
+                  variant={TRANSCRIPT_SESSION_STATUS_VARIANT[session.status] ?? "neutral"}
+                  shape="pill"
+                  // The dropdown affordance lives INSIDE the pill, in the
+                  // same trailing slot `Tag`'s own remove-button ("×") uses
+                  // — `trailingIcon` (tag.tsx), not a sibling icon next to
+                  // the Tag, which is why `tag.tsx` gained that prop rather
+                  // than composing a second element here. Purely decorative
+                  // (no `onClick` of its own): the whole pill is already
+                  // this `Button`'s child, so a real nested button here
+                  // would be invalid HTML and steal the click. Dropped for
+                  // a Closed pill (see `isClosed`'s own doc comment) — once
+                  // locked, this isn't a dropdown trigger anymore, so
+                  // nothing here should suggest it still is. Rotates the
+                  // same way `Select`'s own chevron does (select.tsx) while
+                  // the popover is open, rather than a plain static glyph.
+                  trailingIcon={
+                    !isClosed && (
+                      <ChevronDown
+                        className={cn("transition-transform", statusMenuOpen && "rotate-180")}
+                        strokeWidth={1.5}
+                      />
+                    )
+                  }
+                />
+              </Button>
+            </Popover>
           </div>
         </div>
         <AccordionPrimitive.Content className="overflow-hidden data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up">
@@ -3356,6 +3370,7 @@ function TranscriptSessionSeparator({
 function InteractionTranscript({
   channelType,
   customerName,
+  channelAddress,
   recordId,
   skillLabel,
   isFreshLaunch,
@@ -3379,8 +3394,16 @@ function InteractionTranscript({
   channelType?: ChannelType;
   /** Real customer name to substitute for every customer-sender message's
    *  hardcoded mock name in the SMS/WhatsApp transcript — see this
-   *  component's own doc comment above. */
+   *  component's own doc comment above. Also shown at the far left of every
+   *  `TranscriptSessionSeparator` row, where the status tag used to sit,
+   *  per explicit request. */
   customerName?: string;
+  /** The active channel's own phone number/email address/chat handle
+   *  (`TrackedChannel.addressLabel`) — shown right next to `customerName`
+   *  at the far left of every `TranscriptSessionSeparator` row. Undefined
+   *  for a channel with no real address on record (e.g. a redialed voice
+   *  call), same as `addressLabel`'s own doc comment describes. */
+  channelAddress?: string;
   /** This interaction's own record id — used as the synthetic "just
    *  launched" session's Contact ID (see `isFreshLaunch` below). */
   recordId: string;
@@ -3825,6 +3848,8 @@ function InteractionTranscript({
               <div key={session.id} className="flex flex-col">
                 <TranscriptSessionSeparator
                   session={sessionWithCurrentStatus}
+                  customerName={customerName}
+                  channelAddress={channelAddress}
                   open={openSessionIds.has(session.id)}
                   onToggle={() => toggleSession(session.id)}
                   // Only a real, meaningful count for chat/SMS/WhatsApp —
@@ -7389,6 +7414,7 @@ export function AgentNextGenPage({
                       <InteractionTranscript
                         channelType={activeChannelType}
                         customerName={activeInteraction.customerName}
+                        channelAddress={activeChannel?.addressLabel}
                         recordId={activeInteraction.recordId}
                         skillLabel={activeChannel?.preview}
                         isFreshLaunch={!!activeInteraction.startedFresh}
