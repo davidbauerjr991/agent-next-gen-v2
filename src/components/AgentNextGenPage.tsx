@@ -5232,22 +5232,15 @@ export function AgentNextGenPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSidePanelContainerNarrow]);
 
-  // The Customer Information panel belongs to the interaction it was opened
-  // from — its only trigger is the toggle button on the interaction
-  // `PageHeader`, which doesn't exist on the Desk dashboard at all. Leaving
-  // the interaction (dismissing it, or navigating to Desk/another tab) must
-  // close it, or it'd stay open (and pinned) pointing at a customer who's no
-  // longer the active interaction. Keyed on the id (a stable primitive)
-  // rather than the `activeInteraction` object itself.
-  useEffect(() => {
-    if (!activeInteractionId) {
-      // Resets back to the open+pinned default (not a hard "off") — so the
-      // next interaction's panel still starts open+pinned per the default
-      // above, rather than this leftover state carrying over.
-      setSidePanelOpen(false);
-      setSidePanelPinned(true);
-    }
-  }, [activeInteractionId]);
+  // Used to force-close (and reset pinned) whenever the agent left the
+  // interaction view entirely (dismissing it, or navigating to Desk/
+  // Settings/another tab) — removed per explicit request: the panel now
+  // just keeps whatever open/closed state the agent last left it in
+  // (`lastSidePanelOpenChoice` covers re-applying that to the NEXT
+  // interaction too), rather than being force-closed by navigating away
+  // and force-reopened for every new one. Only an explicit close (the
+  // panel's own close button, or the header icon toggle while pinned)
+  // changes it now.
 
   // Hover-preview handlers — guarded on `sidePanelPinned` (not the
   // narrow-adjusted `effectiveSidePanelPinned`): once pinned, hover does
