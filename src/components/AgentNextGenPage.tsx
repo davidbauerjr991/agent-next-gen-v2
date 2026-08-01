@@ -42,7 +42,6 @@ import {
   SortableTableHead,
   Icon,
   Badge,
-  type BadgeColor,
   SearchInput,
   Separator,
   DonutChart,
@@ -3924,16 +3923,20 @@ interface CustomerLatestInteraction {
   timeAgo: string;
   channel: string;
   status: string;
-  statusColor: BadgeColor;
+  /** Reuses `ContactHistoryStatusVariant` (its own `Badge`'s circle-shape
+   *  `variant` vocabulary) now that status renders as a small dot + label
+   *  instead of a pill `Badge` — see the render site's own doc comment for
+   *  why. */
+  statusVariant: ContactHistoryStatusVariant;
   summary: string;
   caseId: string;
   handledBy: string;
 }
 
-const CUSTOMER_LATEST_INTERACTION_STATUS_POOL: { status: string; color: BadgeColor }[] = [
-  { status: "Resolved", color: "green" },
-  { status: "Escalated", color: "red" },
-  { status: "Pending", color: "orange" },
+const CUSTOMER_LATEST_INTERACTION_STATUS_POOL: { status: string; variant: ContactHistoryStatusVariant }[] = [
+  { status: "Resolved", variant: "success" },
+  { status: "Escalated", variant: "critical" },
+  { status: "Pending", variant: "warning" },
 ];
 
 const CUSTOMER_LATEST_INTERACTION_CHANNEL_POOL = ["Email", "Voice", "Chat", "SMS"];
@@ -3960,7 +3963,7 @@ const CUSTOMER_LATEST_INTERACTION_SUMMARY_POOL = [
  *  separate invented-name pool. */
 function buildLatestInteraction(customerName: string | undefined, recordId: string): CustomerLatestInteraction {
   const seed = hashSeed(`${recordId || customerName || "customer"}-latest-interaction`);
-  const { status, color } = CUSTOMER_LATEST_INTERACTION_STATUS_POOL[seed % CUSTOMER_LATEST_INTERACTION_STATUS_POOL.length];
+  const { status, variant } = CUSTOMER_LATEST_INTERACTION_STATUS_POOL[seed % CUSTOMER_LATEST_INTERACTION_STATUS_POOL.length];
   const channel = CUSTOMER_LATEST_INTERACTION_CHANNEL_POOL[Math.floor(seed / 3) % CUSTOMER_LATEST_INTERACTION_CHANNEL_POOL.length];
   const timeAgo = CUSTOMER_LATEST_INTERACTION_TIME_AGO_POOL[Math.floor(seed / 7) % CUSTOMER_LATEST_INTERACTION_TIME_AGO_POOL.length];
   const summary = CUSTOMER_LATEST_INTERACTION_SUMMARY_POOL[Math.floor(seed / 11) % CUSTOMER_LATEST_INTERACTION_SUMMARY_POOL.length];
@@ -3971,7 +3974,7 @@ function buildLatestInteraction(customerName: string | undefined, recordId: stri
     timeAgo,
     channel,
     status,
-    statusColor: color,
+    statusVariant: variant,
     summary,
     caseId,
     handledBy: handledByAgent?.name ?? "Support Team",
@@ -4540,10 +4543,19 @@ function CustomerInformationPanelBody({
                   blurb — see that function's own doc comment for why (it
                   used to be the exact same "Asked about upgrading her
                   plan..." summary for every customer, gendered pronoun and
-                  all, regardless of who was actually open). `statusColor`
-                  drives the `Badge`'s `color` instead of a hardcoded
-                  `"green"`, since a synthesized status can land on
-                  "Escalated"/"Pending" too, not just "Resolved". */}
+                  all, regardless of who was actually open).
+
+                  Status used to render as its own pill `Badge` sitting to
+                  the right of the timestamp line — reverted per explicit
+                  request (a filled pill there read as too visually loud/
+                  noticeable). Now a plain second line directly below the
+                  timestamp: a small circle `Badge` dot (`shape="circle"
+                  dot"`, colored via `statusVariant` the same semantic-role
+                  vocabulary `ContactHistoryStatusVariant`/Contact History's
+                  own status dots already use) plus the status name as
+                  plain text next to it — quieter than a filled pill, same
+                  "dot + label" idiom already established elsewhere in this
+                  file. */}
               <Accordion
                 className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
                 defaultValue="latest-interaction"
@@ -4553,14 +4565,15 @@ function CustomerInformationPanelBody({
                     title: "Latest Interaction",
                     content: (
                       <div className="flex flex-col gap-3">
-                        <div className="flex items-center justify-between gap-3">
+                        <div className="flex flex-col gap-1">
                           <span className="inline-flex items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
                             <Clock className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
                             {latestInteraction.timeAgo} · {latestInteraction.channel}
                           </span>
-                          <Badge color={latestInteraction.statusColor} variant="subtle">
+                          <span className="inline-flex items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
+                            <Badge shape="circle" dot size="sm" variant={latestInteraction.statusVariant} aria-hidden="true" />
                             {latestInteraction.status}
-                          </Badge>
+                          </span>
                         </div>
                         <p className="lyra-body-md text-lyra-fg-default">{latestInteraction.summary}</p>
                         <span className="lyra-body-sm text-lyra-fg-secondary">
