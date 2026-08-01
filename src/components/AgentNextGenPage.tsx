@@ -5745,13 +5745,15 @@ export function AgentNextGenPage({
   // `maxWidth`), rather than staying docked/overlaid at a width that no
   // longer comfortably fits its own content next to the interaction
   // column. Only forces full-screen ON when this crosses that threshold
-  // (or when the panel opens while already at/under it) — deliberately
-  // does NOT force it back OFF when the container widens back out again,
+  // (or when the panel opens while already at/under it) — does NOT force
+  // it back OFF on its own when the container widens back out past 425,
   // and does nothing at all if the agent has already manually exited
   // full-screen since the last such crossing (the effect only re-fires
   // when one of its own two dependencies actually changes value, not on
   // every render), so a manual "Exit Full Screen" click while still
-  // narrow isn't immediately fought and re-applied.
+  // narrow isn't immediately fought and re-applied. (The narrower 350px
+  // threshold below DOES force it back off, but only on its own specific
+  // crossing — see that effect's own doc comment.)
   const isSidePanelAtMaxWidthBreakpoint = sidePanelContainerWidth <= 425;
   useEffect(() => {
     if (isSidePanelAtMaxWidthBreakpoint && sidePanelOpen) {
@@ -5759,6 +5761,25 @@ export function AgentNextGenPage({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSidePanelAtMaxWidthBreakpoint, sidePanelOpen]);
+
+  // Below 350px of the same container width, per explicit follow-up
+  // request: hide the full-screen toggle button entirely (see
+  // `onToggleFullScreen` at the render call site below — passing
+  // `undefined` there hides it, same "no prop, no button" pattern
+  // `onClose` already uses) rather than leaving a control on-screen with
+  // no room left to usefully act on. Crossing back up over 350px both
+  // restores that button AND explicitly exits full-screen — unlike the
+  // 425px threshold above (which never forces an exit on its own), this
+  // one always does, since the button being hidden below 350px means the
+  // agent had no way to have manually exited full-screen in the meantime
+  // anyway, so there's nothing to preserve/avoid fighting here. Only
+  // fires on the actual crossing (dependency array), not continuously.
+  const isSidePanelAtMinimalThreshold = sidePanelContainerWidth <= 350;
+  useEffect(() => {
+    if (!isSidePanelAtMinimalThreshold) {
+      setSidePanelFullScreen(false);
+    }
+  }, [isSidePanelAtMinimalThreshold]);
 
   // Used to force-close (and reset pinned) whenever the agent left the
   // interaction view entirely (dismissing it, or navigating to Desk/
@@ -7393,7 +7414,11 @@ export function AgentNextGenPage({
                   // while open) header toggle icon.
                   onClose={handleSidePanelClose}
                   fullScreen={sidePanelFullScreen}
-                  onToggleFullScreen={() => setSidePanelFullScreen((v) => !v)}
+                  // Hidden below 350px of container width — see
+                  // `isSidePanelAtMinimalThreshold`'s own doc comment.
+                  onToggleFullScreen={
+                    isSidePanelAtMinimalThreshold ? undefined : () => setSidePanelFullScreen((v) => !v)
+                  }
                   onMouseEnter={onSidePanelHoverStart}
                   onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
                   customerName={activeInteraction.customerName}
