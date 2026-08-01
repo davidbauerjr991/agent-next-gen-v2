@@ -7145,7 +7145,14 @@ export function AgentNextGenPage({
   // `panelDragHandlers` the header icon buttons below use — dragging a row
   // here to reorder it moves the same underlying `panelOrder` array the
   // header reads, and vice versa.
-  const appsMenuItems: MenuEntry[] = panelOrder.map((key) => {
+  //
+  // Customers/Accounts/Tickets/WEM are hidden from this menu specifically
+  // (per explicit request) — `panelOrder`/`pinnedKeys` themselves are
+  // untouched, so Customers (already pinned) keeps its header icon; Accounts/
+  // Tickets/WEM (already unpinned) simply have no way to open them anymore,
+  // since this menu was their only entry point.
+  const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["customers", "accounts", "tickets", "wem"];
+  const appsMenuItems: MenuEntry[] = panelOrder.filter((key: PanelKey) => !HIDDEN_FROM_APPS_MENU.includes(key)).map((key) => {
     const { label, icon: KeyIcon } = PANEL_KEY_METADATA[key];
     return {
       id: key,
