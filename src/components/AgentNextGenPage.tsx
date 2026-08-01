@@ -15,6 +15,7 @@ import {
   AgentProfile,
   Container,
   InteriorPanel,
+  SidePanel,
   PageHeader,
   Button,
   Textarea,
@@ -2792,9 +2793,9 @@ function TranscriptSessionDetails({ session }: { session: TranscriptSession }) {
    it, just each separator being `sticky top-0` in source order.
    `bg-lyra-bg-surface-base` keeps messages scrolling underneath from
    showing through while it's pinned; `z-[1]` keeps it above them —
-   deliberately *not* `z-10`: `CustomerInformationInteriorPanel` (the
+   deliberately *not* `z-10`: `CustomerInformationSidePanel` (the
    docked panel this transcript sits beside) renders at `z-[5]`
-   (interior-panel.tsx), and a sticky element's own `z-index` opens a new
+   (side-panel.tsx), and a sticky element's own `z-index` opens a new
    stacking context compared against siblings up the tree, not just against
    the messages scrolling directly beneath it — `z-10` was outranking that
    panel and painting the separator/expanded Session Details card over top
@@ -4413,7 +4414,7 @@ function CustomerInformationPanelBody({
    *  tab's "First Name"/"Last Name" fields — see `CustomerDetailTabContent`. */
   customerName?: string;
   /** Built per-interaction by `buildCustomerInfoFields` (see
-   *  `CustomerInformationInteriorPanel`, which owns the interaction's
+   *  `CustomerInformationSidePanel`, which owns the interaction's
    *  `customerName`/`recordId`/`channels` this depends on) — no longer a
    *  fixed module-level placeholder shared by every interaction. */
   fields: CustomerInfoField[];
@@ -4442,8 +4443,8 @@ function CustomerInformationPanelBody({
           overflow menu had its own separate bug where selecting a tab
           from it silently did nothing once the row collapsed, fixed in
           tabs.tsx). They now render inside the header itself via
-          `InteriorPanel`'s `headerTabs` prop — see
-          `CustomerInformationInteriorPanel` below, which owns the
+          `SidePanel`'s `headerTabs` prop — see
+          `CustomerInformationSidePanel` below, which owns the
           `activeTab` state both this body and that header tab row need
           and passes this component just the number.
 
@@ -4667,9 +4668,9 @@ function CustomerInformationPanelBody({
   );
 }
 
-/* ── CustomerInformationInteriorPanel ──
+/* ── CustomerInformationSidePanel ──
    Owns `activeTab` — the one piece of state both the header's `TabList`
-   (via `InteriorPanel`'s `headerTabs`) and the scrolling body below it
+   (via `SidePanel`'s `headerTabs`) and the scrolling body below it
    (`CustomerInformationPanelBody`) need, which is why this wraps both
    instead of `CustomerInformationPanelBody` owning that state itself the
    way it used to when the tabs still lived inside it.
@@ -4680,41 +4681,43 @@ function CustomerInformationPanelBody({
    interaction fields instead of a pre-joined `headerSubhead` string so it
    has what it needs to build the header text and both panel-body pieces
    from the same source, rather than the caller assembling one string this
-   component has to parse back apart. */
-function CustomerInformationInteriorPanel({
+   component has to parse back apart.
+
+   Docked LEFT via the generic `SidePanel` primitive (matching the request
+   to move this content into a left side panel, per the reference
+   screenshot) rather than the right-docked `InteriorPanel` this was
+   previously built on — pin/hover-preview state lives in the parent
+   (mirrors `AgentNextGenTemplate.stories.tsx`'s own `CustomerInformation-
+   Panel` usage, the current reference for a left-docked side panel in
+   this exact spot), since that's a `SidePanel`-only concept `InteriorPanel`
+   never had. `allowFullScreen`/`exitFullScreenSignal`/`onOverlayModeChange`
+   don't carry over — `SidePanel` has no "full screen" or "floating
+   overlay" concept of its own; an unpinned panel simply shows/hides on
+   hover instead. */
+function CustomerInformationSidePanel({
   open,
-  onClose,
+  pinned,
+  onPinToggle,
+  onMouseEnter,
+  onMouseLeave,
   customerName,
   recordId,
   channels,
   width,
   onWidthChange,
-  exitFullScreenSignal,
-  onOverlayModeChange,
+  onResizeStateChange,
 }: {
   open: boolean;
-  onClose: () => void;
+  pinned: boolean;
+  onPinToggle?: () => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
   customerName?: string;
   recordId: string;
   channels: TrackedChannel[];
   width: number;
   onWidthChange: (width: number) => void;
-  /** Forwarded straight to `InteriorPanel`'s own `exitFullScreenSignal`
-   *  prop (see that prop's doc comment in interior-panel.tsx) — bumped by
-   *  `handleOpenAssignmentFromNotification` so that opening a new
-   *  assignment always exits full screen if this panel happens to be in
-   *  it, per explicit request ("if a new assignment is open and the
-   *  customer information is full screen, exit full screen so the
-   *  interaction is viewable") — otherwise the full-screen Customer
-   *  Information panel would keep covering the newly-opened interaction's
-   *  transcript. */
-  exitFullScreenSignal?: number;
-  /** Forwarded straight to `InteriorPanel`'s own `onOverlayModeChange` prop
-   *  (see its doc comment in interior-panel.tsx) — lets the main component
-   *  track whether this panel is currently floating over the interaction
-   *  body (narrow container or full screen) instead of docked beside it,
-   *  so it knows when clicking that body should close the panel. */
-  onOverlayModeChange?: (isOverlay: boolean) => void;
+  onResizeStateChange?: (isResizing: boolean) => void;
 }) {
   const [activeTab, setActiveTab] = useState(0);
   const fields = useMemo(
@@ -4731,32 +4734,19 @@ function CustomerInformationInteriorPanel({
   );
 
   return (
-    <InteriorPanel
-      side="right"
+    <SidePanel
+      side="left"
       open={open}
-      onClose={onClose}
+      pinned={pinned}
+      onPinToggle={onPinToggle}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       headerTitle="Customer Information"
       headerSubhead={`${customerName ?? "Customer"} · ${recordId}`}
-      // Lets an agent expand this panel to the full width of its container
-      // when a tab's content (e.g. Directory's phone list, or Detail's
-      // two-column form) would benefit from more room than the panel's
-      // normal ~350–425px resizable range comfortably gives it — see
-      // `allowFullScreen`'s own doc comment in interior-panel.tsx.
-      allowFullScreen
-      // Plain default `"wide"` mode (no `overflowBreakpoint` override) per
-      // explicit request: a fixed ≤400px collapse threshold, with the row
-      // scrolling via chevrons above that if these 8 tabs don't all fit —
-      // same behavior as every other `TabList` in the app. An earlier pass
-      // used `overflowBreakpoint="compact"` instead (content-aware,
-      // collapsing exactly when the tabs stop fitting regardless of any
-      // fixed pixel number) specifically because this panel's normal
-      // ~350–425px resizable width sits almost entirely at or under that
-      // 400px line — under `"wide"`, the row is collapsed to "active tab +
-      // N More" for nearly the panel's whole non-full-screen size range,
-      // only showing real tabs (or chevrons) once `allowFullScreen` pushes
-      // it past 400px. Switched back to the standard `"wide"` default
-      // anyway, to match how every other tab bar in the app behaves,
-      // trading that off deliberately.
+      // Plain default `"wide"` mode (no `overflowBreakpoint` override) —
+      // same behavior as every other `TabList` in the app; see the
+      // previous `InteriorPanel`-based version's identical reasoning for
+      // why `"wide"` (not `"compact"`) is the deliberate choice here.
       headerTabs={
         <TabList className="px-4" overflowMenu>
           {CUSTOMER_PANEL_TABS.map((label, i) => (
@@ -4768,8 +4758,7 @@ function CustomerInformationInteriorPanel({
       }
       width={width}
       onWidthChange={onWidthChange}
-      exitFullScreenSignal={exitFullScreenSignal}
-      onOverlayModeChange={onOverlayModeChange}
+      onResizeStateChange={onResizeStateChange}
     >
       <CustomerInformationPanelBody
         activeTab={activeTab}
@@ -4778,7 +4767,7 @@ function CustomerInformationInteriorPanel({
         latestInteraction={latestInteraction}
         latestNote={latestNote}
       />
-    </InteriorPanel>
+    </SidePanel>
   );
 }
 
@@ -5136,59 +5125,88 @@ export function AgentNextGenPage({
     });
   }, [queueSubItems, clockTick]);
 
-  /* Customer Information panel — an `InteriorPanel` (right-docked, inline
-     within the interaction body's own flex row) rather than the `SidePanel`/
-     `CustomerInformationPanel` this used to be built on. `InteriorPanel` has
-     no pin/hover-preview concept at all (that's a `SidePanel`-only idea) and
-     already handles the "too narrow, force an overlay" case internally
-     (built into the component itself below ~1024px container width), so
-     none of the old pinned/hover-timer/narrow-container plumbing is needed
-     here anymore — just a plain open/closed boolean, matching how the
-     Desk dashboard's own right-docked `InteriorPanel` (below, "Case
-     Details"/queue drill-down) already works. */
-  const [customerPanelOpen,  setCustomerPanelOpen]  = useState(false);
-  // 425, not 350 — `CustomerInformationInteriorPanel`'s own `InteriorPanel`
-  // defaults `minWidth`/`maxWidth` to 350/425 (interior-panel.tsx) and would
-  // open fully expanded (`maxWidth`) on its own, but passing this as a
-  // controlled `width` prop below overrides that default entirely — so it
-  // needs to start at the same 425 `maxWidth` itself, per explicit request
-  // that the panel open at its max width initially, not its min.
-  const [customerPanelWidth, setCustomerPanelWidth] = useState(425);
-  // Bumped by every interaction-opening handler — `handleStartCall` (the
-  // top-left "+" Start Interaction button), `handleQuickDial`, `handleRedial`,
-  // and `handleOpenAssignmentFromNotification` (new-assignment notification
-  // click) — forwarded to `CustomerInformationInteriorPanel`'s
-  // `exitFullScreenSignal` prop, which forwards it straight to
-  // `InteriorPanel`'s own prop of the same name. Forces the Customer
-  // Information panel out of full screen whenever ANY new (or reopened)
-  // interaction is activated, per explicit request: a full-screen customer
-  // panel would otherwise keep covering the newly-opened interaction's
-  // transcript — first reported for notification clicks, then again for the
-  // top-left outbound button, so this now covers every launch path rather
-  // than one at a time. Plain incrementing counter — any distinct value on
-  // each bump works, since `InteriorPanel` only compares it against its own
-  // previous render, not this value's own meaning.
-  const [customerPanelExitFullScreenSignal, setCustomerPanelExitFullScreenSignal] = useState(0);
-  // Reported by `InteriorPanel`'s own `onOverlayModeChange` (forwarded
-  // through `CustomerInformationInteriorPanel`) — true whenever this panel
-  // is currently floating over the interaction body (narrow container or
-  // full screen) instead of docked beside it. Drives closing the panel when
-  // the agent clicks that body (see the interaction body column's own
-  // `onClick` below) — a docked, side-by-side panel isn't overlapping
-  // anything, so clicking the transcript/composer there has no reason to
-  // close it; only the overlay case behaves like a dismissible scrim.
-  const [customerPanelIsOverlay, setCustomerPanelIsOverlay] = useState(false);
+  /* Customer Information panel — a left-docked `SidePanel` (per explicit
+     request to move this content into a left side panel, matching a
+     reference screenshot), built via the local `CustomerInformationSide-
+     Panel` wrapper. State/wiring below mirrors `AgentNextGenTemplate
+     .stories.tsx`'s own `CustomerInformationPanel` usage — the current
+     reference for a left-docked side panel in this exact spot — rather
+     than the plain open/closed boolean the right-docked `InteriorPanel`
+     version this replaces got away with: a `SidePanel` needs pinned vs.
+     hover-preview state and its own narrow-container guard, since (unlike
+     `InteriorPanel`) it has no such handling built in. */
+  const [sidePanelOpen,     setSidePanelOpen]     = useState(false);
+  const [sidePanelPinned,   setSidePanelPinned]   = useState(false);
+  const [sidePanelResizing, setSidePanelResizing] = useState(false);
+  // 425 — same initial width the previous `InteriorPanel` version opened
+  // to (its own `maxWidth` default), kept as-is now that it's a plain
+  // controlled `width` prop on `SidePanel` instead.
+  const [sidePanelWidth, setSidePanelWidth] = useState(425);
+  const sidePanelHoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Container-width pin guard — `SidePanel` has no built-in "too narrow,
+  // force an overlay" handling of its own (unlike `InteriorPanel`), so this
+  // reproduces it: measures the same outer container `containerRef` already
+  // tracks (used elsewhere for Ai/Notifications float positioning) and
+  // forces the panel unpinned+closed below 1024px of its width, exactly
+  // matching `AgentNextGenTemplate.stories.tsx`'s own guard.
+  const [sidePanelContainerWidth, setSidePanelContainerWidth] = useState(9999);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    setSidePanelContainerWidth(el.getBoundingClientRect().width);
+    const ro = new ResizeObserver(([entry]) => setSidePanelContainerWidth(entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const isSidePanelContainerNarrow = sidePanelContainerWidth < 1024;
+  const effectiveSidePanelPinned = isSidePanelContainerNarrow ? false : sidePanelPinned;
+
+  const skipFirstSidePanelNarrowRun = useRef(true);
+  useEffect(() => {
+    if (skipFirstSidePanelNarrowRun.current) { skipFirstSidePanelNarrowRun.current = false; return; }
+    if (isSidePanelContainerNarrow) setSidePanelOpen(false);
+    else setSidePanelOpen(sidePanelPinned);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSidePanelContainerNarrow]);
 
   // The Customer Information panel belongs to the interaction it was opened
   // from — its only trigger is the toggle button on the interaction
   // `PageHeader`, which doesn't exist on the Desk dashboard at all. Leaving
   // the interaction (dismissing it, or navigating to Desk/another tab) must
-  // close it, or it'd stay open pointing at a customer who's no longer the
-  // active interaction. Keyed on the id (a stable primitive) rather than
-  // the `activeInteraction` object itself.
+  // close it, or it'd stay open (and pinned) pointing at a customer who's no
+  // longer the active interaction. Keyed on the id (a stable primitive)
+  // rather than the `activeInteraction` object itself.
   useEffect(() => {
-    if (!activeInteractionId) setCustomerPanelOpen(false);
+    if (!activeInteractionId) {
+      setSidePanelOpen(false);
+      setSidePanelPinned(false);
+    }
   }, [activeInteractionId]);
+
+  // Hover-preview handlers — guarded on `sidePanelPinned` (not the
+  // narrow-adjusted `effectiveSidePanelPinned`): once pinned, hover does
+  // nothing at all in either direction, open/closed is controlled solely by
+  // the click toggle while pinned, same as every other `SidePanel` consumer.
+  const onSidePanelHoverStart = () => {
+    if (sidePanelPinned) return;
+    clearTimeout(sidePanelHoverTimer.current);
+    setSidePanelOpen(true);
+  };
+  const onSidePanelHoverEnd = () => {
+    if (sidePanelPinned) return;
+    sidePanelHoverTimer.current = setTimeout(() => setSidePanelOpen(false), 300);
+  };
+  const handleSidePanelPinToggle = () => {
+    setSidePanelPinned((v) => !v);
+    setSidePanelOpen(true); // keep open when toggling pin state
+  };
+  // Click on the header's toggle icon — toggles open/closed only while
+  // already pinned (a no-op while unpinned, since that state is
+  // hover-driven instead).
+  const handleSidePanelIconToggle = () => {
+    if (effectiveSidePanelPinned) setSidePanelOpen((v) => !v);
+  };
 
   // Track window width for nav overlay breakpoint
   useEffect(() => {
@@ -5218,11 +5236,6 @@ export function AgentNextGenPage({
   useEffect(() => {
     if (!isNavNarrow || !panelOpen) setNarrowActiveRegion("main");
   }, [isNavNarrow, panelOpen]);
-
-  // Plain open/closed toggle for the Customer Information `InteriorPanel`'s
-  // trigger button — no pin/hover state to coordinate with anymore (see the
-  // panel state's own doc comment above).
-  const handleCustomerPanelToggle = () => setCustomerPanelOpen((v) => !v);
 
   const MAX_PANEL_HEIGHT = 860;
   const BOTTOM_PADDING   = 8;
@@ -5273,7 +5286,7 @@ export function AgentNextGenPage({
     const addressLabel = OUTBOUND_CONFIG.phoneOptions.find((o) => o.value === selection.phone)?.label ?? selection.phone;
     // Read before `setInteractions` below — whether this customer already
     // has a card open decides whether Customer Information animates open
-    // (see the `setCustomerPanelOpen` call at the end of this handler).
+    // (see the `setSidePanelOpen` call at the end of this handler).
     const isNewInteraction = !interactions.some((i) => i.id === selection.contact.id);
     const newChannel: TrackedChannel = {
       id: `${selection.channel}:${selection.phone}`,
@@ -5334,13 +5347,7 @@ export function AgentNextGenPage({
     // with a customer who already has one open leaves the panel exactly as
     // the agent last left it (open, or toggled closed) rather than
     // re-forcing it open every time.
-    if (isNewInteraction) setCustomerPanelOpen(true);
-    // Exit full screen (see `customerPanelExitFullScreenSignal`'s own doc
-    // comment) — unconditional, same as `handleOpenAssignmentFromNotification`:
-    // starting a new outbound interaction from the top-left "+" button
-    // should always bring it into view, even if Customer Information
-    // happens to currently be full-screen from a previous interaction.
-    setCustomerPanelExitFullScreenSignal((n) => n + 1);
+    if (isNewInteraction) setSidePanelOpen(true);
   };
 
   // App-local only (per "changes to components should only happen locally
@@ -5419,9 +5426,7 @@ export function AgentNextGenPage({
     });
     setActiveInteractionId(id);
     setNavOpen(true);
-    if (isNewInteraction) setCustomerPanelOpen(true);
-    // Exit full screen — see `handleStartCall`'s identical call for why.
-    setCustomerPanelExitFullScreenSignal((n) => n + 1);
+    if (isNewInteraction) setSidePanelOpen(true);
   };
 
   /* "Redial" from the home tab's Contact History card — same merge-by-id
@@ -5470,9 +5475,7 @@ export function AgentNextGenPage({
     });
     setActiveInteractionId(id);
     setNavOpen(true);
-    if (isNewInteraction) setCustomerPanelOpen(true);
-    // Exit full screen — see `handleStartCall`'s identical call for why.
-    setCustomerPanelExitFullScreenSignal((n) => n + 1);
+    if (isNewInteraction) setSidePanelOpen(true);
   };
 
   /** Fired by clicking a Contact History row itself (`ContactHistoryCard`'s
@@ -5546,9 +5549,7 @@ export function AgentNextGenPage({
     });
     setActiveInteractionId(id);
     setNavOpen(true);
-    if (isNewInteraction) setCustomerPanelOpen(true);
-    // Exit full screen — see `handleStartCall`'s identical call for why.
-    setCustomerPanelExitFullScreenSignal((n) => n + 1);
+    if (isNewInteraction) setSidePanelOpen(true);
   };
 
   /* "Unassign & Dismiss" — `InteractionNavItem` itself decides which of
@@ -5973,13 +5974,7 @@ export function AgentNextGenPage({
     });
     setActiveInteractionId(id);
     setNavOpen(true);
-    if (isNewInteraction) setCustomerPanelOpen(true);
-    // Exit full screen (see `customerPanelExitFullScreenSignal`'s own doc
-    // comment above) — unconditional, not gated on `isNewInteraction`: even
-    // re-opening an assignment that already had a card should bring its
-    // interaction back into view if the Customer Information panel happens
-    // to currently be covering the whole container in full-screen mode.
-    setCustomerPanelExitFullScreenSignal((n) => n + 1);
+    if (isNewInteraction) setSidePanelOpen(true);
     setNotifications((prev) => prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n)));
   };
 
@@ -6759,43 +6754,65 @@ export function AgentNextGenPage({
             ref used to position float panels. */}
         <div ref={containerRef} className="relative flex flex-1 min-w-0 overflow-hidden pr-3 pb-3">
 
-          {/* Main Container — flex column now (was flex row; harmless
-              change for the single flex-1 child this had before — a lone
-              flex-1 child stretches to fill both axes the same way in
-              either direction) so `isCombinedPanelMode`'s tab row can stack
-              above the content instead of sitting beside it. PageHeader +
-              content is still the sole child the rest of the time — the
-              Customer Information panel moved to an `InteriorPanel` docked
-              right *inside* the interaction body below, instead of a
-              `SidePanel` docked left out here. */}
+          {/* Main Container — flex column so `isCombinedPanelMode`'s tab row
+              can stack above the content instead of sitting beside it. The
+              Customer Information `SidePanel` docks left of that entire
+              column (tab row included) via the nested flex-row wrapper just
+              inside — same "panel beside column" shape as
+              `AgentNextGenTemplate.stories.tsx`'s reference layout, just
+              with `isCombinedPanelMode`'s own stacking preserved unchanged
+              one level in. */}
           <Container className="flex flex-col flex-1 overflow-hidden relative">
 
-            {/* Below 1280px with a docked panel open: a second tab
-                (`activePanelContent.title`, e.g. "Notifications") sits
-                alongside this main region's own tab, and this whole
-                container becomes the shared surface both regions toggle
-                inside of instead of the panel docking beside it. Same
-                `TabList`/`Tab` composition as the Dashboard's own tab row
-                below (and everywhere else in this file) — not a new
-                component. */}
-            {isCombinedPanelMode && (
-              <TabList fullWidth className="bg-lyra-bg-surface-base shrink-0">
-                <Tab active={narrowActiveRegion === "main"} onClick={() => setNarrowActiveRegion("main")}>
-                  {mainRegionTabLabel}
-                </Tab>
-                <Tab active={narrowActiveRegion === "panel"} onClick={() => setNarrowActiveRegion("panel")}>
-                  {activePanelContent?.title}
-                </Tab>
-              </TabList>
-            )}
-
-            {/* Content column: PageHeader + page body */}
-            <div
-              className={cn(
-                "flex flex-1 flex-col min-w-0 overflow-hidden",
-                isCombinedPanelMode && narrowActiveRegion !== "main" && "hidden"
+            {/* Row: Customer Information panel (left) + everything else
+                (tab row + content column, stacked). Not flattened into
+                Container itself since `isCombinedPanelMode`'s tab row must
+                stay OUTSIDE the panel's reach — only the column to its
+                right stacks vertically. */}
+            <div className="flex flex-1 overflow-hidden min-h-0">
+              {showPanelToggle && activeInteraction && (
+                <CustomerInformationSidePanel
+                  open={sidePanelOpen}
+                  pinned={effectiveSidePanelPinned}
+                  onPinToggle={isSidePanelContainerNarrow ? undefined : handleSidePanelPinToggle}
+                  onMouseEnter={onSidePanelHoverStart}
+                  onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
+                  customerName={activeInteraction.customerName}
+                  recordId={activeInteraction.recordId}
+                  channels={activeInteraction.channels}
+                  width={sidePanelWidth}
+                  onWidthChange={setSidePanelWidth}
+                  onResizeStateChange={setSidePanelResizing}
+                />
               )}
-            >
+              <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+
+                {/* Below 1280px with a docked panel open: a second tab
+                    (`activePanelContent.title`, e.g. "Notifications") sits
+                    alongside this main region's own tab, and this whole
+                    container becomes the shared surface both regions toggle
+                    inside of instead of the panel docking beside it. Same
+                    `TabList`/`Tab` composition as the Dashboard's own tab row
+                    below (and everywhere else in this file) — not a new
+                    component. */}
+                {isCombinedPanelMode && (
+                  <TabList fullWidth className="bg-lyra-bg-surface-base shrink-0">
+                    <Tab active={narrowActiveRegion === "main"} onClick={() => setNarrowActiveRegion("main")}>
+                      {mainRegionTabLabel}
+                    </Tab>
+                    <Tab active={narrowActiveRegion === "panel"} onClick={() => setNarrowActiveRegion("panel")}>
+                      {activePanelContent?.title}
+                    </Tab>
+                  </TabList>
+                )}
+
+                {/* Content column: PageHeader + page body */}
+                <div
+                  className={cn(
+                    "flex flex-1 flex-col min-w-0 overflow-hidden",
+                    isCombinedPanelMode && narrowActiveRegion !== "main" && "hidden"
+                  )}
+                >
               {showSettings ? (
                 // ── Settings — a blank page for now (real settings content
                 // isn't built yet), same "just the header, blank body below"
@@ -6818,6 +6835,29 @@ export function AgentNextGenPage({
                 <>
                   {showPageHeader && (
                     <PageHeader
+                      // Hovering this record icon reveals the Customer
+                      // Information side panel; clicking it is a real on/off
+                      // toggle via the shared `PanelPinButton` atom — same
+                      // trigger the panel's own internal pin button uses.
+                      // Mirrors `AgentNextGenTemplate.stories.tsx`'s
+                      // reference pattern for its own record-header icon.
+                      icon={
+                        showPanelToggle && (
+                          <span
+                            onMouseEnter={onSidePanelHoverStart}
+                            onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
+                          >
+                            <PanelPinButton
+                              pinned={sidePanelPinned}
+                              onToggle={handleSidePanelIconToggle}
+                              icon={<User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
+                              pinnedLabel={sidePanelToggleLabel ?? "Unpin Customer Information"}
+                              unpinnedLabel={sidePanelToggleLabel ?? "Pin Customer Information"}
+                            />
+                          </span>
+                        )
+                      }
+                      iconAriaHidden={false}
                       title={activeInteraction.customerName ?? "Customer"}
                       subtitle={activeInteraction.recordId}
                       // One toggle per open channel, to the right of the
@@ -6930,73 +6970,15 @@ export function AgentNextGenPage({
                           </div>
                         )
                       }
-                      // Toggle for the Customer Information `InteriorPanel`
-                      // below — lyra-ui's own documented pattern for an
-                      // InteriorPanel's open/close trigger (see
-                      // InteriorPanel.stories.tsx): a plain `Button` sitting
-                      // in the page header's `actions` slot (which renders
-                      // on the header's right side), not a dedicated toggle
-                      // component — InteriorPanel has no pin/hover concept
-                      // of its own to compose a fancier trigger around, the
-                      // way the old `SidePanel`-based version's
-                      // `PanelPinButton` did.
-                      // `aria-pressed` (not `aria-expanded`) — this reads as
-                      // a genuine toggle button with a persistent on/off
-                      // state, not a disclosure revealing adjacent content.
-                      // The pressed look reuses the same "active" treatment
-                      // CONTRIBUTING.md documents for `Menu`'s current-item
-                      // row (bg-lyra-bg-active-subtle, escalating on hover/
-                      // press) rather than inventing a one-off toggled color.
-                      // Text button now (icon + visible label), per explicit
-                      // request — no longer one of `Button`'s `ICON_SIZES`,
-                      // so `isIconVariant` is off and `title` would just sit
-                      // as a redundant native-tooltip attribute alongside the
-                      // now-visible label; dropped in favor of the label
-                      // itself doing that job.
-                      actions={
-                        showPanelToggle && (
-                          <Button
-                            variant="outline"
-                            size="default"
-                            aria-pressed={customerPanelOpen}
-                            onClick={handleCustomerPanelToggle}
-                            className={
-                              customerPanelOpen
-                                ? "border-lyra-border-active bg-lyra-bg-active-subtle text-lyra-fg-active-strong hover:bg-lyra-state-hover-active-subtle active:bg-lyra-state-pressed-active-subtle"
-                                : undefined
-                            }
-                          >
-                            <User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-                            {sidePanelToggleLabel ?? "Customer Information"}
-                          </Button>
-                        )
-                      }
                     />
                   )}
-                  {/* Body row: transcript+composer column + Customer
-                      Information interior panel — same "main content +
-                      docked interior panel" flex-row shape as the Desk
-                      dashboard's own right-docked InteriorPanel below. */}
+                  {/* Body row: transcript+composer column. Customer
+                      Information now renders as a `SidePanel` docked left of
+                      the whole outer Container (see above), not inside this
+                      row — so this is just the transcript/composer column
+                      now, no docked panel sibling here anymore. */}
                   <div className="relative flex flex-1 overflow-hidden">
-                    <div
-                      className="flex flex-1 flex-col min-w-0 overflow-hidden"
-                      // Closes the Customer Information panel on a click
-                      // anywhere in this column (banner, transcript, hover
-                      // toolbars, the composer's input/buttons — plain event
-                      // bubbling, no per-child wiring needed) — but only
-                      // while that panel is actually floating OVER this
-                      // content instead of docked beside it
-                      // (`customerPanelIsOverlay`, reported by
-                      // `InteriorPanel`'s `onOverlayModeChange`). A
-                      // side-by-side docked panel isn't overlapping
-                      // anything, so clicking here shouldn't dismiss it —
-                      // same reasoning a real scrim-backed modal only
-                      // dismisses on an outside click when it's actually
-                      // covering something.
-                      onClick={() => {
-                        if (customerPanelOpen && customerPanelIsOverlay) setCustomerPanelOpen(false);
-                      }}
-                    >
+                    <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
                       {/* Reopened-from-history, closed interaction — read-only
                           notice. See `ActiveInteraction.closed`'s own doc
                           comment for the full picture (also drives hiding
@@ -7024,19 +7006,6 @@ export function AgentNextGenPage({
                         <InteractionComposer onSend={(text) => handleSendMessage(activeInteraction.id, text)} />
                       )}
                     </div>
-                    {showPanelToggle && (
-                      <CustomerInformationInteriorPanel
-                        open={customerPanelOpen}
-                        onClose={() => setCustomerPanelOpen(false)}
-                        customerName={activeInteraction.customerName}
-                        recordId={activeInteraction.recordId}
-                        channels={activeInteraction.channels}
-                        width={customerPanelWidth}
-                        onWidthChange={setCustomerPanelWidth}
-                        exitFullScreenSignal={customerPanelExitFullScreenSignal}
-                        onOverlayModeChange={setCustomerPanelIsOverlay}
-                      />
-                    )}
                   </div>
                 </>
               ) : (
@@ -7318,6 +7287,9 @@ export function AgentNextGenPage({
                 {activePanelContent.body}
               </div>
             )}
+
+              </div>
+            </div>
 
           </Container>
 
