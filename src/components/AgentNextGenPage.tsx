@@ -7622,6 +7622,12 @@ export function AgentNextGenPage({
               // behavior as the removed icon button.
               onHelpClick={() => window.open("https://help.nicecxone.com/content/agent/cxoneagent/cxoneagent.htm?cshid=CXoneAgent", "_blank", "noopener,noreferrer")}
               onLogOut={() => onNavigate?.("login")}
+              // Per explicit request: this prototype has no real
+              // integrations to surface here, so the status menu's
+              // "Connected Apps" row (which otherwise always renders, even
+              // with a permanently-empty "0" badge — see `hideConnectedApps`'s
+              // own doc comment, agent-profile.tsx) is hidden outright.
+              hideConnectedApps
               className="ml-1"
             />
           </>
