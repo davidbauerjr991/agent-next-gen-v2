@@ -7256,7 +7256,18 @@ export function AgentNextGenPage({
                     // git history/CONTRIBUTING.md): that one was cramming
                     // the exact same tabs into `PageHeader`'s slim
                     // `titleSuffix` slot, not replacing the header outright.
-                    <div className="flex min-h-[68px] items-center gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6">
+                    // `items-end` (not `-center`) — per explicit follow-up:
+                    // this row's own `border-b` (just below) is the ONLY
+                    // border now, not a second one stacked under `TabList`'s
+                    // own (which only ever spanned its own box width, not
+                    // this whole row, hence the previous "two lines" bug).
+                    // `TabList`'s own border is suppressed below
+                    // (`border-b-0`) so there's exactly one line, and
+                    // bottom-aligning every child here (instead of centering)
+                    // is what makes that ONE line land flush with the tabs'
+                    // own underline instead of sitting lower, under empty
+                    // space beneath a vertically-centered `TabList`.
+                    <div className="flex min-h-[68px] items-end gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6">
                       {/* Only shown while the panel itself is closed — once
                           it's open, this same icon would just sit there
                           doing nothing useful next to a panel that's
@@ -7290,7 +7301,12 @@ export function AgentNextGenPage({
                           <div className="h-8 w-px bg-lyra-border-subtle shrink-0" aria-hidden="true" />
                         </>
                       )}
-                      <TabList overflowMenu className="flex-1 min-w-0">
+                      {/* `border-b-0` — cancels TabList's own default
+                          bottom border (which only ever spans its own box,
+                          not this whole row) so the row's own full-width
+                          `border-b` above is the single, sole underline,
+                          not a second, shorter one stacked on top of it. */}
+                      <TabList overflowMenu className="flex-1 min-w-0 border-b-0">
                         {/* "Customer History" — a separate, independently
                             selectable tab, NOT another trigger for the
                             Customer Information side panel (that's the
