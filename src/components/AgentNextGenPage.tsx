@@ -5526,6 +5526,20 @@ export function AgentNextGenPage({
   const [panelWidth,      setPanelWidth]      = useState(SHARED_PANEL_DEFAULT_WIDTH);
   const [panelHeight,     setPanelHeight]     = useState(860);
   const [panelIsResizing, setPanelIsResizing] = useState(false);
+  // Viewport-fullscreen toggle for the shared panel (AI/Notifications/Apps/
+  // Calendar/etc.) — distinct from `panelVariant`'s "float"/"docked" (which
+  // is `Draggable`'s own concept and stays within/beside the interaction
+  // container). This instead acts like a modal's fullscreen toggle: a
+  // separate `position: fixed; inset: 0` overlay (`sharedPanelFullScreenOverlay`
+  // below) covering the whole browser viewport, reusing the same header/body
+  // content but rendered independently of `Draggable` entirely — `Draggable`
+  // has no viewport-fullscreen concept of its own (only float/docked), and
+  // coercing its "float" variant into spanning the viewport would mean
+  // fighting its internal width/height/offset state and its own
+  // `clampOffsetIntoViewport` containment logic. Whichever of
+  // `panelVariant`'s two states was active before entering fullscreen is
+  // preserved (untouched) and simply resumes when fullscreen exits.
+  const [panelFullScreen, setPanelFullScreen] = useState(false);
   // `containerRef` is the CONTENT container — everything to the right of
   // LeftNav (its own JSX comment further down calls it "Content area"),
   // also used elsewhere for AI/Notifications float positioning. This is
@@ -6486,6 +6500,7 @@ export function AgentNextGenPage({
       setPanelState("open");
     } else {
       setPanelState("closing");
+      setPanelFullScreen(false);
       panelAnimTimer.current = setTimeout(() => setPanelState("closed"), 150);
     }
     return () => clearTimeout(panelAnimTimer.current);
@@ -6986,6 +7001,16 @@ export function AgentNextGenPage({
             actions={
               <>
                 {activePanelContent.headerActions}
+                <Tooltip content="Full Screen" placement="bottom" asLabel>
+                  <ActionIconButton
+                    aria-label="Full Screen"
+                    size="sm"
+                    onClick={() => setPanelFullScreen(true)}
+                    className="text-lyra-fg-secondary hover:text-lyra-fg-secondary"
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" strokeWidth={1.5} />
+                  </ActionIconButton>
+                </Tooltip>
                 <Tooltip content={dockButtonProps["aria-label"]} placement="bottom" asLabel>
                   <ActionIconButton
                     {...dockButtonProps}
@@ -7009,6 +7034,53 @@ export function AgentNextGenPage({
     >
       {activePanelContent.body}
     </Draggable>
+  ) : null;
+
+  // Fullscreen overlay for the shared panel — see `panelFullScreen`'s own
+  // doc comment above for why this bypasses `Draggable` entirely rather
+  // than trying to make its "float" variant cover the viewport. Mirrors the
+  // Customer Information panel's header shape (title/icon/actions via
+  // `ContainerHeader`, using the same `activePanelContent` the docked/float
+  // rendering above uses) plus a `Minimize2` "exit full screen" action.
+  // `z-[10000]` — above the app-header's own menus (`z-[9999]`, see
+  // `getPanelFloatStyle`'s doc comment) and the float panel itself
+  // (`zIndex: 40`), since a fullscreen toggle should cover the whole app,
+  // header included, like a real modal.
+  const sharedPanelFullScreenOverlay = panelMounted && activePanelContent && panelFullScreen ? (
+    <div className="fixed inset-0 z-[10000] flex flex-col bg-lyra-bg-surface-base">
+      <ContainerHeader
+        title={activePanelContent.title}
+        titleBadge={activePanelContent.titleBadge}
+        titleClassName={activePanelContent.titleClassName}
+        icon={activePanelContent.dockedIcon}
+        bordered={!activePanelContent.headerContent}
+        actions={
+          <>
+            {activePanelContent.headerActions}
+            <Tooltip content="Exit Full Screen" placement="bottom" asLabel>
+              <ActionIconButton
+                aria-label="Exit Full Screen"
+                size="sm"
+                onClick={() => setPanelFullScreen(false)}
+                className="text-lyra-fg-secondary hover:text-lyra-fg-secondary"
+              >
+                <Minimize2 className="h-3.5 w-3.5" strokeWidth={1.5} />
+              </ActionIconButton>
+            </Tooltip>
+          </>
+        }
+        onClose={() => {
+          setPanelFullScreen(false);
+          setPanelOpen(false);
+        }}
+      />
+      {activePanelContent.headerContent && (
+        <div className="shrink-0 px-4 pb-3 border-b border-lyra-border-subtle">
+          {activePanelContent.headerContent}
+        </div>
+      )}
+      <div className="flex flex-col flex-1 min-h-0">{activePanelContent.body}</div>
+    </div>
   ) : null;
 
   return (
@@ -7927,8 +7999,13 @@ export function AgentNextGenPage({
                 — clicking it hands off to the exact same float rendering
                 below (untouched), which is what makes the tabs disappear;
                 re-docking from there flips `panelVariant` back to "docked"
-                and `isCombinedPanelMode` brings the tabs right back. */}
-            {isCombinedPanelMode && activePanelContent && (
+                and `isCombinedPanelMode` brings the tabs right back. Also
+                guarded on `!panelFullScreen` — if the nav narrows into
+                combined mode while the shared panel happens to be
+                fullscreen, `sharedPanelFullScreenOverlay` (rendered at the
+                page root) already covers this content; skip this copy so
+                `activePanelContent.body` isn't mounted twice at once. */}
+            {isCombinedPanelMode && activePanelContent && !panelFullScreen && (
               <div
                 className={cn(
                   "flex flex-1 flex-col min-w-0 overflow-hidden",
@@ -7976,7 +8053,7 @@ export function AgentNextGenPage({
               keyframe animations — avoids compositor fill-mode flash).
               Was five near-identical blocks (one per panel); with only one
               physical container now, there's only one. */}
-          {panelVariant === "float" && panelMounted && (
+          {panelVariant === "float" && panelMounted && !panelFullScreen && (
             <div
               style={{
                 ...getPanelFloatStyle(),
@@ -8001,8 +8078,11 @@ export function AgentNextGenPage({
             there's only one. Skipped in `isCombinedPanelMode` — below
             768px the panel's content renders inline as the main
             container's second tab instead (see above), not as this
-            separate docked-width column beside it. */}
-        {panelVariant === "docked" && !isCombinedPanelMode && (
+            separate docked-width column beside it. Also skipped while
+            `panelFullScreen` is on — `sharedPanelFullScreenOverlay` (a
+            separate `position: fixed` overlay rendered at the page root,
+            see its own doc comment) takes over instead. */}
+        {panelVariant === "docked" && !isCombinedPanelMode && !panelFullScreen && (
           <div className="flex h-full pb-3" style={{
             width: panelState === "open" ? panelWidth : 0,
             height: "100%",
@@ -8077,6 +8157,19 @@ export function AgentNextGenPage({
           </p>
         </AgentWelcomeMessage>
       </Modal>
+
+      {/* Shared panel — viewport fullscreen overlay. Rendered here, as a
+          direct child of the page's own root element, rather than nested
+          under `containerRef`/the docked or float wrappers above — a
+          `position: fixed` element is only guaranteed to size/position
+          against the actual viewport (not some intermediate ancestor) when
+          no element between it and here applies a `transform`/`filter`/
+          `perspective`/`contain` that would otherwise open its own
+          containing block. See `sharedPanelFullScreenOverlay`'s own doc
+          comment (near `sharedPanel`, above) for why this bypasses
+          `Draggable` entirely instead of trying to stretch its "float"
+          variant to cover the screen. */}
+      {sharedPanelFullScreenOverlay}
     </div>
   );
 }
