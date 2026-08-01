@@ -2685,7 +2685,17 @@ function TranscriptMessageBubble({
                 // pointing at nothing whenever the cursor happens to pass
                 // over that dead space. `pointer-events-auto` restores
                 // interactivity once actually visible (hover or open).
-                "mb-0.5 flex shrink-0 items-center gap-0.5 pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100",
+                //
+                // `group-focus-within:` alongside `group-hover:` — per
+                // explicit accessibility request: Copy/Add-tag are real
+                // buttons, so `opacity-0`/`pointer-events-none` alone
+                // doesn't remove them from the tab order, it just leaves
+                // them invisible (and unclickable, pre-`pointer-events-auto`)
+                // while a keyboard user has actually tabbed to one. Tabbing
+                // into either button now reveals this toolbar exactly like
+                // hovering the row does; the hover behavior itself is
+                // unchanged.
+                "mb-0.5 flex shrink-0 items-center gap-0.5 pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
                 // The "Add tag" popover renders in a portal, so moving the
                 // pointer into it isn't hovering this row anymore —
                 // group-hover alone would fade the toolbar out from under
@@ -2735,7 +2745,15 @@ function TranscriptMessageBubble({
               <Button
                 variant="ghost"
                 size="sm"
-                className="opacity-0 transition-opacity group-hover/tags:opacity-100"
+                // `group-focus-within/tags:opacity-100` alongside the
+                // existing hover reveal — per explicit accessibility
+                // request: this button is itself the focusable element,
+                // but `group-focus-within` (not `focus-visible`) is used
+                // here instead of `favorite-button.tsx`'s simpler
+                // technique since the visibility is driven by the PARENT
+                // `group/tags` row, not this button's own focus state in
+                // isolation — matches the toolbar fix just above.
+                className="opacity-0 transition-opacity group-hover/tags:opacity-100 group-focus-within/tags:opacity-100"
                 onClick={onClearTags}
               >
                 Clear Tags
