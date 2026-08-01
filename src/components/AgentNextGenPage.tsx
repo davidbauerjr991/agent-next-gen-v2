@@ -4404,7 +4404,7 @@ function buildLatestNote(customerName: string | undefined, recordId: string): Cu
 // showed "Interactions" active, but the panel should open on "Overview"
 // (index 0) by default — so `activeTab` below just starts at 0 rather than
 // looking up a specific tab's index.
-const CUSTOMER_PANEL_TABS = ["Overview", "History", "Detail", "Directory", "Interactions", "Tasks", "Notes", "Accounts", "Tickets"];
+const CUSTOMER_PANEL_TABS = ["Overview", "Detail", "Directory", "Tasks", "Notes", "Accounts", "Tickets"];
 
 /** Shared neutral bordered-container treatment for every collapsible
  *  `Accordion` in the Customer Information panel (Overview tab's "Customer
@@ -5038,21 +5038,6 @@ function CustomerInformationPanelBody({
           email={getFieldValue(fields, "Email")}
           phoneDisplay={getFieldValue(fields, "Phone #")}
         />
-      )}
-
-      {/* History — was going to be a channel-toggle pill in the interaction
-          record header (per the reference screenshot), moved here instead
-          per explicit follow-up request: a tab alongside Interactions/Tasks/
-          Notes/etc., not another entry in the ChannelToggle row. No real
-          content yet, same "blank placeholder" treatment the app-header
-          panel buttons (Agent Chat/Schedule/etc.) already use for a
-          not-yet-built body — just this tab's own copy ("Coming soon")
-          instead of theirs ("Nothing here yet"), so this in-progress tab
-          doesn't quietly read as caught-up-and-empty. */}
-      {activeTab === CUSTOMER_PANEL_TABS.indexOf("History") && (
-        <div className="flex flex-1 items-center justify-center p-4">
-          <p className="lyra-body-md text-lyra-fg-disabled text-center">Coming soon</p>
-        </div>
       )}
     </div>
   );
@@ -8166,51 +8151,61 @@ export function AgentNextGenPage({
                       row — so this is just the transcript/composer column
                       now, no docked panel sibling here anymore. */}
                   <div className="relative flex flex-1 overflow-hidden">
-                    <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
-                      {/* Reopened-from-history, closed interaction — read-only
-                          notice. See `ActiveInteraction.closed`'s own doc
-                          comment for the full picture (also drives hiding
-                          `InteractionComposer` below and every channel's
-                          kebab, both in this column and in the LeftNav
-                          card/ChannelToggleGroup above). */}
-                      {activeInteraction.closed && (
-                        <div className="shrink-0 px-6 pt-4">
-                          <InlineNotification variant="info">
-                            You are viewing a closed interaction.
-                          </InlineNotification>
-                        </div>
-                      )}
-                      <InteractionTranscript
-                        channelType={activeChannelType}
-                        customerName={activeInteraction.customerName}
-                        channelAddress={activeChannel?.addressLabel}
-                        recordId={activeInteraction.recordId}
-                        skillLabel={activeChannel?.preview}
-                        isFreshLaunch={!!activeInteraction.startedFresh}
-                        liveMessages={activeInteraction.liveMessages ?? []}
-                        currentStatus={activeInteraction.currentStatus}
-                        onCurrentStatusChange={(status) => handleInteractionStatusChange(activeInteraction.id, status)}
-                        // Same shared `outcomeDraftKey`/`outcomeDraft` state
-                        // the LeftNav's own `ChannelRow` Outcome button uses
-                        // for this exact channel (`outcomeKey` — same
-                        // `${interactionId}:${channelKey}` scheme that
-                        // call site uses) — see `InteractionTranscript`'s
-                        // own outcome props' doc comment.
-                        outcomeOpen={outcomeDraftKey === activeChannelOutcomeKey && outcomeDraftSource === "transcript"}
-                        onOutcomeOpenChange={(open) => handleOutcomeOpenChange(activeChannelOutcomeKey!, open, "transcript")}
-                        outcomeTags={outcomeDraft.tags}
-                        onOutcomeTagsChange={(tags) => setOutcomeDraft((d) => ({ ...d, tags }))}
-                        outcomeDispositionCode={outcomeDraft.dispositionCode}
-                        onOutcomeDispositionChange={(value) => setOutcomeDraft((d) => ({ ...d, dispositionCode: value }))}
-                        outcomeSummary={outcomeDraft.summary}
-                        onOutcomeSummaryChange={(value) => setOutcomeDraft((d) => ({ ...d, summary: value }))}
-                        onOutcomeSave={handleOutcomeSave}
-                        onOutcomeCancel={handleOutcomeCancel}
-                      />
-                      {!activeInteraction.closed && (
-                        <InteractionComposer onSend={(text) => handleSendMessage(activeInteraction.id, text)} />
-                      )}
-                    </div>
+                    {customerHistoryTabActive ? (
+                      // "Customer History" tab — no real content yet, same
+                      // "blank placeholder" treatment already used elsewhere
+                      // in this file (e.g. Settings' own blank body) for a
+                      // not-yet-built tab body.
+                      <div className="flex flex-1 items-center justify-center p-4">
+                        <p className="lyra-body-md text-lyra-fg-disabled text-center">Coming soon</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+                        {/* Reopened-from-history, closed interaction — read-only
+                            notice. See `ActiveInteraction.closed`'s own doc
+                            comment for the full picture (also drives hiding
+                            `InteractionComposer` below and every channel's
+                            kebab, both in this column and in the LeftNav
+                            card/ChannelToggleGroup above). */}
+                        {activeInteraction.closed && (
+                          <div className="shrink-0 px-6 pt-4">
+                            <InlineNotification variant="info">
+                              You are viewing a closed interaction.
+                            </InlineNotification>
+                          </div>
+                        )}
+                        <InteractionTranscript
+                          channelType={activeChannelType}
+                          customerName={activeInteraction.customerName}
+                          channelAddress={activeChannel?.addressLabel}
+                          recordId={activeInteraction.recordId}
+                          skillLabel={activeChannel?.preview}
+                          isFreshLaunch={!!activeInteraction.startedFresh}
+                          liveMessages={activeInteraction.liveMessages ?? []}
+                          currentStatus={activeInteraction.currentStatus}
+                          onCurrentStatusChange={(status) => handleInteractionStatusChange(activeInteraction.id, status)}
+                          // Same shared `outcomeDraftKey`/`outcomeDraft` state
+                          // the LeftNav's own `ChannelRow` Outcome button uses
+                          // for this exact channel (`outcomeKey` — same
+                          // `${interactionId}:${channelKey}` scheme that
+                          // call site uses) — see `InteractionTranscript`'s
+                          // own outcome props' doc comment.
+                          outcomeOpen={outcomeDraftKey === activeChannelOutcomeKey && outcomeDraftSource === "transcript"}
+                          onOutcomeOpenChange={(open) => handleOutcomeOpenChange(activeChannelOutcomeKey!, open, "transcript")}
+                          outcomeTags={outcomeDraft.tags}
+                          onOutcomeTagsChange={(tags) => setOutcomeDraft((d) => ({ ...d, tags }))}
+                          outcomeDispositionCode={outcomeDraft.dispositionCode}
+                          onOutcomeDispositionChange={(value) => setOutcomeDraft((d) => ({ ...d, dispositionCode: value }))}
+                          outcomeSummary={outcomeDraft.summary}
+                          onOutcomeSummaryChange={(value) => setOutcomeDraft((d) => ({ ...d, summary: value }))}
+                          onOutcomeSave={handleOutcomeSave}
+                          onOutcomeCancel={handleOutcomeCancel}
+                        />
+                        {!activeInteraction.closed && (
+                          <InteractionComposer onSend={(text) => handleSendMessage(activeInteraction.id, text)} />
+                        )}
+                      </div>
+                    )}
                   </div>
                 </>
               ) : (
