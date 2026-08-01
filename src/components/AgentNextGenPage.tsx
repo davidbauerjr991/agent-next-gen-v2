@@ -5377,24 +5377,15 @@ export function AgentNextGenPage({
           if (!input) return;
           // The placeholder text itself contains "email" (part of
           // OUTBOUND_CONFIG.searchPlaceholder's own copy, "Enter phone,
-          // email or search term"), which is enough for Chrome's autofill
-          // heuristic to treat this as a saved-address field — and Chrome
-          // is well known to ignore a plain autocomplete="off" for exactly
-          // this address/contact-info category (it still showed the
-          // dropdown after that alone). The reliable workaround: Chrome
-          // only suppresses its suggestions popup for a field that's
-          // `readonly` at the exact moment it receives focus. So mark it
-          // readonly, focus it (no dropdown, since it looks non-editable
-          // right now), then release `readonly` on the very next frame —
-          // by then focus has already landed and the dropdown decision is
-          // already made, so removing it doesn't retroactively trigger
-          // anything, and the field is instantly typable.
+          // email or search term"), which is enough for some browsers'
+          // autofill heuristics to treat this as a saved-address field and
+          // show a suggestions dropdown the moment it's focused. Chrome
+          // ignores this plain autocomplete="off" for that category (a
+          // stronger readonly-at-focus workaround was tried and reverted —
+          // not worth the added complexity), but it's kept because Safari
+          // does respect it. Set before `.focus()` (same synchronous tick).
           input.setAttribute("autocomplete", "off");
-          input.setAttribute("readonly", "readonly");
           input.focus();
-          requestAnimationFrame(() => {
-            input.removeAttribute("readonly");
-          });
         }, 50);
       });
     };
