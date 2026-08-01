@@ -41,6 +41,7 @@ import {
   TableRow,
   TableHead,
   TableCell,
+  TableFooter,
   SortableTableHead,
   Icon,
   Badge,
@@ -144,6 +145,11 @@ import {
   CircleCheck,
   Maximize2,
   Minimize2,
+  Plus,
+  Trash2,
+  Filter,
+  RefreshCw,
+  Rows3,
   type LucideIcon,
 } from "lucide-react";
 
@@ -2088,6 +2094,183 @@ function ContactHistoryCard({
         </div>
       )}
     </DashboardCard>
+  );
+}
+
+/* ── CustomersListView ──
+   Salesforce-Lightning-style Contacts list view — populates the Dashboard
+   tab row's "Customers" tab (`activeDeskTab === "customers"`, see the
+   render branch below). Columns/values match a reference screenshot of a
+   real NICE CXone test-org Contacts list view (field names, row data,
+   "14 records"/pagination chrome) as closely as the visible portion of
+   that screenshot allows — it only shows 11 of the 14 rows, so
+   `CUSTOMER_LIST_RECORDS` has 11 entries while the "14 records"/
+   "Displaying records 1 - 14 of 14" labels below are hardcoded to match
+   the screenshot's own text rather than derived from this (shorter)
+   array's length.
+
+   Built from lyra-ui's own `Table`/`TableHeader`/`TableRow`/`TableHead`/
+   `TableCell`/`TableFooter` primitives (table.tsx) for the actual grid +
+   pagination — the same components every other data table in this app
+   already uses — rather than a one-off markup table. The toolbar row and
+   filter bar above the grid are custom (no existing lyra-ui component
+   composes a "Recently viewed" list-view picker + Salesforce-style "No
+   filters assigned" bar together), but built from the same shared atoms
+   (`Select`, `Button variant="icon"`, `Button variant="ghost"`/
+   `"outline"`) `TableToolbar` itself uses internally for its own action/
+   Clear buttons, for visual consistency with the rest of the design
+   system. */
+
+interface CustomerListRecord {
+  contactNumber: string;
+  firstName: string;
+  lastName: string;
+  group: string;
+  firstPhone: string;
+  emailAddress: string;
+  address1: string;
+  city: string;
+  state: string;
+  postalCode: string;
+}
+
+const CUSTOMER_LIST_RECORDS: CustomerListRecord[] = [
+  { contactNumber: "hMayer37",    firstName: "Hannah",   lastName: "Mayer",     group: "", firstPhone: "(716) 331-4661", emailAddress: "Teresa.Harrington@gmail.com",  address1: "",                      city: "",              state: "", postalCode: "" },
+  { contactNumber: "dBauer79",    firstName: "Davy",     lastName: "Bauer",     group: "", firstPhone: "(614) 749-1794", emailAddress: "david.bauer@nice.com",         address1: "184 Clinton Heights Ave", city: "Columbus",      state: "OH", postalCode: "43215" },
+  { contactNumber: "aSmith90",    firstName: "Annie",    lastName: "Smith",     group: "", firstPhone: "(415) 791-3275", emailAddress: "juliana.arias@nice.com",       address1: "201 Spear St",           city: "San Francisco", state: "CA", postalCode: "94105" },
+  { contactNumber: "jShepard59",  firstName: "Jackie",   lastName: "Shepard",   group: "", firstPhone: "(801) 455-5169", emailAddress: "",                             address1: "",                      city: "",              state: "", postalCode: "" },
+  { contactNumber: "6072818957",  firstName: "josh",     lastName: "robertson", group: "", firstPhone: "(415) 671-6000", emailAddress: "devera.e@gmail.com",           address1: "",                      city: "",              state: "", postalCode: "" },
+  { contactNumber: "55222",       firstName: "Milena",   lastName: "Restrepo",  group: "", firstPhone: "(208) 557-4431", emailAddress: "smrestrepoguerrero@gmail.com", address1: "",                      city: "",              state: "", postalCode: "" },
+  { contactNumber: "gBorneman30", firstName: "Greg",     lastName: "Borneman",  group: "", firstPhone: "(770) 614-4280", emailAddress: "gborneman@gmail.com",          address1: "2412 Sandell Dr",       city: "Dunwoody",      state: "GA", postalCode: "30338" },
+  { contactNumber: "JJR_11",      firstName: "carey",    lastName: "diane",     group: "", firstPhone: "(607) 743-3206", emailAddress: "",                             address1: "",                      city: "",              state: "", postalCode: "" },
+  { contactNumber: "sSwargam92",  firstName: "SRINIVAS", lastName: "SWARGAM",   group: "", firstPhone: "(943) 777-4221", emailAddress: "swargamsri@gmail.com",         address1: "",                      city: "",              state: "", postalCode: "" },
+  { contactNumber: "lHowlett25",  firstName: "Logan",    lastName: "Howlett",   group: "", firstPhone: "(408) 839-0384", emailAddress: "erwin.devera@gmail.com",       address1: "123 Main St",           city: "Campbell",      state: "CA", postalCode: "95008" },
+  { contactNumber: "eDeVera50",   firstName: "Erwin",    lastName: "de Vera",   group: "", firstPhone: "(408) 839-0384", emailAddress: "erwin.devera@gmail.com",       address1: "",                      city: "",              state: "", postalCode: "" },
+];
+
+const CUSTOMER_LIST_COLUMNS: { key: keyof CustomerListRecord; label: string }[] = [
+  { key: "contactNumber", label: "CONTACTNUMBER" },
+  { key: "firstName",     label: "FIRSTNAME" },
+  { key: "lastName",      label: "LASTNAME" },
+  { key: "group",         label: "GROUP" },
+  { key: "firstPhone",    label: "FIRSTPHONE" },
+  { key: "emailAddress",  label: "EMAILADDRESS" },
+  { key: "address1",      label: "ADDRESS1" },
+  { key: "city",          label: "CITY" },
+  { key: "state",         label: "STATE" },
+  { key: "postalCode",    label: "POSTALCODE" },
+];
+
+function CustomersListView() {
+  // Static/uncontrolled — the reference screenshot only shows one list
+  // view ("Recently viewed") selected; a real list-view switcher isn't
+  // part of this request.
+  const [listView, setListView] = useState("recently-viewed");
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0">
+      {/* Toolbar row — list-view picker + record count on the left,
+          add/list/delete/filter icon actions on the right. Filter shown
+          in its "active" state (the reference screenshot's filter bar
+          below is already expanded) via the same `bg-lyra-bg-active-
+          subtle`/`border-lyra-border-active` treatment `FilterChip`'s own
+          selected state uses elsewhere in this design system. */}
+      <div className="flex items-center justify-between gap-3 px-6 py-3">
+        <div className="flex items-center gap-3">
+          <Select
+            size="md"
+            value={listView}
+            onValueChange={setListView}
+            options={[{ value: "recently-viewed", label: "Recently viewed" }]}
+          />
+          <span className="text-lyra-border-default">|</span>
+          <span className="lyra-body-md-emphasis text-lyra-fg-default">14 records</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button variant="icon" size="icon" title="New">
+            <Plus className="h-4 w-4" strokeWidth={1.5} />
+          </Button>
+          <Button variant="icon" size="icon" title="List view controls">
+            <Rows3 className="h-4 w-4" strokeWidth={1.5} />
+          </Button>
+          <Button variant="icon" size="icon" title="Delete">
+            <Trash2 className="h-4 w-4" strokeWidth={1.5} />
+          </Button>
+          <Button
+            variant="icon"
+            size="icon"
+            title="Filters"
+            className="bg-lyra-bg-active-subtle border border-lyra-border-active text-lyra-fg-active-strong hover:bg-lyra-bg-active-subtle"
+          >
+            <Filter className="h-4 w-4" strokeWidth={1.5} />
+          </Button>
+        </div>
+      </div>
+
+      {/* Filter bar — expanded (per the active filter icon above), no
+          filters currently assigned. Same `Button variant="ghost"`/
+          `"outline"` pairing `TableToolbar`'s own `clearFiltersButton`/
+          Query Builder button use. */}
+      <div className="flex items-center justify-between gap-3 bg-lyra-bg-surface-container-subtle px-6 py-2.5">
+        <span className="lyra-body-md text-lyra-fg-secondary">No filters assigned</span>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="default" disabled>
+            Clear
+          </Button>
+          <Button variant="outline">Add filters</Button>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-auto px-6">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              {CUSTOMER_LIST_COLUMNS.map((col) => (
+                <TableHead key={col.key} className="flex-1 min-w-[140px]">{col.label}</TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {CUSTOMER_LIST_RECORDS.map((record) => (
+              <TableRow key={record.contactNumber}>
+                {CUSTOMER_LIST_COLUMNS.map((col) => (
+                  <TableCell key={col.key} className="flex-1 min-w-[140px]">{record[col.key]}</TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Footer — hardcoded to match the reference screenshot's
+          "Displaying records 1 - 14 of 14"/"Page 1 of 1" chrome exactly,
+          not derived from `CUSTOMER_LIST_RECORDS.length` (11) — see this
+          component's own doc comment above for why. No rows-per-page
+          selector (the reference screenshot doesn't show one); a plain
+          refresh icon sits after `TableFooter`'s own pagination nav,
+          matching the screenshot's trailing refresh control, which
+          `TableFooter` itself has no built-in slot for — the border/
+          padding that would normally live on `TableFooter` itself moves
+          to this wrapping row instead, so the two don't double up. */}
+      <div className="flex items-center gap-2 border-t border-lyra-border-subtle px-6 py-2.5 shrink-0">
+        <div className="flex-1">
+          <TableFooter
+            className="border-t-0 py-0"
+            currentPage={1}
+            totalPages={1}
+            onPageChange={() => {}}
+            rowsPerPage={14}
+            showRowsPerPage={false}
+            totalRecords={14}
+            displayStart={1}
+            displayEnd={14}
+          />
+        </div>
+        <Button variant="icon" size="icon" title="Refresh">
+          <RefreshCw className="h-4 w-4" strokeWidth={1.5} />
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -8268,6 +8451,19 @@ export function AgentNextGenPage({
                   )}
               {/* Body row: main content + interior panel */}
               <div className="relative flex flex-1 overflow-hidden">
+              {activeDeskTab === "customers" ? (
+                <CustomersListView />
+              ) : activeDeskTab !== "home" ? (
+                // Accounts/Tickets/WEM — no content built yet; same
+                // "Coming soon" placeholder treatment used elsewhere in
+                // this file for in-progress tabs (e.g. the Customer
+                // History tab), rather than silently falling through to
+                // the Dashboard's own queue widgets/summary cards below.
+                <div className="flex flex-1 items-center justify-center p-4">
+                  <p className="lyra-body-md text-lyra-fg-disabled text-center">Coming soon</p>
+                </div>
+              ) : (
+                <>
                 <div className="flex flex-1 flex-col min-w-0 overflow-y-auto px-6 py-6">
                   <div className="w-full max-w-[1200px] mx-auto lyra-container-grid-wrap">
                     {/* ── Queue widgets ──
@@ -8432,6 +8628,8 @@ export function AgentNextGenPage({
                     )}
                   </InteriorPanel>
                 )}
+                </>
+              )}
               </div>
                 </>
               )}
