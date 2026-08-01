@@ -5247,6 +5247,84 @@ type Page = "agent-workspace" | "agent" | "outbound" | "login";
 // `Draggable`) has been removed from this app.
 const SHARED_PANEL_DEFAULT_WIDTH = 360;
 
+// Screen Pop — visual mock of an external app's login screen, shown in
+// place of a real embed. Real screen-pop targets like Salesforce/Zendesk
+// send clickjack-protection headers (X-Frame-Options / CSP frame-ancestors)
+// on their login and app pages specifically to refuse cross-origin
+// iframing — that protection lives on THEIR side and can't be relaxed from
+// a consumer/embedding page no matter how it's built (see
+// support.zendesk.com's own "Embedding Zendesk into an iframe is not
+// allowed" article, and the equivalent Salesforce clickjack protection on
+// login.salesforce.com). So rather than a broken/blank iframe, each app
+// gets a hand-rolled, obviously-fake login card instead — every field is
+// `disabled` and the button/links are non-interactive, and the badge under
+// the card spells out that it's a mock, so it can never be mistaken for a
+// real login prompt (or an actual authentication surface asking for real
+// credentials).
+function MockLoginCard({
+  appName,
+  accent,
+  logo,
+  usernameLabel = "Username",
+  usernamePlaceholder = "username@company.com",
+  buttonLabel = "Log In",
+  footerLink = "Forgot Your Password?",
+  rememberMe = true,
+}: {
+  appName: string;
+  accent: string;
+  logo: React.ReactNode;
+  usernameLabel?: string;
+  usernamePlaceholder?: string;
+  buttonLabel?: string;
+  footerLink?: string;
+  rememberMe?: boolean;
+}) {
+  return (
+    <div className="overflow-y-auto flex-1 flex flex-col items-center bg-[#f4f6f9] px-4 pt-10 pb-6 gap-4">
+      <div className="w-full max-w-[280px] bg-white rounded-lg shadow-md border border-[#e5e5e5] flex flex-col items-center px-7 py-8">
+        {logo}
+        <div className="flex flex-col gap-1 w-full mb-3 mt-1">
+          <label className="text-xs text-[#3e3e3c]">{usernameLabel}</label>
+          <input
+            type="text"
+            disabled
+            placeholder={usernamePlaceholder}
+            className="border border-[#c9c9c9] rounded px-2.5 py-2 text-sm text-[#3e3e3c] placeholder:text-[#aeaeae] bg-white disabled:opacity-100 disabled:cursor-not-allowed focus:outline-none"
+          />
+        </div>
+        <div className="flex flex-col gap-1 w-full mb-3">
+          <label className="text-xs text-[#3e3e3c]">Password</label>
+          <input
+            type="password"
+            disabled
+            placeholder="••••••••"
+            className="border border-[#c9c9c9] rounded px-2.5 py-2 text-sm text-[#3e3e3c] bg-white disabled:opacity-100 disabled:cursor-not-allowed focus:outline-none"
+          />
+        </div>
+        {rememberMe && (
+          <label className="flex items-center gap-2 text-xs text-[#3e3e3c] w-full mb-4">
+            <input type="checkbox" disabled defaultChecked className="disabled:cursor-not-allowed" />
+            Remember me
+          </label>
+        )}
+        <button
+          type="button"
+          disabled
+          style={{ backgroundColor: accent }}
+          className="w-full text-white text-sm font-medium rounded px-4 py-2 mb-3 disabled:opacity-100 cursor-not-allowed"
+        >
+          {buttonLabel}
+        </button>
+        <a className="text-xs pointer-events-none" style={{ color: accent }}>{footerLink}</a>
+      </div>
+      <span className="lyra-body-xs text-lyra-fg-disabled bg-lyra-bg-surface-container-subtle border border-lyra-border-subtle rounded-full px-2.5 py-1">
+        Mock preview — not a live {appName} session
+      </span>
+    </div>
+  );
+}
+
 // Screen Pop — external apps an agent can pop the current contact/record
 // into. Dummy list; wiring an actual screen-pop integration per app is out
 // of scope for now.
@@ -6678,62 +6756,43 @@ export function AgentNextGenPage({
         onValueChange={setScreenPopApp}
       />
     ),
-    // "Salesforce" is mocked in place, not actually embedded — Salesforce's
-    // real login page (login.salesforce.com) sends clickjack-protection
-    // headers (X-Frame-Options / CSP frame-ancestors) that refuse to render
-    // in a cross-origin iframe, no matter how the embedding page is built.
-    // That protection lives on Salesforce's own login surface and can't be
-    // relaxed from a consumer's side (org-level "allow framing" settings
-    // only apply once already authenticated inside your own Salesforce
-    // domain). So for this prototype we hand-roll a visual mock of the
-    // login screen instead of a real iframe/real auth — clearly labeled as
-    // a mock (bottom badge) and non-functional (button does nothing) so it
-    // can't be mistaken for a genuine login prompt.
+    // "Salesforce"/"Zendesk" are mocked in place, not actually embedded —
+    // see `MockLoginCard`'s own doc comment (near `SCREEN_POP_APPS`) for
+    // why a real iframe of either login page isn't possible.
     body:
       screenPopApp === "salesforce" ? (
-        <div className="overflow-y-auto flex-1 flex flex-col items-center bg-[#f4f6f9] px-4 pt-10 pb-6 gap-4">
-          <div className="w-full max-w-[280px] bg-white rounded-lg shadow-md border border-[#e5e5e5] flex flex-col items-center px-7 py-8">
-            <svg viewBox="0 0 48 30" className="w-24 h-auto mb-5" aria-hidden="true">
+        <MockLoginCard
+          appName="Salesforce"
+          accent="#0176d3"
+          logo={
+            <svg viewBox="0 0 48 30" className="w-24 h-auto mb-4" aria-hidden="true">
               <path
                 fill="#00A1E0"
                 d="M19.5 6.6c1.5-1.6 3.6-2.6 6-2.6 3.1 0 5.8 1.7 7.3 4.3.9-.4 1.9-.6 3-.6 3.9 0 7.1 3.2 7.1 7.1s-3.2 7.1-7.1 7.1c-.5 0-.9 0-1.4-.1-.9 1.6-2.6 2.7-4.5 2.7-.8 0-1.6-.2-2.3-.5-.9 2.1-3 3.6-5.5 3.6-2.6 0-4.8-1.6-5.7-3.9-.4.1-.8.1-1.2.1-3.3 0-6-2.7-6-6 0-2.2 1.2-4.2 3-5.2-.1-.4-.1-.8-.1-1.2 0-3.6 2.9-6.5 6.5-6.5 1.4 0 2.7.4 3.9 1.2"
               />
             </svg>
-            <div className="flex flex-col gap-1 w-full mb-3">
-              <label className="text-xs text-[#3e3e3c]">Username</label>
-              <input
-                type="text"
-                disabled
-                placeholder="username@company.com"
-                className="border border-[#c9c9c9] rounded px-2.5 py-2 text-sm text-[#3e3e3c] placeholder:text-[#aeaeae] bg-white disabled:opacity-100 disabled:cursor-not-allowed focus:outline-none"
-              />
+          }
+        />
+      ) : screenPopApp === "zendesk" ? (
+        <MockLoginCard
+          appName="Zendesk"
+          accent="#03363d"
+          usernameLabel="Email"
+          usernamePlaceholder="you@company.com"
+          buttonLabel="Sign in"
+          footerLink="Forgot my password"
+          logo={
+            <div className="flex flex-col items-center gap-2 mb-5">
+              <svg viewBox="0 0 40 40" className="w-10 h-10" aria-hidden="true">
+                <rect x="4" y="4" width="14" height="14" rx="3" fill="#03363D" />
+                <circle cx="29" cy="11" r="7" fill="#03363D" />
+                <rect x="4" y="22" width="14" height="14" rx="7" fill="#03363D" />
+                <rect x="22" y="22" width="14" height="14" rx="3" fill="#03363D" />
+              </svg>
+              <span className="text-lg font-bold text-[#03363D] tracking-tight lowercase">Zendesk</span>
             </div>
-            <div className="flex flex-col gap-1 w-full mb-3">
-              <label className="text-xs text-[#3e3e3c]">Password</label>
-              <input
-                type="password"
-                disabled
-                placeholder="••••••••"
-                className="border border-[#c9c9c9] rounded px-2.5 py-2 text-sm text-[#3e3e3c] bg-white disabled:opacity-100 disabled:cursor-not-allowed focus:outline-none"
-              />
-            </div>
-            <label className="flex items-center gap-2 text-xs text-[#3e3e3c] w-full mb-4">
-              <input type="checkbox" disabled defaultChecked className="disabled:cursor-not-allowed" />
-              Remember me
-            </label>
-            <button
-              type="button"
-              disabled
-              className="w-full bg-[#0176d3] text-white text-sm font-medium rounded px-4 py-2 mb-3 disabled:opacity-100 cursor-not-allowed"
-            >
-              Log In
-            </button>
-            <a className="text-xs text-[#0176d3] pointer-events-none">Forgot Your Password?</a>
-          </div>
-          <span className="lyra-body-xs text-lyra-fg-disabled bg-lyra-bg-surface-container-subtle border border-lyra-border-subtle rounded-full px-2.5 py-1">
-            Mock preview — not a live Salesforce session
-          </span>
-        </div>
+          }
+        />
       ) : (
         <div className="overflow-y-auto flex-1 flex items-center justify-center p-4">
           <p className="lyra-body-md text-lyra-fg-disabled text-center">Nothing here yet.</p>
