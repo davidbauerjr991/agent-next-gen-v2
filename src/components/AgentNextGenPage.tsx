@@ -6849,7 +6849,12 @@ export function AgentNextGenPage({
                 <CustomerInformationSidePanel
                   open={sidePanelOpen}
                   pinned={effectiveSidePanelPinned}
-                  onClose={isSidePanelContainerNarrow ? undefined : handleSidePanelClose}
+                  // Always shown, even in the narrow-container overlay mode
+                  // — per explicit request, an agent who's opened it as a
+                  // floating overlay still needs a way to close it again
+                  // from inside the panel itself, not just the (now-hidden
+                  // while open) header toggle icon.
+                  onClose={handleSidePanelClose}
                   onMouseEnter={onSidePanelHoverStart}
                   onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
                   customerName={activeInteraction.customerName}
