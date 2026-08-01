@@ -2214,30 +2214,33 @@ function nextCustomerSortDirection(current: SortDirection): SortDirection {
 
 // Proportional `flex-[n]` ratios — same shape as DataManagement.stories.tsx's
 // own `columnConfig` — so the table shrinks/grows to fill exactly whatever
-// width is available. `minWidth` is a per-column readability floor: lyra-ui's
-// `Table` has no CSS min-width of its own (only `resize.totalWidth`, which
-// stays unset until a column is actually drag-resized — see table.tsx), so
-// with only `flex-[n]` every column just keeps shrinking with the
-// container, no floor, until labels/values are truncated to 1-2 characters.
-// This floor is what triggers a real horizontal scrollbar on the `overflow-
-// auto` wrapper below once the container gets narrower than the columns'
-// combined minimums, instead of squishing text unreadably. (Class strings
-// below are written out in full, not built from the numbers via template
-// literals — Tailwind's build only picks up `min-w-[…]` utilities that
-// appear literally in source.)
-const CUSTOMER_COLUMN_CONFIG: Record<CustomerColKey, { label: string; flex: string; minWidth: string }> = {
-  contactNumber: { label: "Contact Number", flex: "flex-1",      minWidth: "min-w-[120px]" },
-  channels:      { label: "Channels",       flex: "flex-1",      minWidth: "min-w-[150px]" },
-  firstName:     { label: "First Name",     flex: "flex-1",      minWidth: "min-w-[100px]" },
-  lastName:      { label: "Last Name",      flex: "flex-1",      minWidth: "min-w-[100px]" },
-  group:         { label: "Group",          flex: "flex-[0.7]",  minWidth: "min-w-[90px]" },
-  firstPhone:    { label: "First Phone",    flex: "flex-[1.2]",  minWidth: "min-w-[140px]" },
-  emailAddress:  { label: "Email Address",  flex: "flex-[1.6]",  minWidth: "min-w-[200px]" },
-  address1:      { label: "Address 1",      flex: "flex-[1.6]",  minWidth: "min-w-[180px]" },
-  city:          { label: "City",           flex: "flex-1",      minWidth: "min-w-[100px]" },
-  state:         { label: "State",          flex: "flex-[0.6]",  minWidth: "min-w-[70px]" },
-  postalCode:    { label: "Postal Code",    flex: "flex-[0.8]",  minWidth: "min-w-[100px]" },
+// width is available. `minWidth`/`minWidthPx` are a per-column readability
+// floor (same px value, once as a Tailwind class for the cell itself, once
+// as a plain number so `CustomersListView` can sum the visible columns and
+// feed the total to `<Table style={{ minWidth }}>` — see the long comment
+// down there for why the *cell-level* class alone isn't enough to get a
+// real horizontal scrollbar here). (Class strings are written out in full,
+// not built from the numbers via template literals — Tailwind's build only
+// picks up `min-w-[…]` utilities that appear literally in source.)
+const CUSTOMER_COLUMN_CONFIG: Record<CustomerColKey, { label: string; flex: string; minWidth: string; minWidthPx: number }> = {
+  contactNumber: { label: "Contact Number", flex: "flex-1",      minWidth: "min-w-[120px]", minWidthPx: 120 },
+  channels:      { label: "Channels",       flex: "flex-1",      minWidth: "min-w-[150px]", minWidthPx: 150 },
+  firstName:     { label: "First Name",     flex: "flex-1",      minWidth: "min-w-[100px]", minWidthPx: 100 },
+  lastName:      { label: "Last Name",      flex: "flex-1",      minWidth: "min-w-[100px]", minWidthPx: 100 },
+  group:         { label: "Group",          flex: "flex-[0.7]",  minWidth: "min-w-[90px]",  minWidthPx: 90 },
+  firstPhone:    { label: "First Phone",    flex: "flex-[1.2]",  minWidth: "min-w-[140px]", minWidthPx: 140 },
+  emailAddress:  { label: "Email Address",  flex: "flex-[1.6]",  minWidth: "min-w-[200px]", minWidthPx: 200 },
+  address1:      { label: "Address 1",      flex: "flex-[1.6]",  minWidth: "min-w-[180px]", minWidthPx: 180 },
+  city:          { label: "City",           flex: "flex-1",      minWidth: "min-w-[100px]", minWidthPx: 100 },
+  state:         { label: "State",          flex: "flex-[0.6]",  minWidth: "min-w-[70px]",  minWidthPx: 70 },
+  postalCode:    { label: "Postal Code",    flex: "flex-[0.8]",  minWidth: "min-w-[100px]", minWidthPx: 100 },
 };
+
+// Fixed-width columns outside `CUSTOMER_COLUMN_CONFIG` — the leading
+// checkbox column and the trailing sticky "Actions" kebab column — added to
+// the visible columns' summed `minWidthPx` below to get the table's true
+// minimum width.
+const CUSTOMER_FIXED_COLUMNS_WIDTH = 40 /* checkbox */ + 48 /* actions */;
 
 const CUSTOMER_ALL_COLUMN_DEFS: { key: string; label: string }[] = Object.entries(CUSTOMER_COLUMN_CONFIG).map(
   ([key, val]) => ({ key, label: val.label })
@@ -2276,6 +2279,28 @@ function CustomersListView() {
     CUSTOMER_ALL_COLUMN_KEYS
   );
   const columnOrder = allColumnOrder.filter((k: CustomerColKey) => visibleCols.has(k));
+
+  // Explicit total min-width for `<Table>`, computed from the currently
+  // *visible* columns' own `minWidthPx` (+ the fixed checkbox/actions
+  // columns) — same technique `resize.totalWidth` uses internally (see
+  // table.tsx's own long comment on `Table`'s `<table>` element): a
+  // concrete pixel `min-width` reliably cascades down through
+  // `thead`/`tbody`/`tr` via top-down `align-items: stretch`, which plain
+  // per-cell `min-w-[…]` classes alone don't — Chrome doesn't reliably
+  // propagate flexbox's "automatic minimum size" back *up* through this
+  // many nested flex levels (table → tbody → tr → td) to make the row's
+  // own box (and therefore its `border-b`/hover background) grow to match.
+  // Without this, the columns individually refuse to shrink below their
+  // `min-w-[…]` floor (so text stays readable and content visibly scrolls
+  // into view), but each row's own painted box stays capped at the
+  // container's original width — exactly the "row separator lines vanish
+  // once scrolled past that boundary" bug reported via screenshot. This
+  // only takes effect before any manual column resize; once a column is
+  // actually dragged, `Table` swaps in `resize.totalWidth` (computed from
+  // real registered widths) in its place.
+  const tableMinWidth =
+    CUSTOMER_FIXED_COLUMNS_WIDTH +
+    columnOrder.reduce((sum: number, key: CustomerColKey) => sum + CUSTOMER_COLUMN_CONFIG[key].minWidthPx, 0);
 
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const allSelected = selectedRows.size === filtered.length && filtered.length > 0;
@@ -2361,7 +2386,7 @@ function CustomersListView() {
       />
 
       <div className="flex-1 min-h-0 overflow-auto px-6">
-        <Table>
+        <Table style={{ minWidth: tableMinWidth }}>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-[40px] shrink-0">
