@@ -56,6 +56,10 @@ import {
   TabList,
   Tab,
   ChannelTab,
+  // Aliased — this file already declares its own local `CHANNEL_TYPE_META`
+  // (an unrelated inbound/outbound contact-history breakdown, see below)
+  // and this import would otherwise collide with it.
+  CHANNEL_TYPE_META as CHANNEL_ICON_META,
   Popover,
   Menu,
   WarningIconSolid,
@@ -91,7 +95,7 @@ import {
   type MenuEntry,
 } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_AGENTS } from "@nicecxone/lyra-ui/agents-data";
-import { CREATE_NEW_CUSTOMERS } from "@nicecxone/lyra-ui/customers-data";
+import { CREATE_NEW_CUSTOMERS, type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
 import appIcon from "@/assets/app-icon.svg";
 import {
   Home,
@@ -2101,9 +2105,15 @@ function ContactHistoryCard({
 /* ── CustomersListView ──
    Contacts list view populating the Dashboard tab row's "Customers" tab
    (`activeDeskTab === "customers"`, see the render branch below). Row
-   data (field names/values) is transcribed from a reference screenshot
-   of a real NICE CXone test-org Contacts list view; the columns below
-   (`CUSTOMER_COLUMN_CONFIG`) keep those same field labels.
+   data now comes from lyra-ui's own shared `CREATE_NEW_CUSTOMERS` fixture
+   (`@nicecxone/lyra-ui/customers-data`, already imported above for the
+   Outbound picker) instead of a hand-transcribed screenshot table, so
+   this list view can't drift out of sync with lyra-ui's "customer
+   database" — see create-new-customers-data.ts, which now carries
+   firstName/lastName/group/firstPhone/emailAddress/address1/city/state/
+   postalCode fields (added alongside its pre-existing id/name/customerId/
+   channels/avatarClassName) specifically so this table has real columns
+   to render.
 
    The UI itself is a direct, trimmed port of lyra-ui's own "Data
    Management" template (DataManagement.stories.tsx's
@@ -2121,6 +2131,12 @@ function ContactHistoryCard({
 
 interface CustomerListRecord {
   contactNumber: string;
+  /** Which channels this customer can be reached on — same field lyra-ui's
+   *  Outbound picker already uses for its own per-row hover flyout (see
+   *  create-new-customers-data.ts). Rendered here as hover-reveal
+   *  `ActionIconButton`s instead of a Menu flyout — see
+   *  `CustomerChannelCell` below. */
+  channels: ChannelType[];
   firstName: string;
   lastName: string;
   group: string;
@@ -2132,21 +2148,63 @@ interface CustomerListRecord {
   postalCode: string;
 }
 
-const CUSTOMER_LIST_RECORDS: CustomerListRecord[] = [
-  { contactNumber: "hMayer37",    firstName: "Hannah",   lastName: "Mayer",     group: "", firstPhone: "(716) 331-4661", emailAddress: "Teresa.Harrington@gmail.com",  address1: "",                      city: "",              state: "", postalCode: "" },
-  { contactNumber: "dBauer79",    firstName: "Davy",     lastName: "Bauer",     group: "", firstPhone: "(614) 749-1794", emailAddress: "david.bauer@nice.com",         address1: "184 Clinton Heights Ave", city: "Columbus",      state: "OH", postalCode: "43215" },
-  { contactNumber: "aSmith90",    firstName: "Annie",    lastName: "Smith",     group: "", firstPhone: "(415) 791-3275", emailAddress: "juliana.arias@nice.com",       address1: "201 Spear St",           city: "San Francisco", state: "CA", postalCode: "94105" },
-  { contactNumber: "jShepard59",  firstName: "Jackie",   lastName: "Shepard",   group: "", firstPhone: "(801) 455-5169", emailAddress: "",                             address1: "",                      city: "",              state: "", postalCode: "" },
-  { contactNumber: "6072818957",  firstName: "josh",     lastName: "robertson", group: "", firstPhone: "(415) 671-6000", emailAddress: "devera.e@gmail.com",           address1: "",                      city: "",              state: "", postalCode: "" },
-  { contactNumber: "55222",       firstName: "Milena",   lastName: "Restrepo",  group: "", firstPhone: "(208) 557-4431", emailAddress: "smrestrepoguerrero@gmail.com", address1: "",                      city: "",              state: "", postalCode: "" },
-  { contactNumber: "gBorneman30", firstName: "Greg",     lastName: "Borneman",  group: "", firstPhone: "(770) 614-4280", emailAddress: "gborneman@gmail.com",          address1: "2412 Sandell Dr",       city: "Dunwoody",      state: "GA", postalCode: "30338" },
-  { contactNumber: "JJR_11",      firstName: "carey",    lastName: "diane",     group: "", firstPhone: "(607) 743-3206", emailAddress: "",                             address1: "",                      city: "",              state: "", postalCode: "" },
-  { contactNumber: "sSwargam92",  firstName: "SRINIVAS", lastName: "SWARGAM",   group: "", firstPhone: "(943) 777-4221", emailAddress: "swargamsri@gmail.com",         address1: "",                      city: "",              state: "", postalCode: "" },
-  { contactNumber: "lHowlett25",  firstName: "Logan",    lastName: "Howlett",   group: "", firstPhone: "(408) 839-0384", emailAddress: "erwin.devera@gmail.com",       address1: "123 Main St",           city: "Campbell",      state: "CA", postalCode: "95008" },
-  { contactNumber: "eDeVera50",   firstName: "Erwin",    lastName: "de Vera",   group: "", firstPhone: "(408) 839-0384", emailAddress: "erwin.devera@gmail.com",       address1: "",                      city: "",              state: "", postalCode: "" },
-];
+// Mapped 1:1 from lyra-ui's `CREATE_NEW_CUSTOMERS` — `customerId` (e.g.
+// "CST-10000") becomes this table's "Contact Number" column, everything
+// else is a passthrough of the matching field already on that record.
+const CUSTOMER_LIST_RECORDS: CustomerListRecord[] = CREATE_NEW_CUSTOMERS.map((c: CreateNewCustomerRecord) => ({
+  contactNumber: c.customerId,
+  channels: c.channels,
+  firstName: c.firstName,
+  lastName: c.lastName,
+  group: c.group,
+  firstPhone: c.firstPhone,
+  emailAddress: c.emailAddress,
+  address1: c.address1,
+  city: c.city,
+  state: c.state,
+  postalCode: c.postalCode,
+}));
 
 type CustomerColKey = keyof CustomerListRecord;
+
+// Fixed left-to-right channel order the hover flyout renders in — only
+// channels the row's own `channels` array actually includes are shown
+// ("only supported channels show", same rule as the Outbound picker).
+const CUSTOMER_CHANNEL_ORDER: ChannelType[] = ["voice", "sms", "email", "whatsapp"];
+
+/** Hover-reveal `ActionIconButton`s for a row's supported channels — reuses
+ *  lyra-ui's own `CHANNEL_TYPE_META` icon/label map (channel-row.tsx) so
+ *  the icon-per-channel choice stays identical to every other channel
+ *  picker in the app, rather than redeclaring Phone/Mail/MessageSquare/
+ *  WhatsAppIcon here. Fades in on row hover/focus-within, matching the
+ *  Copy/Add-tag hover-toolbar convention used on conversation bubbles
+ *  elsewhere in this file (`pointer-events-none opacity-0` →
+ *  `group-hover:`/`group-focus-within:` reveal); the row itself needs
+ *  `className="group"` for this to fire (added on `TableRow` below). */
+function CustomerChannelCell({ channels }: { channels: ChannelType[] }) {
+  const available = CUSTOMER_CHANNEL_ORDER.filter((c) => channels.includes(c));
+  if (available.length === 0) {
+    return <span className="lyra-body-sm text-lyra-fg-disabled">—</span>;
+  }
+  return (
+    <div className="flex items-center gap-1">
+      {available.map((c) => {
+        const meta = CHANNEL_ICON_META[c];
+        return (
+          <ActionIconButton
+            key={c}
+            size="sm"
+            title={meta.label}
+            onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.stopPropagation()}
+            className="pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+          >
+            {meta.icon}
+          </ActionIconButton>
+        );
+      })}
+    </div>
+  );
+}
 
 function nextCustomerSortDirection(current: SortDirection): SortDirection {
   if (current === null) return "asc";
@@ -2160,6 +2218,7 @@ function nextCustomerSortDirection(current: SortDirection): SortDirection {
 // demanding a wide floor no container here needs to accommodate.
 const CUSTOMER_COLUMN_CONFIG: Record<CustomerColKey, { label: string; flex: string }> = {
   contactNumber: { label: "Contact Number", flex: "flex-1" },
+  channels:      { label: "Channels",       flex: "flex-1" },
   firstName:     { label: "First Name",     flex: "flex-1" },
   lastName:      { label: "Last Name",      flex: "flex-1" },
   group:         { label: "Group",          flex: "flex-[0.7]" },
@@ -2328,7 +2387,11 @@ function CustomersListView() {
           </TableHeader>
           <TableBody>
             {pageRows.map((row) => (
-              <TableRow key={row.contactNumber} data-state={selectedRows.has(row.contactNumber) ? "selected" : undefined}>
+              <TableRow
+                key={row.contactNumber}
+                className="group"
+                data-state={selectedRows.has(row.contactNumber) ? "selected" : undefined}
+              >
                 <TableCell className="w-[40px] shrink-0">
                   <Checkbox
                     checked={selectedRows.has(row.contactNumber)}
@@ -2337,7 +2400,9 @@ function CustomersListView() {
                   />
                 </TableCell>
                 {columnOrder.map((key: CustomerColKey) => (
-                  <TableCell key={key} columnKey={key} className={CUSTOMER_COLUMN_CONFIG[key].flex}>{row[key]}</TableCell>
+                  <TableCell key={key} columnKey={key} className={CUSTOMER_COLUMN_CONFIG[key].flex}>
+                    {key === "channels" ? <CustomerChannelCell channels={row.channels} /> : row[key]}
+                  </TableCell>
                 ))}
                 <TableCell className="w-[48px] shrink-0 sticky right-0 bg-lyra-bg-surface-base">
                   <button
