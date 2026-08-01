@@ -2951,32 +2951,13 @@ function TranscriptSessionSeparator({
     >
       <AccordionPrimitive.Item value={session.id}>
         <div className="flex items-center gap-3 py-2">
-          <div className="h-px flex-1 bg-lyra-border-subtle" />
-          {/* The whole pill hovers as one unit — background change on
-              hover anywhere inside it (status tag, "# caseId · date", or
-              the empty space between them) — even though it routes clicks
-              to two different actions underneath (the status `Tag` opens
-              the status popover; everything else toggles Session Details).
-              Plain `hover:bg-*` directly on this wrapping div, no `group`
-              needed: the pointer is still over THIS div's box whenever it's
-              over either inner `Button`, since they're descendants of it,
-              so a bare `:hover` here already covers both without any
-              JS/group-hover wiring. The two inner `Button`s below get their
-              own default `ghost`-variant hover suppressed
-              (`hover:bg-transparent active:bg-transparent`) so only this
-              one background ever shows — otherwise a `Button`'s own hover
-              would additionally darken just the sub-region under the
-              cursor on top of this div's already-changed background,
-              reading as two overlapping, slightly different-toned patches
-              instead of one clean pill-wide hover. Gated on `!isClosed`:
-              nothing here is clickable anymore once locked (see
-              `isClosed`), so a hover reaction would be misleading. */}
-          <div
-            className={cn(
-              "shrink-0 flex items-center gap-1.5 rounded-full border border-lyra-border-subtle pl-1.5 pr-3 py-1.5 lyra-body-sm text-lyra-fg-secondary transition-colors",
-              !isClosed && "hover:bg-lyra-state-hover"
-            )}
-          >
+          {/* Flat, left-aligned status/case info — no wrapping pill
+              border/background and no flanking divider lines (per design
+              update matching the reference screenshot): plain inline
+              content with "|" separators between the status tag, message
+              count, and "# caseId · date" instead of a bordered pill
+              centered between two hr lines. */}
+          <div className="shrink-0 flex items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
             <Popover
               open={statusMenuOpen}
               onOpenChange={onStatusMenuOpenChange}
@@ -3089,6 +3070,7 @@ function TranscriptSessionSeparator({
                 />
               </Button>
             </Popover>
+            <span aria-hidden="true">|</span>
             {/* "# caseId · date" + the expand/collapse chevron — only for a
                 session that isn't Closed. A Closed session's Session
                 Details can't be toggled anymore (same "locked" reasoning as
@@ -3145,12 +3127,11 @@ function TranscriptSessionSeparator({
               </Tooltip>
             )}
           </div>
-          <div className="h-px flex-1 bg-lyra-border-subtle" />
           {/* Consult/Transfer + Outcome — same real buttons/icons
               `ChannelRow`'s own trailing cluster uses (channel-row.tsx),
-              floated to this row's far right (`ml-auto` on the outer flex
-              row already pushes the two divider lines apart, so this just
-              needs to sit after the second one) per explicit request.
+              floated to this row's far right via `ml-auto` directly on
+              this cluster now that the two divider lines are gone (flat
+              layout per design update) per explicit request.
               Consult/Transfer has no real action anywhere in this app yet
               (see rule #30) — same static, unwired icon button here.
               Outcome IS real when `outcome` is passed (the current
@@ -3159,7 +3140,7 @@ function TranscriptSessionSeparator({
               reusing its shared `outcomeDraftKey`/`outcomeDraft` state one
               level up so opening it here or from the LeftNav card shows
               the identical draft. */}
-          <div className="shrink-0 flex items-center gap-0">
+          <div className="shrink-0 flex items-center gap-0 ml-auto">
             <Button variant="icon" size="icon-sm" title="Consult / Transfer" className="text-lyra-fg-secondary">
               <TransferIcon />
             </Button>
