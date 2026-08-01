@@ -6678,11 +6678,67 @@ export function AgentNextGenPage({
         onValueChange={setScreenPopApp}
       />
     ),
-    body: (
-      <div className="overflow-y-auto flex-1 flex items-center justify-center p-4">
-        <p className="lyra-body-md text-lyra-fg-disabled text-center">Nothing here yet.</p>
-      </div>
-    ),
+    // "Salesforce" is mocked in place, not actually embedded — Salesforce's
+    // real login page (login.salesforce.com) sends clickjack-protection
+    // headers (X-Frame-Options / CSP frame-ancestors) that refuse to render
+    // in a cross-origin iframe, no matter how the embedding page is built.
+    // That protection lives on Salesforce's own login surface and can't be
+    // relaxed from a consumer's side (org-level "allow framing" settings
+    // only apply once already authenticated inside your own Salesforce
+    // domain). So for this prototype we hand-roll a visual mock of the
+    // login screen instead of a real iframe/real auth — clearly labeled as
+    // a mock (bottom badge) and non-functional (button does nothing) so it
+    // can't be mistaken for a genuine login prompt.
+    body:
+      screenPopApp === "salesforce" ? (
+        <div className="overflow-y-auto flex-1 flex flex-col items-center bg-[#f4f6f9] px-4 pt-10 pb-6 gap-4">
+          <div className="w-full max-w-[280px] bg-white rounded-lg shadow-md border border-[#e5e5e5] flex flex-col items-center px-7 py-8">
+            <svg viewBox="0 0 48 30" className="w-24 h-auto mb-5" aria-hidden="true">
+              <path
+                fill="#00A1E0"
+                d="M19.5 6.6c1.5-1.6 3.6-2.6 6-2.6 3.1 0 5.8 1.7 7.3 4.3.9-.4 1.9-.6 3-.6 3.9 0 7.1 3.2 7.1 7.1s-3.2 7.1-7.1 7.1c-.5 0-.9 0-1.4-.1-.9 1.6-2.6 2.7-4.5 2.7-.8 0-1.6-.2-2.3-.5-.9 2.1-3 3.6-5.5 3.6-2.6 0-4.8-1.6-5.7-3.9-.4.1-.8.1-1.2.1-3.3 0-6-2.7-6-6 0-2.2 1.2-4.2 3-5.2-.1-.4-.1-.8-.1-1.2 0-3.6 2.9-6.5 6.5-6.5 1.4 0 2.7.4 3.9 1.2"
+              />
+            </svg>
+            <div className="flex flex-col gap-1 w-full mb-3">
+              <label className="text-xs text-[#3e3e3c]">Username</label>
+              <input
+                type="text"
+                disabled
+                placeholder="username@company.com"
+                className="border border-[#c9c9c9] rounded px-2.5 py-2 text-sm text-[#3e3e3c] placeholder:text-[#aeaeae] bg-white disabled:opacity-100 disabled:cursor-not-allowed focus:outline-none"
+              />
+            </div>
+            <div className="flex flex-col gap-1 w-full mb-3">
+              <label className="text-xs text-[#3e3e3c]">Password</label>
+              <input
+                type="password"
+                disabled
+                placeholder="••••••••"
+                className="border border-[#c9c9c9] rounded px-2.5 py-2 text-sm text-[#3e3e3c] bg-white disabled:opacity-100 disabled:cursor-not-allowed focus:outline-none"
+              />
+            </div>
+            <label className="flex items-center gap-2 text-xs text-[#3e3e3c] w-full mb-4">
+              <input type="checkbox" disabled defaultChecked className="disabled:cursor-not-allowed" />
+              Remember me
+            </label>
+            <button
+              type="button"
+              disabled
+              className="w-full bg-[#0176d3] text-white text-sm font-medium rounded px-4 py-2 mb-3 disabled:opacity-100 cursor-not-allowed"
+            >
+              Log In
+            </button>
+            <a className="text-xs text-[#0176d3] pointer-events-none">Forgot Your Password?</a>
+          </div>
+          <span className="lyra-body-xs text-lyra-fg-disabled bg-lyra-bg-surface-container-subtle border border-lyra-border-subtle rounded-full px-2.5 py-1">
+            Mock preview — not a live Salesforce session
+          </span>
+        </div>
+      ) : (
+        <div className="overflow-y-auto flex-1 flex items-center justify-center p-4">
+          <p className="lyra-body-md text-lyra-fg-disabled text-center">Nothing here yet.</p>
+        </div>
+      ),
   };
   // Search — same blank body as Agent Chat/Schedule, plus a
   // `SearchInput` in `headerContent` (same "fixed above the divider"
