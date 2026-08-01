@@ -7190,22 +7190,21 @@ export function AgentNextGenPage({
       onResizeStateChange={setPanelIsResizing}
       className={cn(
         "rounded-lyra-lg border border-lyra-border-subtle",
-        // Floating (undocked) gets a 90%-opacity background (scaled back
-        // 10% from fully opaque) per explicit request — plain
-        // `bg-lyra-bg-surface-base/90` can't work here since Tailwind can't
-        // generate opacity-modified utilities for our `var(--lyra-color-*)`
-        // tokens (same root cause as the Modal backdrop's own `color-mix()`
-        // override, overlay.tsx/AgentNextGenPage.tsx doc comments), so
-        // `color-mix()` directly against the same
-        // `--lyra-color-bg-surface-base` variable the plain utility itself
-        // resolves to (tailwind-preset.ts) is used instead. Docked keeps
-        // the normal fully-opaque background. `backdrop-blur-sm` (4px) —
-        // "blur the background slightly" — softens whatever shows through
-        // that 10% transparency, same pairing the Modal backdrop's own
-        // color-mix()-plus-backdrop-blur-sm treatment already uses
-        // (entry-agent-next-gen-v2.tsx).
+        // Floating (undocked/dragged) gets an 0.8 (80%) opacity background
+        // per explicit request — plain `bg-lyra-bg-surface-base/80` can't
+        // work here since Tailwind can't generate opacity-modified
+        // utilities for our `var(--lyra-color-*)` tokens (same root cause
+        // as the Modal backdrop's own `color-mix()` override, overlay.tsx/
+        // AgentNextGenPage.tsx doc comments), so `color-mix()` directly
+        // against the same `--lyra-color-bg-surface-base` variable the
+        // plain utility itself resolves to (tailwind-preset.ts) is used
+        // instead. Docked keeps the normal fully-opaque background.
+        // `backdrop-blur-sm` (4px) — "blur the background slightly" —
+        // softens whatever shows through that 20% transparency, same
+        // pairing the Modal backdrop's own color-mix()-plus-backdrop-blur-sm
+        // treatment already uses (entry-agent-next-gen-v2.tsx).
         panelVariant === "float"
-          ? "shadow-lg backdrop-blur-sm bg-[color-mix(in_srgb,var(--lyra-color-bg-surface-base)_90%,transparent)]"
+          ? "shadow-lg backdrop-blur-sm bg-[color-mix(in_srgb,var(--lyra-color-bg-surface-base)_80%,transparent)]"
           : "h-full bg-lyra-bg-surface-base"
       )}
       renderHeaderControls={({ gripProps, dockButtonProps, dockIcon, variant: dVariant }) => (
