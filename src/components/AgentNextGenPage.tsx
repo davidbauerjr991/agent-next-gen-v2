@@ -5782,17 +5782,17 @@ export function AgentNextGenPage({
   // row in this menu, which opens the shared panel exactly like the header
   // icon would.
   // Default pinned set — header shows (right to left) Notifications,
-  // Schedule, Agent Chat, Search; Customers/Accounts/Tickets/WEM/Screen
-  // Pop start unpinned. Customers/Accounts/Tickets/WEM are also filtered
-  // out of the "View All Apps" menu itself (see `HIDDEN_FROM_APPS_MENU`
-  // below), so unpinning Customers here — per explicit follow-up request —
-  // makes it fully unreachable from the app header, same as the other
-  // three; Screen Pop stays reachable via that menu since it isn't in
-  // `HIDDEN_FROM_APPS_MENU`.
+  // Agent Chat, Search; Schedule/Customers/Accounts/Tickets/WEM/Screen Pop
+  // start unpinned. Customers/Accounts/Tickets/WEM are also filtered out
+  // of the "View All Apps" menu itself (see `HIDDEN_FROM_APPS_MENU`
+  // below), making them fully unreachable from the app header; Schedule
+  // and Screen Pop aren't in that list, so unpinning them (Schedule per
+  // this follow-up request) just hides their header icon — both stay
+  // reachable via "View All Apps".
   const [pinnedKeys, setPinnedKeys] = useState<Record<PanelKey, boolean>>({
     notif: true,
     conversations: true,
-    schedule: true,
+    schedule: false,
     screenpop: false,
     customers: false,
     accounts: false,
