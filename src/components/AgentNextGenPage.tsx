@@ -2238,7 +2238,19 @@ function CustomersListView() {
       />
 
       <div className="flex-1 min-h-0 overflow-auto px-6">
-        <Table>
+        {/* `Table`'s own `<table>` element deliberately ships with no
+            width/min-width class (see table.tsx's own long comment on
+            that element) — it only gets an explicit width once a column
+            has actually been resized (`resize.totalWidth`, seeded by a
+            live drag). With no `resizable` columns here, that never
+            happens, so the table would otherwise size to its own content
+            and leave a gap short of the container's right edge instead
+            of filling it. `w-full` sidesteps that safely for THIS
+            table specifically — the conflict that comment warns about
+            (an explicit width class fighting a resize-in-progress) only
+            applies to tables that support column resize, which this one
+            doesn't. */}
+        <Table className="w-full">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               {visibleColumns.map((col) => (
