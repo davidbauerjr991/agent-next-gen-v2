@@ -4722,7 +4722,7 @@ function CustomerInformationSidePanel({
 }: {
   open: boolean;
   pinned: boolean;
-  /** Closes the panel (unpins + hides) — rendered as a `PanelLeftClose`-
+  /** Hides the panel WITHOUT unpinning it — rendered as a `PanelLeftClose`-
    *  iconed `PanelPinButton` in the header via `headerActions` below, NOT
    *  `SidePanel`'s own built-in pin button (that one has no way to
    *  override its default `Pin` icon, and this is a real close action now,
@@ -5249,12 +5249,12 @@ export function AgentNextGenPage({
   };
   // Fired by the panel's own header button (a `PanelPinButton` wearing a
   // `PanelLeftClose` icon instead of the default `Pin` glyph, per explicit
-  // request) — closes the panel outright rather than just unpinning it, to
-  // match what a "close" icon implies: unpins AND hides it, instead of the
-  // old pin-toggle behavior that kept it open (hover-controlled) after
-  // unpinning.
+  // request) — just hides the panel, per explicit follow-up request;
+  // leaves `sidePanelPinned` untouched (still pinned if it was), so the
+  // person-icon toggle in the record header (`handleSidePanelIconToggle`)
+  // still reopens it in the same pinned state rather than this having
+  // quietly unpinned it first.
   const handleSidePanelClose = () => {
-    setSidePanelPinned(false);
     setSidePanelOpen(false);
   };
   // Click on the header's toggle icon — toggles open/closed only while
