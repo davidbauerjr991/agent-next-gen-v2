@@ -7163,25 +7163,38 @@ export function AgentNextGenPage({
   // the Customer Information panel's header shape (title/icon/actions via
   // `ContainerHeader`, using the same `activePanelContent` the docked/float
   // rendering above uses) plus a `Minimize2` "exit full screen" action.
-  // `absolute inset-0` — positioned against `containerRef`'s own div (see
-  // where this is rendered, below), which is already `relative` and is
-  // exactly the "main content container" (everything right of LeftNav,
-  // below AppHeader) this should fill; NOT `fixed inset-0`/the viewport,
-  // which would also cover LeftNav and AppHeader. `z-[9]` sits above the
-  // Customer Information panel's `z-[5]` but deliberately BELOW LeftNav's
-  // own collapse/expand toggle button (`z-10`, left-nav.tsx) — that button
-  // is positioned `absolute -right-3` (poking ~12px past LeftNav's own
-  // right edge, i.e. spatially into `containerRef`'s territory), and
-  // `containerRef` itself doesn't establish its own stacking context (no
-  // z-index of its own), so a descendant's z-index here competes directly
-  // against LeftNav's sibling-level z-10, not just against other things
-  // inside `containerRef` — going any higher (e.g. the `z-[50]` this used
-  // originally) paints over/hides that toggle button, per explicit
-  // follow-up request to keep it clickable/visible instead. Doesn't need
-  // to compete with the app-header's own menus (`z-[9999]`) — those live
-  // in a different row entirely (above `containerRef`, not inside it).
+  // Positioned against `containerRef`'s own div (see where this is
+  // rendered, below), which is already `relative` and is exactly the "main
+  // content container" (everything right of LeftNav, below AppHeader) this
+  // should fill; NOT `fixed`/the viewport, which would also cover LeftNav
+  // and AppHeader. Deliberately NOT a plain `inset-0`, either — the
+  // containing block for an absolutely positioned element is its
+  // ancestor's PADDING box, so `right-0`/`bottom-0` would land flush with
+  // containerRef's true outer edge, swallowing its own `pr-3 pb-3` (the
+  // same gap the normal docked panel gets via its wrapper's `marginRight:
+  // 12`/`pb-3`). Using `right-3 bottom-3` instead (matching `pr-3`/`pb-3`'s
+  // 12px) reproduces that same gap so the fullscreen panel lines up with
+  // where the docked panel's own right/bottom edges would sit — flush only
+  // on top/left, matching the docked panel's own flush-top/flush-left
+  // look. `rounded-lyra-lg border ... overflow-hidden` also matches
+  // `sharedPanel`'s own docked-variant styling (and `Draggable`'s own
+  // docked-branch wrapper, which always applies `overflow-hidden` — see
+  // draggable.tsx) rather than the previous full-bleed/borderless look.
+  // `z-[9]` sits above the Customer Information panel's `z-[5]` but
+  // deliberately BELOW LeftNav's own collapse/expand toggle button
+  // (`z-10`, left-nav.tsx) — that button is positioned `absolute -right-3`
+  // (poking ~12px past LeftNav's own right edge, i.e. spatially into
+  // `containerRef`'s territory), and `containerRef` itself doesn't
+  // establish its own stacking context (no z-index of its own), so a
+  // descendant's z-index here competes directly against LeftNav's
+  // sibling-level z-10, not just against other things inside `containerRef`
+  // — going any higher (e.g. the `z-[50]` this used originally) paints
+  // over/hides that toggle button, per explicit follow-up request to keep
+  // it clickable/visible instead. Doesn't need to compete with the
+  // app-header's own menus (`z-[9999]`) — those live in a different row
+  // entirely (above `containerRef`, not inside it).
   const sharedPanelFullScreenOverlay = panelMounted && activePanelContent && panelFullScreen ? (
-    <div className="absolute inset-0 z-[9] flex flex-col bg-lyra-bg-surface-base">
+    <div className="absolute top-0 left-0 right-3 bottom-3 z-[9] flex flex-col rounded-lyra-lg border border-lyra-border-subtle bg-lyra-bg-surface-base overflow-hidden">
       <ContainerHeader
         title={activePanelContent.title}
         titleBadge={activePanelContent.titleBadge}
