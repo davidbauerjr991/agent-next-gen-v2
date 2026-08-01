@@ -6982,7 +6982,13 @@ export function AgentNextGenPage({
                             <ChannelTab
                               key={key}
                               type={c.type}
-                              address={c.addressLabel}
+                              // No `address` — per explicit request, the
+                              // channel tabs show just the type label
+                              // ("SMS"/"Email"/"Webchat"), not the phone
+                              // number/email/handle next to it. `ChannelTab`
+                              // folds its tab-face text and tooltip content
+                              // into this one prop, so omitting it drops the
+                              // address from both, not just the tab face.
                               messageCount={c.messageCount}
                               interactionId={c.interactionId}
                               active={!customerHistoryTabActive && (activeInteraction.currentChannelId ?? activeInteraction.channels[activeInteraction.channels.length - 1]?.id) === key}
