@@ -5272,11 +5272,10 @@ export function AgentNextGenPage({
   /* ── Launching interactions from CreateNew ──
      Overrides OUTBOUND_CONFIG's default onStartCall/onQuickDial (which just
      console.log) so this page actually surfaces what gets launched as
-     InteractionNavItem cards in the left nav. Each handler below also
-     expands the nav (`setNavOpen(true)`) — a collapsed rail would otherwise
-     hide the card it just launched/updated from view entirely, so starting
-     a call always surfaces it regardless of whether the nav happened to be
-     collapsed at the time. */
+     InteractionNavItem cards in the left nav. Used to also force the nav
+     open (`setNavOpen(true)`) whenever a new assignment launched — dropped
+     per explicit request: starting/reopening an assignment no longer
+     expands a collapsed rail on its own. */
   const handleStartCall = (selection: {
     contact: CreateNewOutboundContact;
     channel: ChannelType;
@@ -5348,7 +5347,6 @@ export function AgentNextGenPage({
       });
     });
     setActiveInteractionId(selection.contact.id);
-    setNavOpen(true);
     // Customer Information animates open only for a genuinely NEW
     // interaction (per explicit request) — starting a second interaction
     // with a customer who already has one open leaves the panel exactly as
@@ -5432,7 +5430,6 @@ export function AgentNextGenPage({
       return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id } : interaction));
     });
     setActiveInteractionId(id);
-    setNavOpen(true);
     if (isNewInteraction) setSidePanelOpen(true);
   };
 
@@ -5481,7 +5478,6 @@ export function AgentNextGenPage({
       return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id } : interaction));
     });
     setActiveInteractionId(id);
-    setNavOpen(true);
     if (isNewInteraction) setSidePanelOpen(true);
   };
 
@@ -5555,7 +5551,6 @@ export function AgentNextGenPage({
       );
     });
     setActiveInteractionId(id);
-    setNavOpen(true);
     if (isNewInteraction) setSidePanelOpen(true);
   };
 
@@ -5980,7 +5975,6 @@ export function AgentNextGenPage({
       );
     });
     setActiveInteractionId(id);
-    setNavOpen(true);
     if (isNewInteraction) setSidePanelOpen(true);
     setNotifications((prev) => prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n)));
   };
