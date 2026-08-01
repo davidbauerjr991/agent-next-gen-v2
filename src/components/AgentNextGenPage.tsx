@@ -2215,7 +2215,20 @@ function CustomersListView() {
   const visibleColumns = CUSTOMER_LIST_COLUMNS.filter((c) => visibleCols.has(c.key));
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    // `min-w-0 overflow-hidden` — this is a flex ITEM inside the Desk
+    // body's row container (`<div className="relative flex flex-1
+    // overflow-hidden">`), and flex items default to `min-width: auto`,
+    // meaning they refuse to shrink below their content's own intrinsic
+    // width. The 10-column table's `min-w-[140px]`-per-column floor adds
+    // up to ~1400px of intrinsic width; without `min-w-0` here, THIS
+    // whole column grows to fit that instead of clipping to the space
+    // actually available, dragging the toolbar's top-right actions and
+    // the footer's pagination off-screen along with it (both are
+    // siblings of the table's own scroll wrapper below, so they were
+    // never actually the problem — the outer column's missing width
+    // clamp was). Matches the sibling Dashboard-tab column's own
+    // `min-w-0` a few lines below in this same file.
+    <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
       <TableToolbar
         className="px-6"
         title="Recently Viewed"
