@@ -6935,7 +6935,7 @@ export function AgentNextGenPage({
                     // git history/CONTRIBUTING.md): that one was cramming
                     // the exact same tabs into `PageHeader`'s slim
                     // `titleSuffix` slot, not replacing the header outright.
-                    <div className="flex min-h-[68px] items-center gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6">
+                    <div className="flex min-h-[68px] items-center gap-3 bg-lyra-bg-surface-base px-6">
                       {/* Only shown while the panel itself is closed — once
                           it's open, this same icon would just sit there
                           doing nothing useful next to a panel that's
