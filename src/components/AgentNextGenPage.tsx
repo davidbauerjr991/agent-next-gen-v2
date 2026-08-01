@@ -5637,15 +5637,15 @@ export function AgentNextGenPage({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const isNavNarrow = windowWidth < 1280;
+  const isNavNarrow = windowWidth < 768;
   const isCompactHeader = windowWidth < 760;
 
-  // Auto-collapse the expanded nav when viewport drops below 1280px
+  // Auto-collapse the expanded nav when viewport drops below 768px
   useEffect(() => {
     if (isNavNarrow && navOpen) setNavOpen(false);
   }, [isNavNarrow]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Below 1280px, a DOCKED panel no longer forces itself to float+closed —
+  // Below 768px, a DOCKED panel no longer forces itself to float+closed —
   // it now combines with the main container into a single container with
   // two tabs instead (see `isCombinedPanelMode` below, computed once
   // `activePanelContent` exists further down). Floating panels are
@@ -6498,7 +6498,7 @@ export function AgentNextGenPage({
   };
   const activePanelContent = activePanelKey ? contentByPanelKey[activePanelKey] : null;
 
-  // Below 1280px, a DOCKED (not floating) open panel combines with the main
+  // Below 768px, a DOCKED (not floating) open panel combines with the main
   // container into a single container with two tabs — one for whatever the
   // main view currently is (Settings/an active interaction/Home), one for
   // the panel — instead of sitting docked beside it. `panelOpen` is
@@ -6529,7 +6529,7 @@ export function AgentNextGenPage({
       setPanelOpen(true);
     }
     setActivePanelKey(key);
-    // Below 1280px, opening a panel switches straight to its tab — otherwise
+    // Below 768px, opening a panel switches straight to its tab — otherwise
     // clicking a header icon while narrow would silently open the panel
     // behind whatever the main tab currently shows, with no visible change.
     if (isNavNarrow) setNarrowActiveRegion("panel");
@@ -7213,7 +7213,7 @@ export function AgentNextGenPage({
               )}
               <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
 
-                {/* Below 1280px with a docked panel open: a second tab
+                {/* Below 768px with a docked panel open: a second tab
                     (`activePanelContent.title`, e.g. "Notifications") sits
                     alongside this main region's own tab, and this whole
                     container becomes the shared surface both regions toggle
@@ -7775,7 +7775,7 @@ export function AgentNextGenPage({
             so flex layout keeps it in-bounds). Was five near-identical
             blocks (one per panel); with only one physical container now,
             there's only one. Skipped in `isCombinedPanelMode` — below
-            1280px the panel's content renders inline as the main
+            768px the panel's content renders inline as the main
             container's second tab instead (see above), not as this
             separate docked-width column beside it. */}
         {panelVariant === "docked" && !isCombinedPanelMode && (
