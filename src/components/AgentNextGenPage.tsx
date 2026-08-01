@@ -7006,12 +7006,22 @@ export function AgentNextGenPage({
                         })}
                       </TabList>
                       {/* Same Add Channel control every `InteractionNavItem`
-                          card already has (`getHeaderAction`) — a plain
-                          trailing icon button now, sitting after the tab
-                          row instead of embedded inside `ChannelToggleGroup`'s
-                          own bordered shell (there's no such shell here to
-                          embed it in anymore). */}
-                      {getHeaderAction(activeInteraction.id)}
+                          card already has (`getHeaderAction`) — sitting
+                          after the tab row instead of embedded inside
+                          `ChannelToggleGroup`'s own bordered shell (there's
+                          no such shell here to embed it in anymore). Sized
+                          up to a medium outline icon button (`Button`'s own
+                          `variant="outline"`/`size="icon-md"` tokens: h-8
+                          w-8, bordered, `bg-lyra-bg-control`) via the
+                          className override `getHeaderAction` exposes for
+                          exactly this — `OutboundAddButton`'s own default is
+                          a small (h-6 w-6) borderless ghost icon, meant for
+                          the tight space inside an `InteractionNavItem`
+                          card row, not a standalone header action. */}
+                      {getHeaderAction(
+                        activeInteraction.id,
+                        "h-8 w-8 border border-lyra-border-default bg-lyra-bg-control text-lyra-fg-action"
+                      )}
                     </div>
                   )}
                   {/* Body row: transcript+composer column. Customer
