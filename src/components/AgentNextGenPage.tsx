@@ -5343,6 +5343,44 @@ export function AgentNextGenPage({
     setCustomerPanelExitFullScreenSignal((n) => n + 1);
   };
 
+  // App-local only (per "changes to components should only happen locally
+  // unless specified") — lyra-ui's shared `CreateNew` intentionally keeps
+  // focus on its own trigger button on a normal click-to-open (see that
+  // component's own doc comment on `openedViaLaunchRequestRef`), which is
+  // the right default for every other app using it. Rather than changing
+  // that shared behavior (or adding an opt-in prop to the library, or even
+  // wrapping `<CreateNew>` in an extra element — `LeftNav`'s `injectExpanded`
+  // clones `pinnedHeader`'s own DIRECT child to push in the hover-driven
+  // `expanded` prop in overlay/narrow-nav mode, so a wrapper div here would
+  // silently break that and leave the trigger stuck at whatever `expanded`
+  // value this file passes instead of expanding on hover), this listens
+  // for the trigger's own click at the document level instead, matched by
+  // its stable `aria-label` (`title`, i.e. "New Outbound") — no JSX
+  // wrapper, `CreateNew` stays `pinnedHeader`'s sole direct child. Once the
+  // popover's open transition has settled, it finds the outbound search
+  // field by its placeholder (`OUTBOUND_CONFIG.searchPlaceholder`, defined
+  // below) and focuses it directly. A closing click just fails the query
+  // harmlessly (nothing to focus once the content's unmounted).
+  useEffect(() => {
+    const CREATE_NEW_TRIGGER_LABEL = "New Outbound";
+    const onDocumentClick = (e: MouseEvent) => {
+      const trigger = (e.target as HTMLElement).closest?.(
+        `button[aria-label="${CREATE_NEW_TRIGGER_LABEL}"]`
+      );
+      if (!trigger) return;
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          const input = document.querySelector<HTMLInputElement>(
+            `input[placeholder="${OUTBOUND_CONFIG.searchPlaceholder}"]`
+          );
+          input?.focus();
+        }, 50);
+      });
+    };
+    document.addEventListener("click", onDocumentClick);
+    return () => document.removeEventListener("click", onDocumentClick);
+  }, []);
+
   const handleQuickDial = (phoneNumber: string) => {
     // No contact record for a quick-dialed number — key the card off the
     // number itself so redialing the same number restarts its card rather
