@@ -5981,6 +5981,11 @@ export function AgentNextGenPage({
 
   const MAX_PANEL_HEIGHT = 860;
   const BOTTOM_PADDING   = 8;
+  // Matches `Draggable`'s own default `maxWidth` (draggable.tsx) — made
+  // explicit here (and passed as an explicit prop below) rather than left
+  // as an implicit default, since `handleFullScreenToDragMode` below also
+  // needs this exact value to size the panel at its true maximum.
+  const SHARED_PANEL_MAX_WIDTH = 1024;
 
   const computePanelHeight = () => {
     if (!containerRef.current) return MAX_PANEL_HEIGHT;
@@ -6630,6 +6635,32 @@ export function AgentNextGenPage({
     setPanelVariant(v);
   };
 
+  // The fullscreen overlay's own "drag mode" toggle (see
+  // `sharedPanelFullScreenOverlay` below) — fullscreen bypasses `Draggable`
+  // entirely, so it never receives `Draggable`'s own built-in dock button;
+  // this is the equivalent action for getting from fullscreen straight into
+  // float, at its MAXIMUM size (`SHARED_PANEL_MAX_WIDTH`/`computePanelHeight()`
+  // — already "as tall as the viewport allows, capped at `MAX_PANEL_HEIGHT`")
+  // rather than resuming whatever size the panel happened to be before
+  // entering fullscreen, per explicit request. Safe to just set
+  // `panelWidth`/`panelHeight` directly (unlike a live prop update to an
+  // already-mounted `Draggable`, which wouldn't actually resize it — see
+  // `SHARED_PANEL_MAX_WIDTH`'s own doc comment on `Draggable` never
+  // resyncing its internal `width` from `defaultWidth` after mount): the
+  // docked/float wrapper blocks below are both gated on `!panelFullScreen`,
+  // so `Draggable` is always fully unmounted while fullscreen is active —
+  // switching out of it always mounts a FRESH instance, which reads these
+  // as its own `defaultWidth`/`defaultHeight` at that fresh mount. Toggling
+  // back out of float from here works exactly like any other float panel —
+  // `Draggable`'s own built-in dock button re-docks it to the side, same as
+  // always (`handlePanelVariantChange`, above).
+  const handleFullScreenToDragMode = () => {
+    setPanelWidth(SHARED_PANEL_MAX_WIDTH);
+    setPanelHeight(computePanelHeight());
+    setPanelFullScreen(false);
+    setPanelVariant("float");
+  };
+
   // Float position — absolute viewport coordinates, anchored via
   // `panelFloatLeft`/`panelFloatTop` once set. No more per-panel z-index
   // "bring to front" competition (`topPanel`) — there's only ever one
@@ -7115,6 +7146,7 @@ export function AgentNextGenPage({
       defaultWidth={panelWidth}
       defaultHeight={panelHeight}
       minWidth={280}
+      maxWidth={SHARED_PANEL_MAX_WIDTH}
       minHeight={400}
       onVariantChange={handlePanelVariantChange}
       onWidthChange={setPanelWidth}
@@ -7228,6 +7260,23 @@ export function AgentNextGenPage({
                 className="text-lyra-fg-secondary hover:text-lyra-fg-secondary"
               >
                 <Minimize2 className="h-3.5 w-3.5" strokeWidth={1.5} />
+              </ActionIconButton>
+            </Tooltip>
+            {/* "Drag mode" — see `handleFullScreenToDragMode`'s own doc
+                comment for why this (not `Draggable`'s own dock button,
+                which isn't mounted while fullscreen) is how fullscreen gets
+                to float. Kept in the same relative position `Draggable`'s
+                own dock button normally occupies (right after the
+                full-screen toggle) so the header's button layout doesn't
+                jump around across the transition. */}
+            <Tooltip content="Undock" placement="bottom" asLabel>
+              <ActionIconButton
+                aria-label="Undock"
+                size="sm"
+                onClick={handleFullScreenToDragMode}
+                className="text-lyra-fg-secondary hover:text-lyra-fg-secondary"
+              >
+                <Move className="h-3.5 w-3.5" strokeWidth={1.5} />
               </ActionIconButton>
             </Tooltip>
           </>
