@@ -4765,11 +4765,16 @@ function CustomerInformationSidePanel({
       // `PanelLeftClose`-iconed `PanelPinButton`, standing in for
       // `SidePanel`'s own default `Pin`-iconed one (suppressed by leaving
       // `onPinToggle` unset above) — same shared atom, just a different
-      // icon/labels/handler, per explicit request.
+      // icon/labels/handler, per explicit request. `pinned` is hardcoded
+      // `false` here (NOT this panel's real `pinned` prop) — per explicit
+      // follow-up request to drop the "currently active" highlighted
+      // background `PanelPinButton` normally shows while pinned (see its
+      // own `icon && pinned` branch): this is a momentary close action, not
+      // a toggle with a persistent on/off state to reflect.
       headerActions={
         onClose && (
           <PanelPinButton
-            pinned={pinned}
+            pinned={false}
             onToggle={onClose}
             icon={<PanelLeftClose className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
             pinnedLabel="Close Customer Information"
