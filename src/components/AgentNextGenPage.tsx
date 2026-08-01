@@ -4908,6 +4908,15 @@ export function AgentNextGenPage({
   const [activeInteractionId, setActiveInteractionId] = useState<string | null>(
     () => initialInteraction?.id ?? null
   );
+  // Whether the record header's own "Customer History" tab (not the
+  // Customer Information toggle icon next to it — a separate, unrelated
+  // control) is the selected tab. A real selection, independent of both the
+  // side panel's open/pinned state and of which channel tab is selected —
+  // mutually exclusive with the channel tabs (see `handleChannelSelect`,
+  // which flips this back off whenever a channel tab is picked instead).
+  // No real content behind it yet (that's separate follow-up work); this
+  // just tracks which tab is showing as active.
+  const [customerHistoryTabActive, setCustomerHistoryTabActive] = useState(false);
   // Drives the main content area: whenever an interaction is active, the
   // Desk dashboard is replaced by that interaction's blank detail page (see
   // the PageHeader "record header" mode below) — starting/quick-dialing/
@@ -5643,6 +5652,9 @@ export function AgentNextGenPage({
         interaction.id === interactionId ? { ...interaction, currentChannelId: channelKey } : interaction
       )
     );
+    // Picking a channel tab always deselects "Customer History" — the two
+    // are mutually exclusive tabs in the same row.
+    setCustomerHistoryTabActive(false);
   };
 
   /** Fired by `InteractionComposer`'s Send button — appends the agent's
@@ -6854,10 +6866,12 @@ export function AgentNextGenPage({
                     // live in the pinned Customer Information `SidePanel`'s
                     // own header now, so repeating them here was redundant.
                     // This row is just: the Customer Information toggle
-                    // icon, a divider, then a single `TabList` that both
-                    // reopens Customer History (as its own leading tab) and
-                    // replaces `ChannelToggleGroup`'s job of switching
-                    // between open channels — real `Tab`s now, not toggle
+                    // icon, a divider, then a single `TabList` holding a
+                    // separate, independently-selectable "Customer History"
+                    // tab (own `customerHistoryTabActive` state — NOT
+                    // another trigger for the panel icon) plus one tab per
+                    // open channel, replacing `ChannelToggleGroup`'s job of
+                    // switching between them — real `Tab`s now, not toggle
                     // pills. `ChannelTab`/`TabList` are safe to bring back
                     // here (this row's ONLY content, not squeezed into a
                     // `titleSuffix` slot alongside a title block) — it
@@ -6883,16 +6897,19 @@ export function AgentNextGenPage({
                       )}
                       <div className="h-8 w-px bg-lyra-border-subtle shrink-0" aria-hidden="true" />
                       <TabList overflowMenu className="flex-1 min-w-0">
-                        {/* "Customer History" — per explicit request, this
-                            tab doesn't navigate anywhere of its own; it's a
-                            second trigger for the same Customer Information
-                            side panel the icon above already toggles (this
-                            one's `active` state just mirrors whether that
-                            panel is currently open, same as any other
-                            toggled `Tab`). */}
+                        {/* "Customer History" — a separate, independently
+                            selectable tab, NOT another trigger for the
+                            Customer Information side panel (that's the
+                            person-icon button to the left of the divider
+                            only). Its own `customerHistoryTabActive` state,
+                            mutually exclusive with the channel tabs below
+                            (see `handleChannelSelect`, which turns this back
+                            off whenever a channel tab is picked instead). No
+                            real content behind it yet — selecting it just
+                            shows as the active tab for now. */}
                         <Tab
-                          active={sidePanelOpen}
-                          onClick={handleSidePanelIconToggle}
+                          active={customerHistoryTabActive}
+                          onClick={() => setCustomerHistoryTabActive(true)}
                           icon={<History className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
                         >
                           Customer History
@@ -6906,7 +6923,7 @@ export function AgentNextGenPage({
                               address={c.addressLabel}
                               messageCount={c.messageCount}
                               interactionId={c.interactionId}
-                              active={(activeInteraction.currentChannelId ?? activeInteraction.channels[activeInteraction.channels.length - 1]?.id) === key}
+                              active={!customerHistoryTabActive && (activeInteraction.currentChannelId ?? activeInteraction.channels[activeInteraction.channels.length - 1]?.id) === key}
                               onClick={() => handleChannelSelect(activeInteraction.id, key)}
                               onDismiss={() => {
                                 if (activeInteraction.channels.length > 1) handleDismissChannel(activeInteraction.id, c);
