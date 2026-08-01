@@ -5267,7 +5267,18 @@ function CustomerInformationSidePanel({
       // naturally stays fixed to the bottom without any extra CSS.
       footer={
         activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") ? (
-          <PanelFooter className="justify-start">
+          <PanelFooter className="relative justify-start">
+            {/* Soft fade instead of a hard border-top — same treatment as
+                `InteractionComposer`'s transcript-to-composer transition
+                (see that component's own comment above) — reads as the
+                Overview content scrolling *under* the input rather than
+                stopping at a line. Positioned outside this div's own box
+                (negative top), overlaying the last ~32px of the scrollable
+                content sitting directly above it. */}
+            <div
+              className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-transparent to-lyra-bg-surface-container-subtle"
+              aria-hidden="true"
+            />
             <AIInput placeholder="Ask about this customer..." showAttach={false} className="w-full" />
           </PanelFooter>
         ) : undefined
