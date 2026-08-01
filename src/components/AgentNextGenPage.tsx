@@ -2102,28 +2102,22 @@ function ContactHistoryCard({
    Contacts list view populating the Dashboard tab row's "Customers" tab
    (`activeDeskTab === "customers"`, see the render branch below). Row
    data (field names/values) is transcribed from a reference screenshot
-   of a real NICE CXone test-org Contacts list view — but the UI itself
-   is built entirely from lyra-ui's own table primitives/patterns, not
-   custom-coded chrome:
-     - `TableToolbar` (table.tsx) — title + `actionDefs` (Refresh/New/
-       Delete, rendered top-right) + `filterDefs`/`filterValues`/
-       `onFilterChange`/`onFilterClear` (the standard FilterChip-driven
-       filter pattern every other lyra-ui table uses, see
-       DataManagement.stories.tsx) + a `ColumnToggle` (column visibility)
-       in `actions`. No hand-built toolbar row or "No filters assigned"
-       bar.
-     - `SortableTableHead` (not plain `TableHead`) for every column, with
-       real per-column sort state — same `sortKey`/`sortDir`/`handleSort`/
-       `dirFor` shape `InteractionsTable` above already uses, not a
-       one-off. Column labels are Title Case ("First Name"), not the raw
-       ALL-CAPS API field names the screenshot happens to show.
-     - `TableFooter` for pagination, with real (not hardcoded) record
-       counts — once filtering is live, a fixed "14" would misreport
-       whatever the current filter/sort actually narrowed the table down
-       to. Only 11 of the reference screenshot's 14 total rows were
-       visible in it, so `CUSTOMER_LIST_RECORDS` has 11 entries; the
-       footer reflects that real count instead of the screenshot's own
-       (partially off-screen) total. */
+   of a real NICE CXone test-org Contacts list view; the columns below
+   (`CUSTOMER_COLUMN_CONFIG`) keep those same field labels.
+
+   The UI itself is a direct, trimmed port of lyra-ui's own "Data
+   Management" template (DataManagement.stories.tsx's
+   `DataManagementTemplate`) — same state shape (`sortKey`/`sortDir`/
+   `handleSort`/`dirFor`, `useColumnReorder`, `visibleCols`/
+   `ColumnToggle`, `filterValues`/`filterDefs`, row-selection
+   `Checkbox`es, real `currentPage`/`rowsPerPage`-driven pagination),
+   same `columnConfig: Record<Key, {label, flex}>` shape (proportional
+   `flex-[n]` ratios, no per-column `min-w-[…]` floor — that floor is
+   what made the table wider than its container earlier), same render
+   shape (`TableToolbar` → `Table` → `TableFooter`). Left out: the
+   template's own `PageHeader`/`SidePanel`/`TabList`/grouping/auto-fit —
+   this embeds inside `AgentNextGenPage`'s own PageHeader/tab row, which
+   already cover that job, and grouping/auto-fit weren't asked for. */
 
 interface CustomerListRecord {
   contactNumber: string;
@@ -2152,7 +2146,7 @@ const CUSTOMER_LIST_RECORDS: CustomerListRecord[] = [
   { contactNumber: "eDeVera50",   firstName: "Erwin",    lastName: "de Vera",   group: "", firstPhone: "(408) 839-0384", emailAddress: "erwin.devera@gmail.com",       address1: "",                      city: "",              state: "", postalCode: "" },
 ];
 
-type CustomerSortKey = keyof CustomerListRecord;
+type CustomerColKey = keyof CustomerListRecord;
 
 function nextCustomerSortDirection(current: SortDirection): SortDirection {
   if (current === null) return "asc";
@@ -2160,18 +2154,27 @@ function nextCustomerSortDirection(current: SortDirection): SortDirection {
   return null;
 }
 
-const CUSTOMER_LIST_COLUMNS: { key: CustomerSortKey; label: string }[] = [
-  { key: "contactNumber", label: "Contact Number" },
-  { key: "firstName",     label: "First Name" },
-  { key: "lastName",      label: "Last Name" },
-  { key: "group",         label: "Group" },
-  { key: "firstPhone",    label: "First Phone" },
-  { key: "emailAddress",  label: "Email Address" },
-  { key: "address1",      label: "Address 1" },
-  { key: "city",          label: "City" },
-  { key: "state",         label: "State" },
-  { key: "postalCode",    label: "Postal Code" },
-];
+// Proportional `flex-[n]` ratios — same shape as DataManagement.stories.tsx's
+// own `columnConfig` — not a fixed `min-w-[…]` per column, so the table
+// shrinks/grows to fill exactly whatever width is available instead of
+// demanding a wide floor no container here needs to accommodate.
+const CUSTOMER_COLUMN_CONFIG: Record<CustomerColKey, { label: string; flex: string }> = {
+  contactNumber: { label: "Contact Number", flex: "flex-1" },
+  firstName:     { label: "First Name",     flex: "flex-1" },
+  lastName:      { label: "Last Name",      flex: "flex-1" },
+  group:         { label: "Group",          flex: "flex-[0.7]" },
+  firstPhone:    { label: "First Phone",    flex: "flex-[1.2]" },
+  emailAddress:  { label: "Email Address",  flex: "flex-[1.6]" },
+  address1:      { label: "Address 1",      flex: "flex-[1.6]" },
+  city:          { label: "City",           flex: "flex-1" },
+  state:         { label: "State",          flex: "flex-[0.6]" },
+  postalCode:    { label: "Postal Code",    flex: "flex-[0.8]" },
+};
+
+const CUSTOMER_ALL_COLUMN_DEFS: { key: string; label: string }[] = Object.entries(CUSTOMER_COLUMN_CONFIG).map(
+  ([key, val]) => ({ key, label: val.label })
+);
+const CUSTOMER_ALL_COLUMN_KEYS = Object.keys(CUSTOMER_COLUMN_CONFIG) as CustomerColKey[];
 
 // Real filter dimension (State) derived from the actual data, driving a
 // genuine `filterDefs` FilterChip — not decoration.
@@ -2179,15 +2182,53 @@ const CUSTOMER_STATE_OPTIONS: FilterChipOption[] = Array.from(
   new Set(CUSTOMER_LIST_RECORDS.map((r) => r.state).filter(Boolean))
 ).map((state) => ({ value: state, label: state }));
 
-const CUSTOMER_LIST_ALL_COLUMN_KEYS = new Set<string>(CUSTOMER_LIST_COLUMNS.map((c) => c.key));
-
 function CustomersListView() {
-  const [sortKey, setSortKey] = useState<CustomerSortKey | null>(null);
-  const [sortDir, setSortDir] = useState<SortDirection>(null);
-  const [filterValues, setFilterValues] = useState<Record<string, string[]>>({ state: [] });
-  const [visibleCols, setVisibleCols] = useState<Set<string>>(CUSTOMER_LIST_ALL_COLUMN_KEYS);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [visibleCols, setVisibleCols] = useState<Set<string>>(new Set(CUSTOMER_ALL_COLUMN_KEYS));
 
-  const handleSort = (key: CustomerSortKey) => {
+  const [filterValues, setFilterValues] = useState<Record<string, string[]>>({ state: [] });
+  const filterDefs = [{ key: "state", label: "State", options: CUSTOMER_STATE_OPTIONS }];
+  const handleFilterChange = (key: string, values: string[]) => setFilterValues((prev) => ({ ...prev, [key]: values }));
+  const clearAllFilters = () => setFilterValues({ state: [] });
+
+  const filtered = CUSTOMER_LIST_RECORDS.filter((row) => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const haystack = `${row.firstName} ${row.lastName} ${row.contactNumber} ${row.emailAddress}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    if (filterValues.state?.length && !filterValues.state.includes(row.state)) return false;
+    return true;
+  });
+
+  const [sortKey, setSortKey] = useState<CustomerColKey | null>(null);
+  const [sortDir, setSortDir] = useState<SortDirection>(null);
+
+  const { columnOrder: allColumnOrder, dragOverKey, dragHandlers } = useColumnReorder<CustomerColKey>(
+    CUSTOMER_ALL_COLUMN_KEYS
+  );
+  const columnOrder = allColumnOrder.filter((k: CustomerColKey) => visibleCols.has(k));
+
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  const allSelected = selectedRows.size === filtered.length && filtered.length > 0;
+  const someSelected = selectedRows.size > 0 && !allSelected;
+  const toggleSelectAll = () => {
+    if (allSelected || someSelected) setSelectedRows(new Set());
+    else setSelectedRows(new Set(filtered.map((r) => r.contactNumber)));
+  };
+  const toggleRow = (id: string) => {
+    setSelectedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+
+  const handleSort = (key: CustomerColKey) => {
     if (sortKey === key) {
       const next = nextCustomerSortDirection(sortDir);
       setSortDir(next);
@@ -2197,11 +2238,7 @@ function CustomersListView() {
       setSortDir("asc");
     }
   };
-  const dirFor = (key: CustomerSortKey): SortDirection => (sortKey === key ? sortDir : null);
-
-  const filtered = filterValues.state?.length
-    ? CUSTOMER_LIST_RECORDS.filter((r) => filterValues.state.includes(r.state))
-    : CUSTOMER_LIST_RECORDS;
+  const dirFor = (key: CustomerColKey): SortDirection => (sortKey === key ? sortDir : null);
 
   const sorted = [...filtered].sort((a, b) => {
     if (!sortKey || !sortDir) return 0;
@@ -2212,38 +2249,43 @@ function CustomersListView() {
     return 0;
   });
 
-  const visibleColumns = CUSTOMER_LIST_COLUMNS.filter((c) => visibleCols.has(c.key));
+  const totalRecords = sorted.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / rowsPerPage));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIdx = (safePage - 1) * rowsPerPage;
+  const pageRows = sorted.slice(startIdx, startIdx + rowsPerPage);
+  const displayStart = totalRecords === 0 ? 0 : startIdx + 1;
+  const displayEnd = Math.min(startIdx + rowsPerPage, totalRecords);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [rowsPerPage, totalPages, currentPage]);
 
   return (
     // `min-w-0 overflow-hidden` — this is a flex ITEM inside the Desk
     // body's row container (`<div className="relative flex flex-1
-    // overflow-hidden">`), and flex items default to `min-width: auto`,
-    // meaning they refuse to shrink below their content's own intrinsic
-    // width. The 10-column table's `min-w-[140px]`-per-column floor adds
-    // up to ~1400px of intrinsic width; without `min-w-0` here, THIS
-    // whole column grows to fit that instead of clipping to the space
-    // actually available, dragging the toolbar's top-right actions and
-    // the footer's pagination off-screen along with it (both are
-    // siblings of the table's own scroll wrapper below, so they were
-    // never actually the problem — the outer column's missing width
-    // clamp was). Matches the sibling Dashboard-tab column's own
-    // `min-w-0` a few lines below in this same file.
+    // overflow-hidden">`), and flex items default to `min-width: auto`
+    // (refuse to shrink below their content's own intrinsic width).
+    // Matches the sibling Dashboard-tab column's own `min-w-0` a few
+    // lines below in this same file.
     <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
       <TableToolbar
         className="px-6"
         title="Recently Viewed"
-        filterDefs={[{ key: "state", label: "State", options: CUSTOMER_STATE_OPTIONS }]}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        filterDefs={filterDefs}
         filterValues={filterValues}
-        onFilterChange={(key: string, values: string[]) => setFilterValues((prev) => ({ ...prev, [key]: values }))}
-        onFilterClear={() => setFilterValues({ state: [] })}
+        onFilterChange={handleFilterChange}
+        onFilterClear={clearAllFilters}
         actionDefs={[
           { key: "refresh", label: "Refresh", icon: <RefreshCw className="h-4 w-4" strokeWidth={1.5} /> },
           { key: "new", label: "New", icon: <Plus className="h-4 w-4" strokeWidth={1.5} /> },
-          { key: "delete", label: "Delete", icon: <Trash2 className="h-4 w-4" strokeWidth={1.5} /> },
+          { key: "delete", label: "Delete", icon: <Trash2 className="h-4 w-4" strokeWidth={1.5} />, disabled: selectedRows.size === 0 },
         ]}
         actions={
           <ColumnToggle
-            columns={CUSTOMER_LIST_COLUMNS}
+            columns={CUSTOMER_ALL_COLUMN_DEFS}
             visibleColumns={visibleCols}
             onVisibilityChange={setVisibleCols}
           />
@@ -2251,39 +2293,58 @@ function CustomersListView() {
       />
 
       <div className="flex-1 min-h-0 overflow-auto px-6">
-        {/* `Table`'s own `<table>` element deliberately ships with no
-            width/min-width class (see table.tsx's own long comment on
-            that element) — it only gets an explicit width once a column
-            has actually been resized (`resize.totalWidth`, seeded by a
-            live drag). With no `resizable` columns here, that never
-            happens, so the table would otherwise size to its own content
-            and leave a gap short of the container's right edge instead
-            of filling it. `w-full` sidesteps that safely for THIS
-            table specifically — the conflict that comment warns about
-            (an explicit width class fighting a resize-in-progress) only
-            applies to tables that support column resize, which this one
-            doesn't. */}
-        <Table className="w-full">
+        <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              {visibleColumns.map((col) => (
-                <SortableTableHead
-                  key={col.key}
-                  className="flex-1 min-w-[140px]"
-                  sortDirection={dirFor(col.key)}
-                  onSort={() => handleSort(col.key)}
-                >
-                  {col.label}
-                </SortableTableHead>
-              ))}
+              <TableHead className="w-[40px] shrink-0">
+                <Checkbox
+                  checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                  onCheckedChange={toggleSelectAll}
+                  aria-label="Select all rows"
+                />
+              </TableHead>
+              {columnOrder.map((key: CustomerColKey) => {
+                const col = CUSTOMER_COLUMN_CONFIG[key];
+                return (
+                  <SortableTableHead
+                    key={key}
+                    className={cn(col.flex, "relative")}
+                    sortDirection={dirFor(key)}
+                    onSort={() => handleSort(key)}
+                    columnKey={key}
+                    dragHandlers={dragHandlers}
+                    isDragOver={dragOverKey === key}
+                  >
+                    {col.label}
+                  </SortableTableHead>
+                );
+              })}
+              <TableHead className="w-[48px] shrink-0 sticky right-0 bg-lyra-bg-surface-base">
+                <span className="sr-only">Actions</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sorted.map((record) => (
-              <TableRow key={record.contactNumber}>
-                {visibleColumns.map((col) => (
-                  <TableCell key={col.key} className="flex-1 min-w-[140px]">{record[col.key]}</TableCell>
+            {pageRows.map((row) => (
+              <TableRow key={row.contactNumber} data-state={selectedRows.has(row.contactNumber) ? "selected" : undefined}>
+                <TableCell className="w-[40px] shrink-0">
+                  <Checkbox
+                    checked={selectedRows.has(row.contactNumber)}
+                    onCheckedChange={() => toggleRow(row.contactNumber)}
+                    aria-label={`Select ${row.firstName} ${row.lastName}`}
+                  />
+                </TableCell>
+                {columnOrder.map((key: CustomerColKey) => (
+                  <TableCell key={key} className={CUSTOMER_COLUMN_CONFIG[key].flex}>{row[key]}</TableCell>
                 ))}
+                <TableCell className="w-[48px] shrink-0 sticky right-0 bg-lyra-bg-surface-base">
+                  <button
+                    aria-label="More options"
+                    className="flex h-7 w-7 items-center justify-center rounded-lyra-sm text-lyra-fg-secondary hover:bg-lyra-bg-surface-shell transition-colors"
+                  >
+                    <MoreVertical className="h-4 w-4" strokeWidth={1.5} />
+                  </button>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -2292,14 +2353,14 @@ function CustomersListView() {
 
       <TableFooter
         className="px-6 shrink-0"
-        currentPage={1}
-        totalPages={1}
-        onPageChange={() => {}}
-        rowsPerPage={sorted.length}
-        showRowsPerPage={false}
-        totalRecords={sorted.length}
-        displayStart={sorted.length > 0 ? 1 : 0}
-        displayEnd={sorted.length}
+        currentPage={safePage}
+        totalPages={totalPages}
+        onPageChange={setCurrentPage}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={(val: number) => { setRowsPerPage(val); setCurrentPage(1); }}
+        totalRecords={totalRecords}
+        displayStart={displayStart}
+        displayEnd={displayEnd}
       />
     </div>
   );
