@@ -4741,8 +4741,8 @@ function CustomerInformationSidePanel({
       onPinToggle={onPinToggle}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      headerTitle="Customer Information"
-      headerSubhead={`${customerName ?? "Customer"} · ${recordId}`}
+      headerTitle={customerName ?? "Customer"}
+      headerSubhead={recordId}
       // Plain default `"wide"` mode (no `overflowBreakpoint` override) —
       // same behavior as every other `TabList` in the app; see the
       // previous `InteriorPanel`-based version's identical reasoning for
