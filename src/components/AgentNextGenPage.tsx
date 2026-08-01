@@ -5552,7 +5552,7 @@ export function AgentNextGenPage({
     const id = setInterval(() => setClockTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, []);
-  const [activeDeskTab, setActiveDeskTab] = useState<"home" | "customers" | "accounts" | "tickets" | "interactions" | "wem">("home");
+  const [activeDeskTab, setActiveDeskTab] = useState<"home" | "customers" | "accounts" | "tickets" | "wem">("home");
   /* Settings — a third top-level view alongside Desk/interaction-record,
      shown in place of both in the content column when the Settings rail
      item is clicked. Mutually exclusive with an active interaction: opening
@@ -8242,22 +8242,19 @@ export function AgentNextGenPage({
                       />
                       <TabList overflowMenu className="px-6 bg-lyra-bg-surface-base shrink-0">
                         <Tab active={activeDeskTab === "home"} onClick={() => setActiveDeskTab("home")}>
-                          Dashboard 1
+                          Dashboard
                         </Tab>
                         <Tab active={activeDeskTab === "customers"} onClick={() => setActiveDeskTab("customers")}>
-                          Dashboard 2
+                          Customers
                         </Tab>
                         <Tab active={activeDeskTab === "accounts"} onClick={() => setActiveDeskTab("accounts")}>
-                          Dashboard 3
+                          Accounts
                         </Tab>
                         <Tab active={activeDeskTab === "tickets"} onClick={() => setActiveDeskTab("tickets")}>
-                          Dashboard 4
-                        </Tab>
-                        <Tab active={activeDeskTab === "interactions"} onClick={() => setActiveDeskTab("interactions")}>
-                          Dashboard 5
+                          Tickets
                         </Tab>
                         <Tab active={activeDeskTab === "wem"} onClick={() => setActiveDeskTab("wem")}>
-                          Dashboard 6
+                          WEM
                         </Tab>
                       </TabList>
                     </>
