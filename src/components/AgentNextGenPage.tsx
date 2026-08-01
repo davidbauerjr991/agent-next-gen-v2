@@ -7268,7 +7268,7 @@ export function AgentNextGenPage({
                     // (suppressed) own border coincide with this row's own
                     // `border-b` below, without needing to sacrifice the
                     // icon button/divider's normal centered look to get it.
-                    <div className="flex min-h-[68px] items-center gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6">
+                    <div className="flex items-center gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6 pt-2">
                       {/* Only shown while the panel itself is closed — once
                           it's open, this same icon would just sit there
                           doing nothing useful next to a panel that's
