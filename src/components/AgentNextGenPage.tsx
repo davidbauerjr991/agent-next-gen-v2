@@ -127,6 +127,7 @@ import {
   Search,
   Bell,
   Pin,
+  PanelLeftClose,
   History,
   ChevronRight,
   Copy,
@@ -4709,7 +4710,7 @@ function CustomerInformationPanelBody({
 function CustomerInformationSidePanel({
   open,
   pinned,
-  onPinToggle,
+  onClose,
   onMouseEnter,
   onMouseLeave,
   customerName,
@@ -4721,7 +4722,14 @@ function CustomerInformationSidePanel({
 }: {
   open: boolean;
   pinned: boolean;
-  onPinToggle?: () => void;
+  /** Closes the panel (unpins + hides) — rendered as a `PanelLeftClose`-
+   *  iconed `PanelPinButton` in the header via `headerActions` below, NOT
+   *  `SidePanel`'s own built-in pin button (that one has no way to
+   *  override its default `Pin` icon, and this is a real close action now,
+   *  not a pin/unpin toggle — see `handleSidePanelClose`'s own doc
+   *  comment). `SidePanel`'s `onPinToggle` prop is deliberately left unset
+   *  below so its internal default button doesn't also render. */
+  onClose?: () => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
   customerName?: string;
@@ -4750,11 +4758,25 @@ function CustomerInformationSidePanel({
       side="left"
       open={open}
       pinned={pinned}
-      onPinToggle={onPinToggle}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       headerTitle={customerName ?? "Customer"}
       headerSubhead={recordId}
+      // `PanelLeftClose`-iconed `PanelPinButton`, standing in for
+      // `SidePanel`'s own default `Pin`-iconed one (suppressed by leaving
+      // `onPinToggle` unset above) — same shared atom, just a different
+      // icon/labels/handler, per explicit request.
+      headerActions={
+        onClose && (
+          <PanelPinButton
+            pinned={pinned}
+            onToggle={onClose}
+            icon={<PanelLeftClose className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
+            pinnedLabel="Close Customer Information"
+            unpinnedLabel="Close Customer Information"
+          />
+        )
+      }
       // Plain default `"wide"` mode (no `overflowBreakpoint` override) —
       // same behavior as every other `TabList` in the app; see the
       // previous `InteriorPanel`-based version's identical reasoning for
@@ -5225,9 +5247,15 @@ export function AgentNextGenPage({
     if (sidePanelPinned) return;
     sidePanelHoverTimer.current = setTimeout(() => setSidePanelOpen(false), 300);
   };
-  const handleSidePanelPinToggle = () => {
-    setSidePanelPinned((v) => !v);
-    setSidePanelOpen(true); // keep open when toggling pin state
+  // Fired by the panel's own header button (a `PanelPinButton` wearing a
+  // `PanelLeftClose` icon instead of the default `Pin` glyph, per explicit
+  // request) — closes the panel outright rather than just unpinning it, to
+  // match what a "close" icon implies: unpins AND hides it, instead of the
+  // old pin-toggle behavior that kept it open (hover-controlled) after
+  // unpinning.
+  const handleSidePanelClose = () => {
+    setSidePanelPinned(false);
+    setSidePanelOpen(false);
   };
   // Click on the header's toggle icon — toggles open/closed only while
   // already pinned (a no-op while unpinned, since that state is
@@ -6799,7 +6827,7 @@ export function AgentNextGenPage({
                 <CustomerInformationSidePanel
                   open={sidePanelOpen}
                   pinned={effectiveSidePanelPinned}
-                  onPinToggle={isSidePanelContainerNarrow ? undefined : handleSidePanelPinToggle}
+                  onClose={isSidePanelContainerNarrow ? undefined : handleSidePanelClose}
                   onMouseEnter={onSidePanelHoverStart}
                   onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
                   customerName={activeInteraction.customerName}
