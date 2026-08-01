@@ -5641,6 +5641,25 @@ export function AgentNextGenPage({
   // `panelVariant`'s two states was active before entering fullscreen is
   // preserved (untouched) and simply resumes when fullscreen exits.
   const [panelFullScreen, setPanelFullScreen] = useState(false);
+  // Keeps `sharedPanelFullScreenOverlay` mounted for a beat after
+  // `panelFullScreen` flips back to false, so the exit transition (see
+  // that overlay's own doc comment, and `fullScreenAnimTimer` below) can
+  // actually play instead of the overlay disappearing instantly — same
+  // "state machine outlives the boolean it's animating" shape as
+  // `panelState`/`panelOpen` above, just scoped to fullscreen alone
+  // rather than the whole panel's mount lifecycle.
+  const [fullScreenRendered, setFullScreenRendered] = useState(false);
+  // The actual opacity/scale target for the fullscreen overlay's CSS
+  // transition — deliberately a SEPARATE flag from `panelFullScreen`
+  // itself. A freshly-mounted DOM node that starts life with `opacity: 1`
+  // has no earlier frame at `opacity: 0` for the browser to transition
+  // FROM, so it would just pop in instantly with no visible animation.
+  // Mounting at the "hidden" values first, then flipping this to `true`
+  // one frame later (`requestAnimationFrame`, see the effect below) gives
+  // the browser a real prior frame to interpolate from. Exiting doesn't
+  // need this two-step dance — it's already mounted/visible, so setting
+  // this straight to `false` immediately starts the fade/scale-out.
+  const [fullScreenVisible, setFullScreenVisible] = useState(false);
   // Which team is picked in the "New Outbound" Teams group's own "Choose
   // team" sub-picker (see `outboundConfig` below, and `OUTBOUND_TEAM_
   // MEMBERS`/`CreateNewOutboundGroup.subFilter`'s own doc comments) — ""
@@ -5720,6 +5739,7 @@ export function AgentNextGenPage({
   const panelFloatTop  = useRef<number | null>(null);
   const panelRef       = useRef<HTMLDivElement>(null);
   const panelAnimTimer = useRef<ReturnType<typeof setTimeout>>();
+  const fullScreenAnimTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   // The docked width to restore on the NEXT re-dock — captured at the
   // moment the panel actually leaves "docked" (see
   // `handlePanelVariantChange`/`handleFullScreenToDragMode` below), so a
@@ -6690,6 +6710,46 @@ export function AgentNextGenPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelOpen]);
 
+  // Same "outlive the boolean so the exit transition can play" shape as
+  // the `panelOpen`/`panelState` effect above, scoped to fullscreen alone
+  // — per explicit request for an animation on the fullscreen
+  // expand/collapse toggle. Entering: mount immediately (still at the
+  // "hidden" style, `fullScreenVisible` starts false) then flip
+  // `fullScreenVisible` true one frame later, so the fade/scale-in CSS
+  // transition (`sharedPanelFullScreenOverlay`'s own styles, below) has a
+  // real prior frame to animate from — see `fullScreenVisible`'s own doc
+  // comment for why that two-step is needed. Exiting: flip
+  // `fullScreenVisible` false right away (starts the fade/scale-out
+  // immediately) and only unmount (`fullScreenRendered` false) 180ms
+  // later, once that transition has actually finished playing.
+  useEffect(() => {
+    if (panelFullScreen) {
+      clearTimeout(fullScreenAnimTimer.current);
+      setFullScreenRendered(true);
+      // Double rAF, not a single one — the classic gotcha here is that a
+      // single `requestAnimationFrame` callback can still land in the SAME
+      // frame as the commit that mounted the "hidden" style (browsers run
+      // due rAF callbacks before that frame's own layout/paint), so the
+      // "hidden" style never actually gets painted and there's nothing
+      // for the transition to visibly animate from — the element just
+      // pops straight to visible instead. Waiting for a second frame
+      // guarantees the first one (with `fullScreenVisible` still false)
+      // has genuinely been painted before flipping it to true.
+      let raf2 = 0;
+      const raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => setFullScreenVisible(true));
+      });
+      return () => {
+        cancelAnimationFrame(raf1);
+        cancelAnimationFrame(raf2);
+      };
+    }
+    setFullScreenVisible(false);
+    clearTimeout(fullScreenAnimTimer.current);
+    fullScreenAnimTimer.current = setTimeout(() => setFullScreenRendered(false), 180);
+    return () => clearTimeout(fullScreenAnimTimer.current);
+  }, [panelFullScreen]);
+
   // When docking: capture actual rendered position (includes CSS transform
   // drag offset) before the float wrapper unmounts — restored when
   // undocking. The old "only one of five may be docked" exclusivity check
@@ -7349,8 +7409,34 @@ export function AgentNextGenPage({
   // it clickable/visible instead. Doesn't need to compete with the
   // app-header's own menus (`z-[9999]`) — those live in a different row
   // entirely (above `containerRef`, not inside it).
-  const sharedPanelFullScreenOverlay = panelMounted && activePanelContent && panelFullScreen ? (
-    <div className="absolute top-0 left-0 right-3 bottom-3 z-[9] flex flex-col rounded-lyra-lg border border-lyra-border-subtle bg-lyra-bg-surface-base overflow-hidden">
+  // Mounted on `fullScreenRendered` (which outlives `panelFullScreen` by
+  // 180ms on the way out — see that state's own doc comment) rather than
+  // `panelFullScreen` directly, so the fade/scale-out transition below
+  // actually gets to play instead of the overlay just disappearing the
+  // instant fullscreen is exited. The transition itself keys off
+  // `fullScreenVisible`, NOT `panelFullScreen` directly — see that
+  // state's own doc comment for why a freshly-mounted node needs a
+  // separate "hidden first, visible one frame later" flag to actually
+  // animate in, rather than just popping straight to its final opacity/
+  // scale with nothing to transition from. CSS transition (not a
+  // keyframe animation) per the same reasoning as the float/docked panels
+  // just below — avoids compositor fill-mode flash. `scale`'s default
+  // center origin reads fine here since this overlay already fills the
+  // whole container; a corner-anchored origin would need `transformOrigin`
+  // too, but center suits a "settle into place" feel just as well without
+  // the extra complexity.
+  const sharedPanelFullScreenOverlay = panelMounted && activePanelContent && fullScreenRendered ? (
+    <div
+      className="absolute top-0 left-0 right-3 bottom-3 z-[9] flex flex-col rounded-lyra-lg border border-lyra-border-subtle bg-lyra-bg-surface-base overflow-hidden"
+      style={{
+        opacity: fullScreenVisible ? 1 : 0,
+        transform: fullScreenVisible ? "scale(1)" : "scale(0.98)",
+        transition: fullScreenVisible
+          ? "opacity 200ms ease, transform 200ms cubic-bezier(0.4, 0, 0.2, 1)"
+          : "opacity 150ms ease, transform 150ms ease",
+        pointerEvents: fullScreenVisible ? "auto" : "none",
+      }}
+    >
       <ContainerHeader
         title={activePanelContent.title}
         titleBadge={activePanelContent.titleBadge}
