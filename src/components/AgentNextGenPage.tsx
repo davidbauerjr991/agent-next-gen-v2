@@ -224,6 +224,23 @@ const OUTBOUND_TEAMS: NonNullable<CreateNewOutboundConfig["groups"][number]["con
   { id: "t2", name: "Tier 2 Escalations", initials: "T2", subtitle: "TEAM-07", avatarClassName: "bg-lyra-accent-red-soft text-lyra-accent-red-strong",       channels: ["voice", "email"] },
 ];
 
+// Deterministic (no Math.random) per-team agent roster for the Teams
+// group's own "Choose team" sub-picker (see `CreateNewOutboundGroup.
+// subFilter`'s own doc comment in create-new.tsx, and the "teams" group
+// wiring in `outboundConfig` below) — per explicit request: picking a team
+// there should let the agent search that team's real members. Round-robins
+// `OUTBOUND_AGENTS` across `OUTBOUND_TEAMS` by index (no dedicated
+// "team" field exists on `CreateNewAgentRecord`/`CREATE_NEW_AGENTS`), so
+// each team gets a stable, real-looking set of members instead of an
+// arbitrary or empty one.
+const OUTBOUND_TEAM_MEMBERS: Record<string, NonNullable<CreateNewOutboundConfig["groups"][number]["contacts"]>> =
+  Object.fromEntries(
+    OUTBOUND_TEAMS.map((team: any, teamIndex: number) => [
+      team.id,
+      OUTBOUND_AGENTS.filter((_agent: any, agentIndex: number) => agentIndex % OUTBOUND_TEAMS.length === teamIndex),
+    ])
+  );
+
 const OUTBOUND_SKILLS: NonNullable<CreateNewOutboundConfig["groups"][number]["contacts"]> = [
   { id: "s1", name: "Spanish Language",  initials: "ES", subtitle: "SKL-12", avatarClassName: "bg-lyra-accent-green-soft text-lyra-accent-green-strong", channels: ["voice", "email"], status: "available", queueCount: 4, waitTimeSeconds: 200 },
   { id: "s2", name: "Technical Support", initials: "TS", subtitle: "SKL-03", avatarClassName: "bg-lyra-accent-blue-soft text-lyra-accent-blue-strong",   channels: ["voice", "email"], status: "busy",      queueCount: 7, waitTimeSeconds: 95 },
@@ -5624,6 +5641,13 @@ export function AgentNextGenPage({
   // `panelVariant`'s two states was active before entering fullscreen is
   // preserved (untouched) and simply resumes when fullscreen exits.
   const [panelFullScreen, setPanelFullScreen] = useState(false);
+  // Which team is picked in the "New Outbound" Teams group's own "Choose
+  // team" sub-picker (see `outboundConfig` below, and `OUTBOUND_TEAM_
+  // MEMBERS`/`CreateNewOutboundGroup.subFilter`'s own doc comments) — ""
+  // means no team picked yet. Lives here (not inside create-new.tsx) since
+  // that component has no concept of "team," only of a generic per-group
+  // `subFilter` control it renders and reports picks from.
+  const [selectedOutboundTeamId, setSelectedOutboundTeamId] = useState("");
   // Exit the shared panel's fullscreen whenever the agent navigates away
   // from the current main-content context — clicking a different
   // assignment card, Home, or Settings (and starting/selecting any new
@@ -6536,26 +6560,58 @@ export function AgentNextGenPage({
       openAddressesByContactId.set(interaction.id, byType);
       openTypesByContactId.set(interaction.id, types);
     }
+    // Tags a contact with its open-channel info (see this memo's own doc
+    // comment above) — pulled out so it can run identically over the
+    // "teams" group's swapped-in member roster below, not just every other
+    // group's own static `contacts`.
+    const tagOpenChannels = (contact: NonNullable<CreateNewOutboundConfig["groups"][number]["contacts"]>[number]) => {
+      const openChannelAddresses = openAddressesByContactId.get(contact.id);
+      const openChannelTypes = openTypesByContactId.get(contact.id);
+      if (!openChannelTypes || openChannelTypes.size === 0) return contact;
+      return {
+        ...contact,
+        ...(openChannelAddresses && Object.keys(openChannelAddresses).length > 0 ? { openChannelAddresses } : {}),
+        openChannelTypes: [...openChannelTypes],
+      };
+    };
     return {
       ...OUTBOUND_CONFIG,
       groups: OUTBOUND_CONFIG.groups.map((group) => {
+        // Teams' own "Choose team" sub-picker — per explicit request,
+        // picking a team here swaps this group's `contacts` from the
+        // (now-unused-as-a-list) team records over to that team's real
+        // member agents (`OUTBOUND_TEAM_MEMBERS`), so the existing search
+        // box then filters those members exactly like it already does for
+        // every other group — `contactMatchesSearch`/`activeGroupContacts`
+        // (create-new.tsx) need no changes for this. With no team picked
+        // yet, `contacts` is empty and `emptyMessage` prompts the agent to
+        // pick one above instead of showing "No favorited teams yet",
+        // which would be misleading before any team is even chosen.
+        if (group.id === "teams") {
+          const members = selectedOutboundTeamId ? OUTBOUND_TEAM_MEMBERS[selectedOutboundTeamId] ?? [] : [];
+          return {
+            ...group,
+            contacts: members.map(tagOpenChannels),
+            emptyMessage: selectedOutboundTeamId
+              ? "No favorited agents in this team yet"
+              : "Choose a team above to see its agents",
+            subFilter: {
+              ariaLabel: "Choose team",
+              placeholder: "Choose a team",
+              value: selectedOutboundTeamId,
+              options: OUTBOUND_TEAMS.map((team) => ({ value: team.id, label: team.name })),
+              onChange: setSelectedOutboundTeamId,
+            },
+          };
+        }
         if (!group.contacts) return group;
         return {
           ...group,
-          contacts: group.contacts.map((contact) => {
-            const openChannelAddresses = openAddressesByContactId.get(contact.id);
-            const openChannelTypes = openTypesByContactId.get(contact.id);
-            if (!openChannelTypes || openChannelTypes.size === 0) return contact;
-            return {
-              ...contact,
-              ...(openChannelAddresses && Object.keys(openChannelAddresses).length > 0 ? { openChannelAddresses } : {}),
-              openChannelTypes: [...openChannelTypes],
-            };
-          }),
+          contacts: group.contacts.map(tagOpenChannels),
         };
       }),
     };
-  }, [interactions]);
+  }, [interactions, selectedOutboundTeamId]);
 
   // Every "Agent Next Gen" consumer (this app, AgentNextGenTemplate.
   // stories.tsx, LeftNav.stories.tsx's "Agent Next Gen Left Nav" story,
