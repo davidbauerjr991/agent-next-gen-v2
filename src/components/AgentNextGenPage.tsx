@@ -5135,8 +5135,12 @@ export function AgentNextGenPage({
      version this replaces got away with: a `SidePanel` needs pinned vs.
      hover-preview state and its own narrow-container guard, since (unlike
      `InteriorPanel`) it has no such handling built in. */
-  const [sidePanelOpen,     setSidePanelOpen]     = useState(false);
-  const [sidePanelPinned,   setSidePanelPinned]   = useState(false);
+  // Open + pinned by default (per explicit request) — a fresh interaction's
+  // Customer Information panel starts docked open rather than closed/
+  // hover-only; `isSidePanelContainerNarrow`'s guard above still forces it
+  // closed+unpinned below 1024px regardless of these defaults.
+  const [sidePanelOpen,     setSidePanelOpen]     = useState(true);
+  const [sidePanelPinned,   setSidePanelPinned]   = useState(true);
   const [sidePanelResizing, setSidePanelResizing] = useState(false);
   // 340 — explicit starting width for the SidePanel version (was 425,
   // matching the old InteriorPanel's `maxWidth` default) — per explicit
@@ -5179,8 +5183,11 @@ export function AgentNextGenPage({
   // rather than the `activeInteraction` object itself.
   useEffect(() => {
     if (!activeInteractionId) {
+      // Resets back to the open+pinned default (not a hard "off") — so the
+      // next interaction's panel still starts open+pinned per the default
+      // above, rather than this leftover state carrying over.
       setSidePanelOpen(false);
-      setSidePanelPinned(false);
+      setSidePanelPinned(true);
     }
   }, [activeInteractionId]);
 
