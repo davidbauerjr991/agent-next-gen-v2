@@ -5427,6 +5427,27 @@ export function AgentNextGenPage({
   // narrower panel/iframe never actually gave the nav less room under the
   // old window-width check.
   const bodyContainerRef = useRef<HTMLDivElement>(null);
+  // Tracked here (rather than down by `isNavNarrow`'s own old spot) so both
+  // the side nav's auto-collapse AND the Customer Information panel's own
+  // narrow guard can share this one measurement/threshold — per explicit
+  // request, both should react together at the same 768px point, not two
+  // separately-tracked breakpoints that used to drift apart (768 for the
+  // nav, 1024 for the panel) and fire at visibly different container
+  // widths. See `isContainerNarrow` below.
+  const [bodyContainerWidth, setBodyContainerWidth] = useState(9999);
+  useEffect(() => {
+    const el = bodyContainerRef.current;
+    if (!el) return;
+    setBodyContainerWidth(el.getBoundingClientRect().width);
+    const ro = new ResizeObserver(([entry]) => setBodyContainerWidth(entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // Single shared "container query" boolean — 768px, per explicit request —
+  // driving both the side nav's overlay/auto-collapse (`isNavNarrow`) and
+  // the Customer Information panel's own pinned/overlay guard
+  // (`isSidePanelContainerNarrow`) below.
+  const isContainerNarrow = bodyContainerWidth < 768;
   const panelFloatLeft = useRef<number | null>(null);
   const panelFloatTop  = useRef<number | null>(null);
   const panelRef       = useRef<HTMLDivElement>(null);
@@ -5540,8 +5561,10 @@ export function AgentNextGenPage({
      `InteriorPanel`) it has no such handling built in. */
   // Open + pinned by default (per explicit request) — a fresh interaction's
   // Customer Information panel starts docked open rather than closed/
-  // hover-only; `isSidePanelContainerNarrow`'s guard above still forces it
-  // closed+unpinned below 1024px regardless of these defaults.
+  // hover-only; `isSidePanelContainerNarrow`'s guard below still forces it
+  // unpinned (floating overlay, not docked) below 768px regardless of these
+  // defaults — it stays OPEN though, just no longer docked. See that
+  // guard's own doc comment.
   const [sidePanelOpen,     setSidePanelOpen]     = useState(true);
   const [sidePanelPinned,   setSidePanelPinned]   = useState(true);
   const [sidePanelResizing, setSidePanelResizing] = useState(false);
@@ -5563,29 +5586,22 @@ export function AgentNextGenPage({
 
   // Container-width pin guard — `SidePanel` has no built-in "too narrow,
   // force an overlay" handling of its own (unlike `InteriorPanel`), so this
-  // reproduces it: measures the same outer container `containerRef` already
-  // tracks (used elsewhere for Ai/Notifications float positioning) and
-  // forces the panel unpinned+closed below 1024px of its width, exactly
-  // matching `AgentNextGenTemplate.stories.tsx`'s own guard.
-  const [sidePanelContainerWidth, setSidePanelContainerWidth] = useState(9999);
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    setSidePanelContainerWidth(el.getBoundingClientRect().width);
-    const ro = new ResizeObserver(([entry]) => setSidePanelContainerWidth(entry.contentRect.width));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  const isSidePanelContainerNarrow = sidePanelContainerWidth < 1024;
+  // reproduces it: reuses the shared `isContainerNarrow` (768px, the same
+  // "Body: LeftNav + Content" row measurement the side nav's own
+  // `isNavNarrow` reads — see that constant's own doc comment) to force the
+  // panel unpinned below that width, so it renders as a floating overlay
+  // instead of pushing the main content column over.
+  //
+  // Per explicit request, this no longer force-CLOSES the panel when the
+  // container narrows (it used to: `setSidePanelOpen(false)`) — an agent
+  // who had it open keeps it open, just as a floating overlay instead of
+  // docked, once `effectiveSidePanelPinned` below goes false. Only
+  // `sidePanelPinned`'s effective value changes here; `sidePanelOpen` is
+  // untouched by width and only ever changes via an explicit agent action
+  // (the panel's own close button, the header icon toggle, or a new
+  // interaction applying `lastSidePanelOpenChoice`).
+  const isSidePanelContainerNarrow = isContainerNarrow;
   const effectiveSidePanelPinned = isSidePanelContainerNarrow ? false : sidePanelPinned;
-
-  const skipFirstSidePanelNarrowRun = useRef(true);
-  useEffect(() => {
-    if (skipFirstSidePanelNarrowRun.current) { skipFirstSidePanelNarrowRun.current = false; return; }
-    if (isSidePanelContainerNarrow) setSidePanelOpen(false);
-    else setSidePanelOpen(sidePanelPinned);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSidePanelContainerNarrow]);
 
   // Used to force-close (and reset pinned) whenever the agent left the
   // interaction view entirely (dismissing it, or navigating to Desk/
@@ -5626,7 +5642,7 @@ export function AgentNextGenPage({
   // inline while pinned (the normal case, since `sidePanelPinned` itself
   // never actually goes false anymore — nothing unpins it), or as a
   // floating overlay once the container gets narrow enough to force
-  // `effectiveSidePanelPinned` false. Used to no-op below 1024px (the old
+  // `effectiveSidePanelPinned` false. Used to no-op below 768px (the old
   // "hover handles opening while unpinned instead" reasoning) — per
   // explicit request, an agent whose container narrowed enough to
   // auto-close the panel still needs a working click target to bring it
@@ -5646,21 +5662,11 @@ export function AgentNextGenPage({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // Nav overlay breakpoint — a real container query on the "Body: LeftNav +
-  // Content" row itself (`bodyContainerRef`, see its own doc comment above)
-  // rather than the browser viewport, so this reacts to the actual space
-  // this app is given regardless of window size.
-  const [bodyContainerWidth, setBodyContainerWidth] = useState(9999);
-  useEffect(() => {
-    const el = bodyContainerRef.current;
-    if (!el) return;
-    setBodyContainerWidth(el.getBoundingClientRect().width);
-    const ro = new ResizeObserver(([entry]) => setBodyContainerWidth(entry.contentRect.width));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const isNavNarrow = bodyContainerWidth < 768;
+  // Nav overlay breakpoint — the same shared `isContainerNarrow` (768px,
+  // see its own doc comment up by `bodyContainerRef`) the Customer
+  // Information panel's own narrow guard reads too, so both react together
+  // at exactly the same container width.
+  const isNavNarrow = isContainerNarrow;
   const isCompactHeader = windowWidth < 760;
 
   // Auto-collapse the expanded nav when the container drops below 768px
