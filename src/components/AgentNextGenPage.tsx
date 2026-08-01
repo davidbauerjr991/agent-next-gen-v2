@@ -2958,7 +2958,7 @@ function TranscriptSessionSeparator({
       className="sticky top-0 z-[1] bg-lyra-bg-surface-base"
     >
       <AccordionPrimitive.Item value={session.id}>
-        <div className="flex flex-wrap items-center gap-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 py-2">
           {/* Flat, left-aligned customer/case info — no wrapping pill
               border/background and no flanking divider lines (per earlier
               design update matching the reference screenshot): plain inline
@@ -2972,14 +2972,15 @@ function TranscriptSessionSeparator({
               Transfer + Outcome + status tag cluster should break onto
               their own line rather than clipping/overflowing (an earlier
               overflow-hidden/truncate attempt was the wrong read of the
-              request — undone here). This cluster itself keeps
-              `whitespace-nowrap` so its own text doesn't ALSO break
-              mid-phrase (e.g. mid phone number) before the two clusters
-              even try wrapping onto separate lines. The right-hand
-              cluster's own `ml-auto` still right-aligns it, whether that's
-              on this same line (room permitting) or on the wrapped second
-              line. */}
-          <div className="flex items-center gap-1.5 whitespace-nowrap lyra-body-sm text-lyra-fg-secondary">
+              request — undone here). This cluster now ALSO has its own
+              `flex-wrap` (no more `whitespace-nowrap`) — per explicit
+              follow-up request, its own text wraps onto further lines too
+              instead of overflowing past the container's right edge once
+              even just this cluster alone doesn't fit one line. The
+              right-hand cluster below lost its `ml-auto` for the same
+              reason — it now left-aligns under this cluster once wrapped,
+              rather than floating to the far right on its own line. */}
+          <div className="flex flex-wrap items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
             {customerName && <span className="text-lyra-fg-default">{customerName}</span>}
             {channelAddress && (
               <>
@@ -3045,11 +3046,18 @@ function TranscriptSessionSeparator({
             )}
           </div>
           {/* Consult/Transfer + Outcome — same real buttons/icons
-              `ChannelRow`'s own trailing cluster uses (channel-row.tsx),
-              floated to this row's far right via `ml-auto` directly on
-              this cluster now that the two divider lines are gone (flat
-              layout per design update) per explicit request.
-              Consult/Transfer has no real action anywhere in this app yet
+              `ChannelRow`'s own trailing cluster uses (channel-row.tsx). No
+              more `ml-auto` on this cluster itself — that pinned it to the
+              row's far right edge even once it wrapped onto its own line
+              (reported via screenshot), which reads as floating rather than
+              a natural line break. The row above now uses `justify-between`
+              instead: while both clusters share one line, it still pushes
+              this one flush to the row's right edge (identical look to
+              before); once this cluster wraps onto its own line, being the
+              lone item on that line means `justify-between` places it at
+              that line's start (left) instead — exactly `flex-start`'s
+              behavior for a single flex item, no `ml-auto` needed either
+              way. Consult/Transfer has no real action anywhere in this app yet
               (see rule #30) — same static, unwired icon button here.
               Outcome IS real when `outcome` is passed (the current
               session only — see this prop's own doc comment): the exact
@@ -3057,7 +3065,7 @@ function TranscriptSessionSeparator({
               reusing its shared `outcomeDraftKey`/`outcomeDraft` state one
               level up so opening it here or from the LeftNav card shows
               the identical draft. */}
-          <div className="shrink-0 flex items-center gap-0 ml-auto">
+          <div className="shrink-0 flex items-center gap-0">
             <Button variant="icon" size="icon-sm" title="Consult / Transfer" className="text-lyra-fg-secondary">
               <TransferIcon />
             </Button>
