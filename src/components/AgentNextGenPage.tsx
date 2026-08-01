@@ -5266,11 +5266,17 @@ export function AgentNextGenPage({
     setSidePanelOpen(false);
     lastSidePanelOpenChoice.current = false;
   };
-  // Click on the header's toggle icon — toggles open/closed only while
-  // already pinned (a no-op while unpinned, since that state is
-  // hover-driven instead).
+  // Click on the header's toggle icon — always opens/closes the panel, in
+  // whatever mode `effectiveSidePanelPinned` currently puts it in: docked
+  // inline while pinned (the normal case, since `sidePanelPinned` itself
+  // never actually goes false anymore — nothing unpins it), or as a
+  // floating overlay once the container gets narrow enough to force
+  // `effectiveSidePanelPinned` false. Used to no-op below 1024px (the old
+  // "hover handles opening while unpinned instead" reasoning) — per
+  // explicit request, an agent whose container narrowed enough to
+  // auto-close the panel still needs a working click target to bring it
+  // back, and hovering a plain click button isn't a real affordance there.
   const handleSidePanelIconToggle = () => {
-    if (!effectiveSidePanelPinned) return;
     setSidePanelOpen((v) => {
       const next = !v;
       lastSidePanelOpenChoice.current = next;
