@@ -6925,21 +6925,32 @@ export function AgentNextGenPage({
                     // the exact same tabs into `PageHeader`'s slim
                     // `titleSuffix` slot, not replacing the header outright.
                     <div className="flex min-h-[68px] items-center gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6">
-                      {showPanelToggle && (
-                        <span
-                          onMouseEnter={onSidePanelHoverStart}
-                          onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
-                        >
-                          <PanelPinButton
-                            pinned={sidePanelPinned}
-                            onToggle={handleSidePanelIconToggle}
-                            icon={<User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
-                            pinnedLabel={sidePanelToggleLabel ?? "Unpin Customer Information"}
-                            unpinnedLabel={sidePanelToggleLabel ?? "Pin Customer Information"}
-                          />
-                        </span>
+                      {/* Only shown while the panel itself is closed — once
+                          it's open, this same icon would just sit there
+                          doing nothing useful next to a panel that's
+                          already visible (the panel's own close button, and
+                          the "Customer History" tab, are the ways to act on
+                          it once open); per explicit request. Its own
+                          divider goes with it — a lone divider with nothing
+                          to its left would just look like a stray line at
+                          the start of the row. */}
+                      {showPanelToggle && !sidePanelOpen && (
+                        <>
+                          <span
+                            onMouseEnter={onSidePanelHoverStart}
+                            onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
+                          >
+                            <PanelPinButton
+                              pinned={sidePanelPinned}
+                              onToggle={handleSidePanelIconToggle}
+                              icon={<User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
+                              pinnedLabel={sidePanelToggleLabel ?? "Unpin Customer Information"}
+                              unpinnedLabel={sidePanelToggleLabel ?? "Pin Customer Information"}
+                            />
+                          </span>
+                          <div className="h-8 w-px bg-lyra-border-subtle shrink-0" aria-hidden="true" />
+                        </>
                       )}
-                      <div className="h-8 w-px bg-lyra-border-subtle shrink-0" aria-hidden="true" />
                       <TabList overflowMenu className="flex-1 min-w-0">
                         {/* "Customer History" — a separate, independently
                             selectable tab, NOT another trigger for the
