@@ -5195,6 +5195,16 @@ export function AgentNextGenPage({
   // request.
   const [sidePanelWidth, setSidePanelWidth] = useState(340);
   const sidePanelHoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // The agent's own last explicit open/closed choice (the header's
+  // "Customer History" toggle icon while pinned, or the panel's own close
+  // button) — per explicit request, a freshly started/quick-dialed/
+  // redialed/reopened interaction's panel now starts in WHICHEVER state the
+  // agent last picked, not hardcoded open every time. A ref, not state: it
+  // only needs to be read at the moment a new interaction launches, never
+  // drives a render itself. Hover-preview opens/closes (only relevant while
+  // unpinned) are deliberately NOT recorded here — those are transient,
+  // not a real choice the agent made.
+  const lastSidePanelOpenChoice = useRef(true);
 
   // Container-width pin guard — `SidePanel` has no built-in "too narrow,
   // force an overlay" handling of its own (unlike `InteriorPanel`), so this
@@ -5261,12 +5271,18 @@ export function AgentNextGenPage({
   // quietly unpinned it first.
   const handleSidePanelClose = () => {
     setSidePanelOpen(false);
+    lastSidePanelOpenChoice.current = false;
   };
   // Click on the header's toggle icon — toggles open/closed only while
   // already pinned (a no-op while unpinned, since that state is
   // hover-driven instead).
   const handleSidePanelIconToggle = () => {
-    if (effectiveSidePanelPinned) setSidePanelOpen((v) => !v);
+    if (!effectiveSidePanelPinned) return;
+    setSidePanelOpen((v) => {
+      const next = !v;
+      lastSidePanelOpenChoice.current = next;
+      return next;
+    });
   };
 
   // Track window width for nav overlay breakpoint
@@ -5401,12 +5417,14 @@ export function AgentNextGenPage({
       });
     });
     setActiveInteractionId(selection.contact.id);
-    // Customer Information animates open only for a genuinely NEW
-    // interaction (per explicit request) — starting a second interaction
-    // with a customer who already has one open leaves the panel exactly as
-    // the agent last left it (open, or toggled closed) rather than
-    // re-forcing it open every time.
-    if (isNewInteraction) setSidePanelOpen(true);
+    // Only a genuinely NEW interaction touches Customer Information's
+    // open/closed state at all — starting a second interaction with a
+    // customer who already has one open leaves the panel exactly as the
+    // agent last left it for THAT card, rather than re-applying anything
+    // here. A new one opens/stays closed per `lastSidePanelOpenChoice` —
+    // the agent's own last explicit choice (not hardcoded open) — per
+    // explicit follow-up request.
+    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
   };
 
   // App-local only (per "changes to components should only happen locally
@@ -5484,7 +5502,7 @@ export function AgentNextGenPage({
       return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id } : interaction));
     });
     setActiveInteractionId(id);
-    if (isNewInteraction) setSidePanelOpen(true);
+    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
   };
 
   /* "Redial" from the home tab's Contact History card — same merge-by-id
@@ -5532,7 +5550,7 @@ export function AgentNextGenPage({
       return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id } : interaction));
     });
     setActiveInteractionId(id);
-    if (isNewInteraction) setSidePanelOpen(true);
+    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
   };
 
   /** Fired by clicking a Contact History row itself (`ContactHistoryCard`'s
@@ -5605,7 +5623,7 @@ export function AgentNextGenPage({
       );
     });
     setActiveInteractionId(id);
-    if (isNewInteraction) setSidePanelOpen(true);
+    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
   };
 
   /* "Unassign & Dismiss" — `InteractionNavItem` itself decides which of
@@ -6032,7 +6050,7 @@ export function AgentNextGenPage({
       );
     });
     setActiveInteractionId(id);
-    if (isNewInteraction) setSidePanelOpen(true);
+    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
     setNotifications((prev) => prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n)));
   };
 
