@@ -7167,14 +7167,21 @@ export function AgentNextGenPage({
   // where this is rendered, below), which is already `relative` and is
   // exactly the "main content container" (everything right of LeftNav,
   // below AppHeader) this should fill; NOT `fixed inset-0`/the viewport,
-  // which would also cover LeftNav and AppHeader. `z-[50]` is comfortably
-  // above everything else that can appear inside `containerRef` (the
-  // Customer Information panel's `z-[5]`, the float variant's own
-  // `zIndex: 40`) without needing to compete with the app-header's own
-  // menus (`z-[9999]`) — those live in a different row entirely (above
-  // `containerRef`, not inside it), so there's no overlap to fight.
+  // which would also cover LeftNav and AppHeader. `z-[9]` sits above the
+  // Customer Information panel's `z-[5]` but deliberately BELOW LeftNav's
+  // own collapse/expand toggle button (`z-10`, left-nav.tsx) — that button
+  // is positioned `absolute -right-3` (poking ~12px past LeftNav's own
+  // right edge, i.e. spatially into `containerRef`'s territory), and
+  // `containerRef` itself doesn't establish its own stacking context (no
+  // z-index of its own), so a descendant's z-index here competes directly
+  // against LeftNav's sibling-level z-10, not just against other things
+  // inside `containerRef` — going any higher (e.g. the `z-[50]` this used
+  // originally) paints over/hides that toggle button, per explicit
+  // follow-up request to keep it clickable/visible instead. Doesn't need
+  // to compete with the app-header's own menus (`z-[9999]`) — those live
+  // in a different row entirely (above `containerRef`, not inside it).
   const sharedPanelFullScreenOverlay = panelMounted && activePanelContent && panelFullScreen ? (
-    <div className="absolute inset-0 z-[50] flex flex-col bg-lyra-bg-surface-base">
+    <div className="absolute inset-0 z-[9] flex flex-col bg-lyra-bg-surface-base">
       <ContainerHeader
         title={activePanelContent.title}
         titleBadge={activePanelContent.titleBadge}
