@@ -4836,11 +4836,12 @@ export function AgentNextGenPage({
    */
   sidePanelToggleLabel?: string;
 }) {
-  // Open by default on load (not gated on `initialInteraction` anymore —
-  // the rail should be open the first time this page renders regardless of
-  // whether the agent is seeded mid-call). `handleResize`'s narrow-viewport
-  // auto-collapse (a few lines down) still applies after that first paint.
-  const [navOpen, setNavOpen] = useState(true);
+  // Closed by default on load (not gated on `initialInteraction` — the
+  // rail should be collapsed the first time this page renders regardless
+  // of whether the agent is seeded mid-call). `handleResize`'s narrow-
+  // viewport auto-collapse (a few lines down) still applies after that
+  // first paint.
+  const [navOpen, setNavOpen] = useState(false);
   // No interactions exist until the agent launches one from the CreateNew
   // menu (Start Interaction / quick dial) — see handleStartCall/handleQuick
   // Dial below. Click any resulting InteractionNavItem card to make it the
