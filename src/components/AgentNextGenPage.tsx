@@ -7162,9 +7162,13 @@ export function AgentNextGenPage({
         // `color-mix()` directly against the same
         // `--lyra-color-bg-surface-base` variable the plain utility itself
         // resolves to (tailwind-preset.ts) is used instead. Docked keeps
-        // the normal fully-opaque background.
+        // the normal fully-opaque background. `backdrop-blur-sm` (4px) —
+        // "blur the background slightly" — softens whatever shows through
+        // that 10% transparency, same pairing the Modal backdrop's own
+        // color-mix()-plus-backdrop-blur-sm treatment already uses
+        // (entry-agent-next-gen-v2.tsx).
         panelVariant === "float"
-          ? "shadow-lg bg-[color-mix(in_srgb,var(--lyra-color-bg-surface-base)_90%,transparent)]"
+          ? "shadow-lg backdrop-blur-sm bg-[color-mix(in_srgb,var(--lyra-color-bg-surface-base)_90%,transparent)]"
           : "h-full bg-lyra-bg-surface-base"
       )}
       renderHeaderControls={({ gripProps, dockButtonProps, dockIcon, variant: dVariant }) => (
