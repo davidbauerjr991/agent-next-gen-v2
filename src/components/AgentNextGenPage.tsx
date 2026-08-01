@@ -5604,17 +5604,23 @@ export function AgentNextGenPage({
   const [panelWidth,      setPanelWidth]      = useState(SHARED_PANEL_DEFAULT_WIDTH);
   const [panelHeight,     setPanelHeight]     = useState(860);
   const [panelIsResizing, setPanelIsResizing] = useState(false);
-  // Viewport-fullscreen toggle for the shared panel (AI/Notifications/Apps/
+  // Fullscreen toggle for the shared panel (AI/Notifications/Apps/
   // Calendar/etc.) — distinct from `panelVariant`'s "float"/"docked" (which
   // is `Draggable`'s own concept and stays within/beside the interaction
-  // container). This instead acts like a modal's fullscreen toggle: a
-  // separate `position: fixed; inset: 0` overlay (`sharedPanelFullScreenOverlay`
-  // below) covering the whole browser viewport, reusing the same header/body
-  // content but rendered independently of `Draggable` entirely — `Draggable`
-  // has no viewport-fullscreen concept of its own (only float/docked), and
-  // coercing its "float" variant into spanning the viewport would mean
-  // fighting its internal width/height/offset state and its own
-  // `clampOffsetIntoViewport` containment logic. Whichever of
+  // container). This instead expands the panel to fill the ENTIRE main
+  // content container (`containerRef` — everything right of LeftNav, below
+  // AppHeader; the same box the Customer Information panel/main interaction
+  // `Container` live in), covering that area only — LeftNav and AppHeader
+  // stay visible, unlike a real page-covering modal. Implemented as a
+  // separate `position: absolute; inset: 0` overlay (`sharedPanelFullScreenOverlay`
+  // below), positioned against `containerRef` (which is already `relative`)
+  // rather than the viewport, reusing the same header/body content but
+  // rendered independently of `Draggable` entirely — `Draggable` has no
+  // fullscreen concept of its own (only float/docked), and coercing its
+  // "float" variant into spanning the container would mean fighting its
+  // internal width/height/offset state and its own
+  // `clampOffsetIntoViewport` containment logic (viewport-based, not
+  // container-based, and not easily repurposed). Whichever of
   // `panelVariant`'s two states was active before entering fullscreen is
   // preserved (untouched) and simply resumes when fullscreen exits.
   const [panelFullScreen, setPanelFullScreen] = useState(false);
@@ -7153,16 +7159,22 @@ export function AgentNextGenPage({
 
   // Fullscreen overlay for the shared panel — see `panelFullScreen`'s own
   // doc comment above for why this bypasses `Draggable` entirely rather
-  // than trying to make its "float" variant cover the viewport. Mirrors the
-  // Customer Information panel's header shape (title/icon/actions via
+  // than trying to make its "float" variant cover the container. Mirrors
+  // the Customer Information panel's header shape (title/icon/actions via
   // `ContainerHeader`, using the same `activePanelContent` the docked/float
   // rendering above uses) plus a `Minimize2` "exit full screen" action.
-  // `z-[10000]` — above the app-header's own menus (`z-[9999]`, see
-  // `getPanelFloatStyle`'s doc comment) and the float panel itself
-  // (`zIndex: 40`), since a fullscreen toggle should cover the whole app,
-  // header included, like a real modal.
+  // `absolute inset-0` — positioned against `containerRef`'s own div (see
+  // where this is rendered, below), which is already `relative` and is
+  // exactly the "main content container" (everything right of LeftNav,
+  // below AppHeader) this should fill; NOT `fixed inset-0`/the viewport,
+  // which would also cover LeftNav and AppHeader. `z-[50]` is comfortably
+  // above everything else that can appear inside `containerRef` (the
+  // Customer Information panel's `z-[5]`, the float variant's own
+  // `zIndex: 40`) without needing to compete with the app-header's own
+  // menus (`z-[9999]`) — those live in a different row entirely (above
+  // `containerRef`, not inside it), so there's no overlap to fight.
   const sharedPanelFullScreenOverlay = panelMounted && activePanelContent && panelFullScreen ? (
-    <div className="fixed inset-0 z-[10000] flex flex-col bg-lyra-bg-surface-base">
+    <div className="absolute inset-0 z-[50] flex flex-col bg-lyra-bg-surface-base">
       <ContainerHeader
         title={activePanelContent.title}
         titleBadge={activePanelContent.titleBadge}
@@ -8117,8 +8129,9 @@ export function AgentNextGenPage({
                 and `isCombinedPanelMode` brings the tabs right back. Also
                 guarded on `!panelFullScreen` — if the nav narrows into
                 combined mode while the shared panel happens to be
-                fullscreen, `sharedPanelFullScreenOverlay` (rendered at the
-                page root) already covers this content; skip this copy so
+                fullscreen, `sharedPanelFullScreenOverlay` (rendered as
+                `containerRef`'s own last child, further down) already
+                covers this content; skip this copy so
                 `activePanelContent.body` isn't mounted twice at once. */}
             {isCombinedPanelMode && activePanelContent && !panelFullScreen && (
               <div
@@ -8185,6 +8198,17 @@ export function AgentNextGenPage({
             </div>
           )}
 
+          {/* Shared single-container panel — fullscreen. Rendered here, as
+              the last child of `containerRef`'s own div (which is already
+              `relative`), so the `absolute inset-0` overlay fills exactly
+              this container — LeftNav and AppHeader (both outside this
+              div entirely) stay visible/untouched. See
+              `sharedPanelFullScreenOverlay`'s own doc comment (near
+              `sharedPanel`, above) for why this bypasses `Draggable`
+              entirely instead of trying to stretch its "float" variant to
+              cover the container. */}
+          {sharedPanelFullScreenOverlay}
+
         </div>
 
         {/* Shared single-container panel — docked (sibling of containerRef
@@ -8194,9 +8218,9 @@ export function AgentNextGenPage({
             768px the panel's content renders inline as the main
             container's second tab instead (see above), not as this
             separate docked-width column beside it. Also skipped while
-            `panelFullScreen` is on — `sharedPanelFullScreenOverlay` (a
-            separate `position: fixed` overlay rendered at the page root,
-            see its own doc comment) takes over instead. */}
+            `panelFullScreen` is on — `sharedPanelFullScreenOverlay` (an
+            `absolute inset-0` overlay rendered as `containerRef`'s own last
+            child, just above) takes over instead. */}
         {panelVariant === "docked" && !isCombinedPanelMode && !panelFullScreen && (
           <div className="flex h-full pb-3" style={{
             width: panelState === "open" ? panelWidth : 0,
@@ -8272,19 +8296,6 @@ export function AgentNextGenPage({
           </p>
         </AgentWelcomeMessage>
       </Modal>
-
-      {/* Shared panel — viewport fullscreen overlay. Rendered here, as a
-          direct child of the page's own root element, rather than nested
-          under `containerRef`/the docked or float wrappers above — a
-          `position: fixed` element is only guaranteed to size/position
-          against the actual viewport (not some intermediate ancestor) when
-          no element between it and here applies a `transform`/`filter`/
-          `perspective`/`contain` that would otherwise open its own
-          containing block. See `sharedPanelFullScreenOverlay`'s own doc
-          comment (near `sharedPanel`, above) for why this bypasses
-          `Draggable` entirely instead of trying to stretch its "float"
-          variant to cover the screen. */}
-      {sharedPanelFullScreenOverlay}
     </div>
   );
 }
