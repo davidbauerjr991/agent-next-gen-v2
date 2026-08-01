@@ -16,6 +16,8 @@ import {
   Container,
   InteriorPanel,
   SidePanel,
+  PanelFooter,
+  AIInput,
   PageHeader,
   Button,
   Textarea,
@@ -5259,6 +5261,17 @@ function CustomerInformationSidePanel({
       maxWidth={clampedMaxWidth}
       onWidthChange={onWidthChange}
       onResizeStateChange={onResizeStateChange}
+      // AI Input pinned to the bottom of the Overview tab only — `footer`
+      // renders as a `shrink-0` sibling AFTER `PanelContent` (see
+      // side-panel.tsx), so it's already outside the scroll region and
+      // naturally stays fixed to the bottom without any extra CSS.
+      footer={
+        activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") ? (
+          <PanelFooter className="justify-start">
+            <AIInput placeholder="Ask about this customer..." showAttach={false} className="w-full" />
+          </PanelFooter>
+        ) : undefined
+      }
     >
       <CustomerInformationPanelBody
         activeTab={activeTab}
