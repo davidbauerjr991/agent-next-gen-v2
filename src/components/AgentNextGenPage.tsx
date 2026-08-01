@@ -138,6 +138,8 @@ import {
   Zap,
   FileText,
   Send,
+  ArrowUpRight,
+  CircleCheck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -2855,6 +2857,21 @@ function TranscriptSessionDetails({ session }: { session: TranscriptSession }) {
    same reasoning `sessionMessages`/`openSessionIds` already live one level
    up: every session's status is independent, and only one status popover
    should ever be open across the whole transcript at a time. */
+
+/** Person + redirect-arrow composite — same "no single Lucide icon covers
+ *  transfer" composition lyra-ui's own `ConsultTransferIcon` uses
+ *  (channel-row.tsx) for its Consult/Transfer button, recreated locally here
+ *  since that one's a private, unexported helper in that file — this app
+ *  only needs the same LOOK, not a shared import. */
+function TransferIcon() {
+  return (
+    <span className="relative inline-flex h-4 w-4 items-center justify-center" aria-hidden="true">
+      <User className="h-4 w-4" strokeWidth={1.5} />
+      <ArrowUpRight className="absolute -right-1 -top-1 h-2.5 w-2.5" strokeWidth={2.5} />
+    </span>
+  );
+}
+
 function TranscriptSessionSeparator({
   session,
   open,
@@ -2866,6 +2883,7 @@ function TranscriptSessionSeparator({
   onConfirmClose,
   onCancelClose,
   messageCount,
+  outcome,
 }: {
   session: TranscriptSession;
   open: boolean;
@@ -2902,8 +2920,27 @@ function TranscriptSessionSeparator({
    *  changing anything (the status stays whatever it was before "Closed"
    *  was picked from the list). */
   onCancelClose: () => void;
+  /** Real Consult/Transfer + Outcome buttons, floated right of the "#
+   *  caseId · date" pill — per explicit request. Only meaningful/passed
+   *  for the CURRENT session (`InteractionTranscript`'s `lastSessionId`)
+   *  since it's the same live `ChannelOutcomeConfig` shape (and, via
+   *  `resolution`/`onResolutionChange`, the exact same underlying value)
+   *  the LeftNav's own `ChannelRow` Outcome button already uses for this
+   *  same channel — opening either one shows the identical popover/draft.
+   *  Historical sessions get the Transfer icon too (purely decorative,
+   *  same as everywhere else in this app — see rule #30) but no working
+   *  Outcome popover, since there's no real per-historical-session outcome
+   *  state to back one. */
+  outcome?: ChannelOutcomeConfig;
 }) {
   const isClosed = session.status === "Closed";
+  // Local to the Outcome popover's own "Status" field — same "one popover
+  // instance, two possible bodies (list vs. Closed confirm)" pattern this
+  // component's own session-status pill dropdown already uses above
+  // (`statusMenuView`), and the exact same shape `ChannelRow`'s Outcome
+  // popover uses for its identical field (channel-row.tsx).
+  const [outcomeResolutionMenuOpen, setOutcomeResolutionMenuOpen] = useState(false);
+  const [outcomeResolutionMenuView, setOutcomeResolutionMenuView] = useState<"menu" | "confirm">("menu");
   return (
     <AccordionPrimitive.Root
       type="single"
@@ -3109,6 +3146,217 @@ function TranscriptSessionSeparator({
             )}
           </div>
           <div className="h-px flex-1 bg-lyra-border-subtle" />
+          {/* Consult/Transfer + Outcome — same real buttons/icons
+              `ChannelRow`'s own trailing cluster uses (channel-row.tsx),
+              floated to this row's far right (`ml-auto` on the outer flex
+              row already pushes the two divider lines apart, so this just
+              needs to sit after the second one) per explicit request.
+              Consult/Transfer has no real action anywhere in this app yet
+              (see rule #30) — same static, unwired icon button here.
+              Outcome IS real when `outcome` is passed (the current
+              session only — see this prop's own doc comment): the exact
+              same popover UI `ChannelRow`'s Outcome button renders,
+              reusing its shared `outcomeDraftKey`/`outcomeDraft` state one
+              level up so opening it here or from the LeftNav card shows
+              the identical draft. */}
+          <div className="shrink-0 flex items-center gap-0">
+            <Button variant="icon" size="icon-sm" title="Consult / Transfer" className="text-lyra-fg-secondary">
+              <TransferIcon />
+            </Button>
+            {outcome ? (
+              <Popover
+                open={outcome.open}
+                onOpenChange={outcome.onOpenChange}
+                placement="bottom"
+                align="end"
+                className="w-80"
+                onCloseAutoFocus={(e: Event) => e.preventDefault()}
+                header={
+                  <PanelHeader
+                    title={outcome.title ?? "Log Outcome"}
+                    bordered={false}
+                    className="px-5 pb-0"
+                    onClose={() => outcome.onOpenChange(false)}
+                  />
+                }
+                footer={
+                  <div className="flex items-center justify-end gap-2 px-5 pb-4 pt-1">
+                    <Button variant="outline" size="md" onClick={outcome.onCancel}>
+                      Cancel
+                    </Button>
+                    <Button variant="default" size="md" onClick={outcome.onSave}>
+                      Approve &amp; Save
+                    </Button>
+                  </div>
+                }
+                content={
+                  <div className="flex flex-col gap-4 pb-2 pt-1">
+                    <div>
+                      <Label label="Status" className="mb-1.5" />
+                      <Popover
+                        open={outcomeResolutionMenuOpen}
+                        onOpenChange={(nextOpen: boolean) => {
+                          setOutcomeResolutionMenuOpen(nextOpen);
+                          setOutcomeResolutionMenuView("menu");
+                        }}
+                        placement="bottom"
+                        align="start"
+                        className="w-[var(--radix-popover-trigger-width)]"
+                        bodyPadding={outcomeResolutionMenuView === "confirm"}
+                        header={
+                          outcomeResolutionMenuView === "confirm" ? (
+                            <PanelHeader
+                              title="Close Contact?"
+                              icon={
+                                <WarningIconSolid
+                                  className="h-5 w-5 text-lyra-status-critical-strong"
+                                  aria-hidden="true"
+                                />
+                              }
+                              bordered={false}
+                              className="px-5 pb-0"
+                            />
+                          ) : undefined
+                        }
+                        footer={
+                          outcomeResolutionMenuView === "confirm" ? (
+                            <div className="flex items-center justify-end gap-2 px-5 pb-4 pt-1">
+                              <Button
+                                variant="destructive"
+                                size="md"
+                                onClick={() => {
+                                  outcome.onResolutionChange("Closed");
+                                  setOutcomeResolutionMenuOpen(false);
+                                  setOutcomeResolutionMenuView("menu");
+                                }}
+                              >
+                                Close
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="md"
+                                onClick={() => {
+                                  setOutcomeResolutionMenuOpen(false);
+                                  setOutcomeResolutionMenuView("menu");
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          ) : undefined
+                        }
+                        content={
+                          outcomeResolutionMenuView === "confirm" ? (
+                            <p className="pb-2 pt-1 lyra-body-md text-lyra-fg-secondary">
+                              Closing a contact cannot be undone. Are you sure you want to close this contact?
+                            </p>
+                          ) : (
+                            <Menu
+                              bare
+                              items={outcome.resolutionOptions.map((option: { label: string; dotColor: string }) => ({
+                                id: option.label,
+                                label: option.label,
+                                active: option.label === outcome.resolution,
+                                icon: (
+                                  <span
+                                    aria-hidden="true"
+                                    className="block h-2 w-2 rounded-full"
+                                    style={{ backgroundColor: option.dotColor }}
+                                  />
+                                ),
+                                onClick: () => {
+                                  if (option.label === "Closed") {
+                                    setOutcomeResolutionMenuView("confirm");
+                                    return;
+                                  }
+                                  outcome.onResolutionChange(option.label);
+                                  setOutcomeResolutionMenuOpen(false);
+                                },
+                              }))}
+                            />
+                          )
+                        }
+                      >
+                        <Button
+                          variant="outline"
+                          aria-haspopup="menu"
+                          aria-expanded={outcomeResolutionMenuOpen}
+                          disabled={outcome.resolution === "Closed"}
+                          className="h-9 w-full justify-between border-lyra-border-strong bg-lyra-bg-field font-normal text-lyra-fg-default hover:bg-lyra-bg-field hover:border-lyra-state-border-hover-neutral"
+                        >
+                          <span className="truncate">{outcome.resolution}</span>
+                          {outcome.resolution !== "Closed" && (
+                            <ChevronDown
+                              className={cn(
+                                "h-4 w-4 shrink-0 text-lyra-fg-secondary transition-transform",
+                                outcomeResolutionMenuOpen && "rotate-180"
+                              )}
+                              strokeWidth={1.5}
+                              aria-hidden="true"
+                            />
+                          )}
+                        </Button>
+                      </Popover>
+                    </div>
+                    <div>
+                      <Label label="Tags" className="mb-1.5" />
+                      <Select
+                        multiple
+                        placeholder="Select tags"
+                        options={outcome.tagOptions.map((option: TagPickerOption) => ({ value: option.label, label: option.label }))}
+                        values={outcome.selectedTags}
+                        onValuesChange={outcome.onTagsChange}
+                      />
+                      {outcome.selectedTags.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {outcome.selectedTags.map((tagLabel: string) => {
+                            const option = outcome.tagOptions.find((o: TagPickerOption) => o.label === tagLabel);
+                            return (
+                              <Tag
+                                key={tagLabel}
+                                label={tagLabel}
+                                variant={option?.variant ?? "neutral"}
+                                onRemove={() =>
+                                  outcome.onTagsChange(outcome.selectedTags.filter((t: string) => t !== tagLabel))
+                                }
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    <Select
+                      label="Disposition code"
+                      searchable
+                      options={outcome.dispositionOptions}
+                      value={outcome.dispositionCode}
+                      onValueChange={outcome.onDispositionChange}
+                    />
+                    <Textarea
+                      label="Summary"
+                      rows={5}
+                      value={outcome.summary}
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => outcome.onSummaryChange(e.target.value)}
+                    />
+                  </div>
+                }
+              >
+                <Button
+                  variant="icon"
+                  size="icon-sm"
+                  title="Outcome"
+                  className="text-lyra-fg-secondary"
+                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                >
+                  <CircleCheck className="h-4 w-4 text-lyra-status-info-strong" strokeWidth={1.5} />
+                </Button>
+              </Popover>
+            ) : (
+              <Button variant="icon" size="icon-sm" title="Outcome" className="text-lyra-fg-secondary">
+                <CircleCheck className="h-4 w-4 text-lyra-status-info-strong" strokeWidth={1.5} />
+              </Button>
+            )}
+          </div>
         </div>
         <AccordionPrimitive.Content className="overflow-hidden data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up">
           <div className="pb-4">
@@ -3133,6 +3381,16 @@ function InteractionTranscript({
   liveMessages,
   currentStatus,
   onCurrentStatusChange,
+  outcomeOpen,
+  onOutcomeOpenChange,
+  outcomeTags,
+  onOutcomeTagsChange,
+  outcomeDispositionCode,
+  onOutcomeDispositionChange,
+  outcomeSummary,
+  onOutcomeSummaryChange,
+  onOutcomeSave,
+  onOutcomeCancel,
 }: {
   /** Which channel's content to show — see this component's own doc
    *  comment above. Undefined (no active interaction/channel yet) renders
@@ -3193,6 +3451,32 @@ function InteractionTranscript({
    *  historical session — those stay local to this component (see
    *  `currentStatus` above). */
   onCurrentStatusChange: (status: string) => void;
+  /**
+   * Real Consult/Transfer + Outcome buttons on the CURRENT session's own
+   * separator bar (`TranscriptSessionSeparator`, floated right per explicit
+   * request) — all of these are the exact same shared `outcomeDraftKey`/
+   * `outcomeDraft` state (main component) the LeftNav's `ChannelRow`
+   * Outcome button already uses for THIS channel, threaded down as plain
+   * values/setters rather than one bundled object so this component (which
+   * has no other reason to know about `ChannelOutcomeConfig`'s shape) only
+   * takes on the individual pieces it actually forwards. All optional and
+   * only meaningfully passed together — see the render-call site
+   * (`showPanelToggle` gates whether Customer Information / outcome state
+   * exists at all in this app). `resolution`/`onResolutionChange` aren't
+   * separate props here since they're just `currentStatus`/
+   * `onCurrentStatusChange` above (one underlying value, same as the
+   * LeftNav's own outcome wiring).
+   */
+  outcomeOpen?: boolean;
+  onOutcomeOpenChange?: (open: boolean) => void;
+  outcomeTags?: string[];
+  onOutcomeTagsChange?: (tags: string[]) => void;
+  outcomeDispositionCode?: string;
+  onOutcomeDispositionChange?: (value: string) => void;
+  outcomeSummary?: string;
+  onOutcomeSummaryChange?: (value: string) => void;
+  onOutcomeSave?: () => void;
+  onOutcomeCancel?: () => void;
 }) {
   // A freshly-launched Chat/SMS/WhatsApp interaction (see `isFreshLaunch`'s
   // own doc comment) shows just a single synthesized "Session Details"
@@ -3573,6 +3857,33 @@ function InteractionTranscript({
                   onSelectStatus={(status) => selectSessionStatus(session.id, status)}
                   onConfirmClose={() => handleConfirmCloseSession(session.id)}
                   onCancelClose={handleCancelCloseSession}
+                  // Real Outcome popover only for the CURRENT session (see
+                  // this prop's own doc comment) — reuses `currentStatus`/
+                  // `onCurrentStatusChange` (this component's own props)
+                  // for the "Status" field, same as the LeftNav's
+                  // `ChannelRow` Outcome button does for
+                  // `interaction.currentStatus`/`handleInteractionStatusChange`.
+                  outcome={
+                    session.id === lastSessionId && outcomeOpen !== undefined
+                      ? {
+                          open: outcomeOpen,
+                          onOpenChange: onOutcomeOpenChange!,
+                          resolutionOptions: TRANSCRIPT_SESSION_STATUS_OPTIONS,
+                          resolution: currentStatus ?? "Resolved",
+                          onResolutionChange: (value: string) => onCurrentStatusChange(value),
+                          tagOptions: OUTCOME_TAG_OPTIONS,
+                          selectedTags: outcomeTags ?? [],
+                          onTagsChange: onOutcomeTagsChange!,
+                          dispositionOptions: OUTCOME_DISPOSITION_OPTIONS,
+                          dispositionCode: outcomeDispositionCode ?? OUTCOME_DISPOSITION_OPTIONS[0].value,
+                          onDispositionChange: onOutcomeDispositionChange!,
+                          summary: outcomeSummary ?? OUTCOME_DEFAULT_SUMMARY,
+                          onSummaryChange: onOutcomeSummaryChange!,
+                          onSave: onOutcomeSave!,
+                          onCancel: onOutcomeCancel!,
+                        }
+                      : undefined
+                  }
                 />
                 {messages.length > 0 && (
                   <div className="flex flex-col gap-5 py-4">
@@ -4967,6 +5278,16 @@ export function AgentNextGenPage({
       )
     : undefined;
   const activeChannelType = activeChannel?.type;
+  // Same `${interactionId}:${channelKey}` scheme the LeftNav's own
+  // `ChannelRow` Outcome button keys `outcomeDraftKey` with (a few hundred
+  // lines down) — computed here too so `InteractionTranscript`'s current-
+  // session Outcome popover (`TranscriptSessionSeparator`) reads/writes the
+  // exact same shared draft for this channel, not a second, disconnected
+  // one. `activeInteraction`-less renders (Desk dashboard) never actually
+  // use this — it's just always in scope for the JSX below.
+  const activeChannelOutcomeKey = activeInteraction
+    ? `${activeInteraction.id}:${activeChannel?.id ?? activeChannel?.type ?? "channel"}`
+    : undefined;
   // Shared clock powering every open channel's live "MM:SS since it
   // started" elapsed display — independent of `elapsedSeconds` below, which
   // is the agent's own status timer and resets on status change.
@@ -7064,6 +7385,22 @@ export function AgentNextGenPage({
                         liveMessages={activeInteraction.liveMessages ?? []}
                         currentStatus={activeInteraction.currentStatus}
                         onCurrentStatusChange={(status) => handleInteractionStatusChange(activeInteraction.id, status)}
+                        // Same shared `outcomeDraftKey`/`outcomeDraft` state
+                        // the LeftNav's own `ChannelRow` Outcome button uses
+                        // for this exact channel (`outcomeKey` — same
+                        // `${interactionId}:${channelKey}` scheme that
+                        // call site uses) — see `InteractionTranscript`'s
+                        // own outcome props' doc comment.
+                        outcomeOpen={outcomeDraftKey === activeChannelOutcomeKey}
+                        onOutcomeOpenChange={(open) => handleOutcomeOpenChange(activeChannelOutcomeKey!, open)}
+                        outcomeTags={outcomeDraft.tags}
+                        onOutcomeTagsChange={(tags) => setOutcomeDraft((d) => ({ ...d, tags }))}
+                        outcomeDispositionCode={outcomeDraft.dispositionCode}
+                        onOutcomeDispositionChange={(value) => setOutcomeDraft((d) => ({ ...d, dispositionCode: value }))}
+                        outcomeSummary={outcomeDraft.summary}
+                        onOutcomeSummaryChange={(value) => setOutcomeDraft((d) => ({ ...d, summary: value }))}
+                        onOutcomeSave={handleOutcomeSave}
+                        onOutcomeCancel={handleOutcomeCancel}
                       />
                       {!activeInteraction.closed && (
                         <InteractionComposer onSend={(text) => handleSendMessage(activeInteraction.id, text)} />
