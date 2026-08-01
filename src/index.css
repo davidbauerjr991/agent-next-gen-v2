@@ -1,0 +1,43 @@
+@import '../../lyra-ui/src/styles/lyra-tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base resets ── */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  color: var(--lyra-color-fg-default);
+  background: var(--lyra-color-bg-surface-shell);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Theme switch fade ──
+   Toggling [data-theme] on <html> swaps every color token instantly, which reads as an
+   abrupt flash. This fallback transition smooths that swap for any element that doesn't
+   already declare its own transition (e.g. Tailwind's transition-colors utilities) —
+   those keep their own faster, more specific timing since class selectors win over `*`. */
+*, *::before, *::after {
+  transition: background-color 300ms ease, border-color 300ms ease, color 300ms ease,
+    fill 300ms ease, stroke 300ms ease, box-shadow 300ms ease;
+}
+
+/* ── Scrollbar styling ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #c1c7cd;
+  border-radius: 3px;
+}
