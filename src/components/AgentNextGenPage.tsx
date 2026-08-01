@@ -2314,6 +2314,8 @@ function CustomersListView() {
                     columnKey={key}
                     dragHandlers={dragHandlers}
                     isDragOver={dragOverKey === key}
+                    resizable
+                    minWidth={80}
                   >
                     {col.label}
                   </SortableTableHead>
@@ -2335,7 +2337,7 @@ function CustomersListView() {
                   />
                 </TableCell>
                 {columnOrder.map((key: CustomerColKey) => (
-                  <TableCell key={key} className={CUSTOMER_COLUMN_CONFIG[key].flex}>{row[key]}</TableCell>
+                  <TableCell key={key} columnKey={key} className={CUSTOMER_COLUMN_CONFIG[key].flex}>{row[key]}</TableCell>
                 ))}
                 <TableCell className="w-[48px] shrink-0 sticky right-0 bg-lyra-bg-surface-base">
                   <button
