@@ -5048,20 +5048,29 @@ function CustomerInformationPanelBody({
    overlay" concept of its own; an unpinned panel simply shows/hides on
    hover instead.
 
-   Full-screen (per explicit follow-up request) is instead built entirely
-   here, without touching `SidePanel` itself: the caller passes `pinned={
-   false}` (always an unpinned/floating overlay while full-screen — pushing
-   the main column over via docked/pinned mode wouldn't read as "overlay
-   full screen within its parent container") and `width` equal to the
-   parent `Container`'s own measured width (`sidePanelContainerWidth`,
-   already tracked for the narrow-container guard) instead of the normal
-   drag-resized width, so the panel's own existing unpinned/absolute
-   rendering branch (side-panel.tsx) covers the whole container edge to
-   edge. `key`'d by the caller so this remounts on toggle — `SidePanel`'s
-   internal drag-resize hook (`usePanelDragResize`) latches onto whatever
-   width a manual drag last set and ignores further external `width` prop
-   changes afterward, so a fresh mount is the reliable way to make it pick
-   up the new controlled width instead of possibly ignoring it. */
+   Full-screen (per explicit follow-up request) is built entirely here,
+   without adding a real "full screen" concept to `SidePanel` itself: the
+   caller passes `pinned={false}` (always an unpinned/floating overlay
+   while full-screen — pushing the main column over via docked/pinned mode
+   wouldn't read as "overlay full screen within its parent container") and
+   `width` equal to the parent `Container`'s own measured width
+   (`sidePanelContainerWidth`, already tracked for the narrow-container
+   guard) instead of the normal drag-resized width, so the panel's own
+   existing unpinned/absolute rendering branch (side-panel.tsx) covers the
+   whole container edge to edge — animated by the same CSS width
+   transition every other resize already uses, so expanding/collapsing
+   full-screen isn't an instant jump cut. That animation needed one small
+   fix in the shared `usePanelDragResize` hook (use-panel-drag-resize.ts):
+   it used to latch onto whatever width a manual drag last set and ignore
+   further external `width` prop changes afterward, which (a) silently
+   broke this full-screen toggle for a panel that had been manually
+   resized even once before, and (b) meant this component used to have to
+   force a full remount on every full-screen toggle just to reset that
+   stale internal state, which skipped the transition entirely (a fresh
+   DOM node has no prior frame to animate from). The hook now resets its
+   own internal drag state whenever its `initialWidth` prop changes, so it
+   stays properly reactive to external width changes and no remount is
+   needed here anymore. */
 function CustomerInformationSidePanel({
   open,
   pinned,
@@ -7330,11 +7339,6 @@ export function AgentNextGenPage({
             <div className="flex flex-1 overflow-hidden min-h-0">
               {showPanelToggle && activeInteraction && (
                 <CustomerInformationSidePanel
-                  // Forces a fresh mount whenever full-screen toggles — see
-                  // this component's own doc comment for why (the internal
-                  // drag-resize hook otherwise latches onto a stale width
-                  // and ignores the new controlled `width` below).
-                  key={sidePanelFullScreen ? "fullscreen" : "normal"}
                   open={sidePanelOpen}
                   // Always unpinned (floating overlay) while full-screen —
                   // per explicit request this should overlay the parent
