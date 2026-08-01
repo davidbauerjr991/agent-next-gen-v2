@@ -5138,10 +5138,10 @@ export function AgentNextGenPage({
   const [sidePanelOpen,     setSidePanelOpen]     = useState(false);
   const [sidePanelPinned,   setSidePanelPinned]   = useState(false);
   const [sidePanelResizing, setSidePanelResizing] = useState(false);
-  // 425 — same initial width the previous `InteriorPanel` version opened
-  // to (its own `maxWidth` default), kept as-is now that it's a plain
-  // controlled `width` prop on `SidePanel` instead.
-  const [sidePanelWidth, setSidePanelWidth] = useState(425);
+  // 340 — explicit starting width for the SidePanel version (was 425,
+  // matching the old InteriorPanel's `maxWidth` default) — per explicit
+  // request.
+  const [sidePanelWidth, setSidePanelWidth] = useState(340);
   const sidePanelHoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Container-width pin guard — `SidePanel` has no built-in "too narrow,
