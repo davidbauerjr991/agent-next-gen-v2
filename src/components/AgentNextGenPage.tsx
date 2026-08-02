@@ -1088,6 +1088,21 @@ const LATEST_CONTACTS_STATIC: Omit<LatestContact, "contactsCount" | "skillsCount
 
 type DateFilterValue = "today" | "yesterday" | "last7" | "custom";
 
+// Desk-tab keys/labels — shared by `activeDeskTab`/`deskTabOrder` state and
+// the reorderable tab row that renders them (see `deskTabOrder`'s own doc
+// comment further down). Centralized here so the row can be built with a
+// `.map()` (each `Tab` needs a stable `key` for `TabList`'s `reorderable`
+// drag-and-drop to work) instead of five hand-written near-duplicate `<Tab>`
+// elements.
+type DeskTabKey = "home" | "customers" | "accounts" | "tickets" | "wem";
+const DESK_TAB_LABELS: Record<DeskTabKey, string> = {
+  home: "Dashboard",
+  customers: "Customers",
+  accounts: "Accounts",
+  tickets: "Tickets",
+  wem: "WEM",
+};
+
 /* Dummy Performance data per date range — drives the Performance summary
    card's rows/footer so the numbers actually change when a range is picked.
    `overallPerformance` is a percentage (replaces the old "CSAT Score"
@@ -6579,6 +6594,20 @@ export function AgentNextGenPage({
     return () => clearInterval(id);
   }, []);
   const [activeDeskTab, setActiveDeskTab] = useState<"home" | "customers" | "accounts" | "tickets" | "wem">("home");
+  // Desk-tab display order — separate from `activeDeskTab` above (which
+  // one is selected), so the user can click-and-drag reorder the Home/
+  // Customers/Accounts/Tickets/WEM tabs (via `TabList`'s `reorderable`/
+  // `onReorder`, tabs.tsx) without that affecting which tab is currently
+  // active. `TabList` doesn't own this order itself — it only reports the
+  // result of a drag — so this array is the actual source of truth the
+  // tab row below is rendered from.
+  const [deskTabOrder, setDeskTabOrder] = useState<DeskTabKey[]>([
+    "home",
+    "customers",
+    "accounts",
+    "tickets",
+    "wem",
+  ]);
   /* Settings — a third top-level view alongside Desk/interaction-record,
      shown in place of both in the content column when the Settings rail
      item is clicked. Mutually exclusive with an active interaction: opening
@@ -9333,22 +9362,17 @@ export function AgentNextGenPage({
                           </Badge>
                         }
                       />
-                      <TabList overflowMenu className="px-6 bg-lyra-bg-surface-base shrink-0">
-                        <Tab active={activeDeskTab === "home"} onClick={() => setActiveDeskTab("home")}>
-                          Dashboard
-                        </Tab>
-                        <Tab active={activeDeskTab === "customers"} onClick={() => setActiveDeskTab("customers")}>
-                          Customers
-                        </Tab>
-                        <Tab active={activeDeskTab === "accounts"} onClick={() => setActiveDeskTab("accounts")}>
-                          Accounts
-                        </Tab>
-                        <Tab active={activeDeskTab === "tickets"} onClick={() => setActiveDeskTab("tickets")}>
-                          Tickets
-                        </Tab>
-                        <Tab active={activeDeskTab === "wem"} onClick={() => setActiveDeskTab("wem")}>
-                          WEM
-                        </Tab>
+                      <TabList
+                        overflowMenu
+                        reorderable
+                        onReorder={(order) => setDeskTabOrder(order as DeskTabKey[])}
+                        className="px-6 bg-lyra-bg-surface-base shrink-0"
+                      >
+                        {deskTabOrder.map((key) => (
+                          <Tab key={key} active={activeDeskTab === key} onClick={() => setActiveDeskTab(key)}>
+                            {DESK_TAB_LABELS[key]}
+                          </Tab>
+                        ))}
                       </TabList>
                     </>
                   )}
