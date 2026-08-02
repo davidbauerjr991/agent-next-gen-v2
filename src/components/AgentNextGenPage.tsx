@@ -97,6 +97,7 @@ import {
 } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_AGENTS } from "@nicecxone/lyra-ui/agents-data";
 import { CREATE_NEW_CUSTOMERS, type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
+import { useScheduleContent } from "@/components/SchedulePanel";
 import appIcon from "@/assets/app-icon.svg";
 import {
   Home,
@@ -7982,7 +7983,12 @@ export function AgentNextGenPage({
       setNotifications((prev) => prev.map((i) => i.id === n.id ? { ...i, read: true } : i));
     },
   });
-  // Agent Chat/Schedule — no bespoke component (same blank empty-state
+  // Schedule — basic Day/Week calendar shell (SchedulePanel.tsx, new this
+  // session, app-only — not added to lyra-ui). Called unconditionally here
+  // (a real hook, own local view/anchorDate state), same as any other
+  // panel-content builder in this block.
+  const scheduleContent = useScheduleContent();
+  // Agent Chat — no bespoke component (same blank empty-state
   // `DraggablePanel` itself defaults to when given no children).
   const blankPanelContent = (title: string): EmbeddablePanelContent => ({
     title,
@@ -8074,7 +8080,7 @@ export function AgentNextGenPage({
   const contentByPanelKey: Record<PanelKey, EmbeddablePanelContent> = {
     notif: notifContent,
     conversations: blankPanelContent("Agent Chat"),
-    schedule: blankPanelContent("Schedule"),
+    schedule: scheduleContent,
     screenpop: screenPopContent,
     customers: blankPanelContent("Customers"),
     accounts: blankPanelContent("Accounts"),
