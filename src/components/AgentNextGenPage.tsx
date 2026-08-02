@@ -6009,6 +6009,13 @@ function CustomerRowInfoPanel({
       side="right"
       open={row !== null}
       onClose={onClose}
+      // Lets the agent manually expand to full screen via `InteriorPanel`'s
+      // own built-in toggle button (rendered next to the close button in
+      // its header, self-contained `isFullScreen` state — see interior-
+      // panel.tsx's own doc comment on `allowFullScreen`) — per explicit
+      // request: opens as a normal docked flyout by default, with full
+      // screen as an option, not the default.
+      allowFullScreen
       headerTitle={customerName ?? "Customer"}
       headerSubhead={recordId}
       headerTabs={
@@ -9070,8 +9077,31 @@ export function AgentNextGenPage({
                   onFilterValuesChange={setCustomerFilterValues}
                   onRowClick={setSelectedCustomerRow}
                 />
-                <CustomerRowInfoPanel row={selectedCustomerRow} onClose={() => setSelectedCustomerRow(null)} />
               </div>
+              {/* Rendered OUTSIDE the `display:contents` wrapper above, not
+                  inside it — `InteriorPanel` measures its own real DOM
+                  parent's width (via `ResizeObserver`) to decide whether to
+                  auto-full-screen below 768px, and a `display:contents`
+                  element reports zero width to that observer (it generates
+                  no box at all). Nested inside that wrapper, this panel's
+                  parent WAS that zero-width div, so it read as permanently
+                  narrower than 768px and force-opened full-screen every
+                  time, with no way to size down — confirmed the actual bug
+                  behind "don't have it go full screen, just fly out
+                  normal." Sitting here instead, its real parent is this row
+                  div (its normal, correctly-measured width), so it opens as
+                  a normal docked flyout like every other `InteriorPanel` in
+                  this file. `row` still resets to `null` whenever the
+                  agent's off the Customers tab (rather than stapling this
+                  render to `activeDeskTab === "customers"` outright), so it
+                  doesn't linger open over Accounts/Tickets/WEM/Dashboard if
+                  left open when the agent switches tabs — `selectedCustomerRow`
+                  itself is untouched, so it reopens on the same row if the
+                  agent comes back without picking a new one. */}
+              <CustomerRowInfoPanel
+                row={activeDeskTab === "customers" ? selectedCustomerRow : null}
+                onClose={() => setSelectedCustomerRow(null)}
+              />
               {activeDeskTab !== "customers" && (activeDeskTab !== "home" ? (
                 // Accounts/Tickets/WEM — no content built yet; same
                 // "Coming soon" placeholder treatment used elsewhere in
