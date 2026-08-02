@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown, LocateFixed, Plus } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  LocateFixed,
+  Plus,
+  // Aliased — this file already imports lyra-ui's own `Calendar` (the
+  // date-grid component) and this would otherwise collide with it.
+  Calendar as CalendarIcon,
+  CalendarRange,
+} from "lucide-react";
 import {
   Button,
   buttonVariants,
@@ -95,6 +105,13 @@ const DAY_COLUMN_MIN_WIDTH = 112; // px, per day column in week view
 // `md` value, used here as a container-width threshold rather than a
 // viewport media query (see that component's own doc comment).
 const TOOLBAR_WIDE_BREAKPOINT = 768;
+
+// Below this width, Add and Day/Week collapse to icon-only — there's no
+// standard Tailwind breakpoint down at this size (its smallest, `sm`, is
+// 640), so this is a one-off number picked from this toolbar's own
+// content: comfortably below where "Add"/"Day"/"Week" text still fits
+// two-per-row alongside the nav cluster and Today.
+const TOOLBAR_COMPACT_BREAKPOINT = 400;
 
 type ScheduleView = "day" | "week";
 
@@ -271,17 +288,27 @@ function ScheduleToolbar({
   // own scale.
   const containerRef = useRef<HTMLDivElement>(null);
   const [isWide, setIsWide] = useState(true);
+  const [isCompact, setIsCompact] = useState(false);
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([entry]) => setIsWide(entry.contentRect.width >= TOOLBAR_WIDE_BREAKPOINT));
+    const ro = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width;
+      setIsWide(width >= TOOLBAR_WIDE_BREAKPOINT);
+      setIsCompact(width < TOOLBAR_COMPACT_BREAKPOINT);
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  const navCluster = (
-    <div className="flex items-center gap-2">
-      <Button variant="outline" size="icon" title="Previous" onClick={goToPrevious}>
+  // `stretch` — true only for the narrow layout's row 1, where the date
+  // nav is the sole occupant of the row (Today moved to row 2, see below)
+  // and should fill that full width between the chevrons instead of
+  // staying a compact pill. The wide, single-row layout keeps the original
+  // compact-pill sizing, matching the reference screenshots.
+  const renderNavCluster = (stretch: boolean) => (
+    <div className={cn("flex items-center gap-2", stretch && "w-full")}>
+      <Button variant="outline" size="icon" className="shrink-0" title="Previous" onClick={goToPrevious}>
         <ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
       </Button>
 
@@ -319,13 +346,17 @@ function ScheduleToolbar({
       >
         <button
           type="button"
-          className={cn(buttonVariants({ variant: "outline", size: "lg" }), "justify-center whitespace-nowrap")}
+          className={cn(
+            buttonVariants({ variant: "outline", size: "lg" }),
+            "justify-center whitespace-nowrap",
+            stretch && "flex-1"
+          )}
         >
           {formatNavDate(anchorDate)}
         </button>
       </Popover>
 
-      <Button variant="outline" size="icon" title="Next" onClick={goToNext}>
+      <Button variant="outline" size="icon" className="shrink-0" title="Next" onClick={goToNext}>
         <ChevronRight className="h-4 w-4" strokeWidth={1.5} />
       </Button>
     </div>
@@ -338,12 +369,40 @@ function ScheduleToolbar({
     </Button>
   );
 
+  // Below `TOOLBAR_COMPACT_BREAKPOINT`, both collapse to icon-only —
+  // `ToggleGroup`'s `label` accepts any `ReactNode`, so the icon swap is
+  // just a different `label` per item; the text itself moves to a
+  // visually-hidden `sr-only` span in each so screen readers still get
+  // "Day"/"Week" as the accessible name (a bare icon has none on its own).
   const viewToggle = (
     <ToggleGroup
-      items={[
-        { value: "day", label: "Day" },
-        { value: "week", label: "Week" },
-      ]}
+      items={
+        isCompact
+          ? [
+              {
+                value: "day",
+                label: (
+                  <span className="flex items-center">
+                    <span className="sr-only">Day</span>
+                    <CalendarIcon className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                  </span>
+                ),
+              },
+              {
+                value: "week",
+                label: (
+                  <span className="flex items-center">
+                    <span className="sr-only">Week</span>
+                    <CalendarRange className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                  </span>
+                ),
+              },
+            ]
+          : [
+              { value: "day", label: "Day" },
+              { value: "week", label: "Week" },
+            ]
+      }
       value={view}
       // ToggleGroup's single-select mode deselects on re-click of the
       // already-active item (empty string) — a Day/Week switch should
@@ -365,14 +424,24 @@ function ScheduleToolbar({
       onValueChange={() => {}}
       dropdownAlign="right"
       trigger={
-        <button
-          type="button"
-          className={cn(buttonVariants({ variant: "default", size: "lg" }), "gap-1.5")}
-        >
-          <Plus className="h-4 w-4" strokeWidth={1.5} />
-          Add
-          <ChevronDown className="h-4 w-4" strokeWidth={1.5} />
-        </button>
+        isCompact ? (
+          <button
+            type="button"
+            aria-label="Add"
+            className={cn(buttonVariants({ variant: "default", size: "icon" }))}
+          >
+            <Plus className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={cn(buttonVariants({ variant: "default", size: "lg" }), "gap-1.5")}
+          >
+            <Plus className="h-4 w-4" strokeWidth={1.5} />
+            Add
+            <ChevronDown className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+        )
       }
     />
   );
@@ -382,7 +451,7 @@ function ScheduleToolbar({
       {isWide ? (
         <div className="flex w-full items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            {navCluster}
+            {renderNavCluster(false)}
             {todayButton}
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -395,10 +464,10 @@ function ScheduleToolbar({
         // Add) rather than sharing row 1 with the date nav — at narrow
         // widths, a long formatted date (e.g. "November 4, 2021") left
         // Today competing with it for the same row's space and could push
-        // it off the edge. Row 1 is just the nav cluster now, free to use
-        // the full row width on its own.
+        // it off the edge. Row 1 is just the nav cluster now, stretched
+        // (renderNavCluster(true)) to fill that full row width on its own.
         <div className="flex w-full flex-col gap-2">
-          <div className="flex w-full items-center">{navCluster}</div>
+          <div className="flex w-full items-center">{renderNavCluster(true)}</div>
           <div className="flex w-full items-center justify-between gap-2">
             {todayButton}
             <div className="flex shrink-0 items-center gap-2">
