@@ -6343,11 +6343,31 @@ export function AgentNextGenPage({
   // below, via `buildDismissedContactHistoryEntry`) — see `ContactHistoryCard`'s
   // own doc comment for the full picture.
   const [dismissedContactHistory, setDismissedContactHistory] = useState<ContactHistoryEntry[]>([]);
-  // Toast fired by `handleDismissInteraction` below (a whole assignment
-  // being unassigned/dismissed, not a single-channel `handleDismissChannel`)
-  // — `useToast` just tracks the list; `<ToastContainer>` actually renders
-  // it, near the end of this component's JSX.
+  // Toast fired by both `handleDismissInteraction` (whole assignment) and
+  // `handleDismissChannel` (one of several open channels) below, via
+  // `fireDismissToast` — `useToast` just tracks the list; `<ToastContainer>`
+  // actually renders it, near the end of this component's JSX.
   const { toasts, addToast, dismissToast } = useToast();
+  // Shared by both dismiss paths so the toast's own shape only lives in one
+  // place. `title` is just "Success" — matching `Toast`'s own convention
+  // (see toast.tsx's Storybook demos: a short status word as the bold
+  // title, the specifics as body copy underneath) — with the
+  // "{Name} {Record ID} Successfully Dismissed" text moved into `message`
+  // (the body) instead of previously being crammed into `title` itself.
+  // `customerName` falls back to "Customer" the same way the main
+  // interaction header does (see `mainRegionTabLabel`) — an ad-hoc (typed
+  // number/email, no matched customer) interaction still has *some* value
+  // here (the raw address itself, see `customerIdentified`'s own doc
+  // comment in lyra-ui's interaction-nav-item.tsx), so this fallback is
+  // just defensive, not the common case.
+  const fireDismissToast = (interaction: Pick<ActiveInteraction, "customerName" | "recordId">) => {
+    addToast({
+      variant: "success",
+      title: "Success",
+      message: `${interaction.customerName ?? "Customer"} ${interaction.recordId} Successfully Dismissed`,
+      duration: 4000,
+    });
+  };
   // "Outcome" popover (`ChannelRow`'s own `outcome` prop, channel-row.tsx) —
   // logs Resolution/Tags/Disposition code/Summary for whichever channel's
   // Outcome button was clicked. Only one can be open across the entire left
@@ -7433,17 +7453,7 @@ export function AgentNextGenPage({
     const dismissed = interactions.find((interaction) => interaction.id === id);
     if (dismissed) {
       setDismissedContactHistory((prev) => [buildDismissedContactHistoryEntry(dismissed, clockTick), ...prev]);
-      // `customerName` falls back to "Customer" the same way the main
-      // interaction header does (see `mainRegionTabLabel`) — an ad-hoc
-      // (typed number/email, no matched customer) interaction still has
-      // *some* value here (the raw address itself, see `customerIdentified`'s
-      // own doc comment in lyra-ui's interaction-nav-item.tsx), so this
-      // fallback is just defensive, not the common case.
-      addToast({
-        variant: "success",
-        title: `${dismissed.customerName ?? "Customer"} ${dismissed.recordId} Successfully Dismissed`,
-        duration: 4000,
-      });
+      fireDismissToast(dismissed);
     }
     // Dismissing the active assignment shouldn't strand the agent on an
     // empty dashboard when there's other open work waiting — hand "active"
@@ -7465,6 +7475,15 @@ export function AgentNextGenPage({
     // numbers), and filtering by `type` would drop *both* instead of just
     // the one the agent actually dismissed.
     const dismissedKey = channel.id ?? channel.type;
+    // Fires the same success toast `handleDismissInteraction` does — every
+    // dismissed channel gets its own confirmation, not just the one that
+    // happens to empty the card out entirely. Looked up from `interactions`
+    // (not `remaining`/the updater below) for the same reason
+    // `handleDismissInteraction` does: that's the one place this
+    // assignment's current `customerName`/`recordId` still exist before the
+    // state update below removes just this one channel from it.
+    const interaction = interactions.find((i) => i.id === id);
+    if (interaction) fireDismissToast(interaction);
     setInteractions((prev) =>
       prev.map((interaction) => {
         if (interaction.id !== id) return interaction;
@@ -9842,10 +9861,12 @@ export function AgentNextGenPage({
         </AgentWelcomeMessage>
       </Modal>
 
-      {/* Fired by `handleDismissInteraction` (a whole assignment being
-          unassigned/dismissed) — kept at the very end of this tree, a
-          sibling of everything else, same as `Modal` above, so it's always
-          mounted regardless of which desk tab/panel is currently active. */}
+      {/* Fired by `fireDismissToast`, from either `handleDismissInteraction`
+          (a whole assignment being unassigned/dismissed) or
+          `handleDismissChannel` (one of several open channels) — kept at
+          the very end of this tree, a sibling of everything else, same as
+          `Modal` above, so it's always mounted regardless of which desk
+          tab/panel is currently active. */}
       <ToastContainer>
         {toasts.map((t) => (
           <Toast key={t.id} variant={t.variant} title={t.title} duration={t.duration} onDismiss={() => dismissToast(t.id)}>
