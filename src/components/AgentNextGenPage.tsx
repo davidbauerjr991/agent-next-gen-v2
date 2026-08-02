@@ -2459,30 +2459,43 @@ const CUSTOMER_FILTER_VALUE_OPTIONS: Record<CustomerFilterKey, FilterChipOption[
 
 function CustomersListView({
   onStartInteraction,
+  addedFilterKeys,
+  onAddedFilterKeysChange,
+  filterValues,
+  onFilterValuesChange,
 }: {
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
+  // Filter state is a controlled prop, not local `useState`, so it lives on
+  // (and survives) `AgentNextGenPage` itself instead of resetting every
+  // time this component unmounts — which happens on every navigation away
+  // from the Desk dashboard (an active interaction, Settings), not just
+  // when switching between desk tabs. See the state's own declaration
+  // comment in `AgentNextGenPage` for the full explanation.
+  addedFilterKeys: string[];
+  onAddedFilterKeysChange: (keys: string[]) => void;
+  filterValues: Record<string, string[]>;
+  onFilterValuesChange: (values: Record<string, string[]>) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [visibleCols, setVisibleCols] = useState<Set<string>>(new Set(CUSTOMER_ALL_COLUMN_KEYS));
 
   // Which fields the agent has actually added via the "+ Filter" menu below
   // — only these get rendered as live `FilterChip`s / applied to `filtered`.
-  // Starts empty: no filter is active until the agent explicitly adds one,
-  // matching the reference "Add Filter" menu this was built from.
-  const [addedFilterKeys, setAddedFilterKeys] = useState<string[]>([]);
-  const [filterValues, setFilterValues] = useState<Record<string, string[]>>({});
+  // Starts empty (in the lifted state's own initializer): no filter is
+  // active until the agent explicitly adds one, matching the reference
+  // "Add Filter" menu this was built from.
   const filterDefs = addedFilterKeys.map((key) => {
     const def = CUSTOMER_FILTER_FIELD_DEFS.find((f) => f.key === key)!;
     return { key: def.key, label: def.label, options: CUSTOMER_FILTER_VALUE_OPTIONS[def.key] };
   });
-  const handleFilterChange = (key: string, values: string[]) => setFilterValues((prev) => ({ ...prev, [key]: values }));
-  const clearAllFilters = () => setFilterValues({});
+  const handleFilterChange = (key: string, values: string[]) => onFilterValuesChange({ ...filterValues, [key]: values });
+  const clearAllFilters = () => onFilterValuesChange({});
   // Adding/removing a field from the "+ Filter" menu — removing one also
   // drops its stored selected values, so re-adding it later starts fresh
   // instead of resurrecting a stale selection nobody can see in the meantime.
   const handleAddedFiltersChange = (keys: string[]) => {
-    setAddedFilterKeys(keys);
-    setFilterValues((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => keys.includes(k))));
+    onAddedFilterKeysChange(keys);
+    onFilterValuesChange(Object.fromEntries(Object.entries(filterValues).filter(([k]) => keys.includes(k))));
   };
 
   const filtered = CUSTOMER_LIST_RECORDS.filter((row) => {
@@ -6146,6 +6159,21 @@ export function AgentNextGenPage({
   const [activeInteractionId, setActiveInteractionId] = useState<string | null>(
     () => initialInteraction?.id ?? null
   );
+  // Customers table's "+ Filter" state, lifted up here (not local to
+  // `CustomersListView`) — that component sits inside the Desk dashboard's
+  // own branch of the `showSettings ? ... : activeInteraction ? ... : (
+  // dashboard )` conditional a few thousand lines down, which unmounts the
+  // WHOLE dashboard (including `CustomersListView`) the moment the agent
+  // starts/opens an interaction or Settings, not just when switching desk
+  // tabs. Keeping `CustomersListView` mounted-but-hidden across desk-tab
+  // switches (see its own render call site) only covers THAT narrower case;
+  // it still unmounts for real here, which would reset any state that
+  // lived in its own `useState`. Living up here instead, on a component
+  // that's never unmounted for the lifetime of this page, is what actually
+  // makes the filters survive navigating away to an interaction/Settings
+  // and back to Customers, not just switching between desk tabs.
+  const [customerAddedFilterKeys, setCustomerAddedFilterKeys] = useState<string[]>([]);
+  const [customerFilterValues, setCustomerFilterValues] = useState<Record<string, string[]>>({});
   // Whether the record header's own "Customer History" tab (not the
   // Customer Information toggle icon next to it — a separate, unrelated
   // control) is the selected tab. A real selection, independent of both the
@@ -8929,6 +8957,10 @@ export function AgentNextGenPage({
                   onStartInteraction={(contact, channel, phone, skillId) =>
                     handleStartCall({ contact, channel, phone, skillId })
                   }
+                  addedFilterKeys={customerAddedFilterKeys}
+                  onAddedFilterKeysChange={setCustomerAddedFilterKeys}
+                  filterValues={customerFilterValues}
+                  onFilterValuesChange={setCustomerFilterValues}
                 />
               </div>
               {activeDeskTab !== "customers" && (activeDeskTab !== "home" ? (
