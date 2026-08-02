@@ -2300,9 +2300,18 @@ function CustomerChannelPicker({
   }, [open, selectedChannel, row]);
 
   const fieldMeta = customerChannelAddress(row, selectedChannel);
+  // No real phone/email on file for this channel — true whenever `row` is
+  // the placeholder stub `ActiveInteractionAddChannelIcons` falls back to
+  // for an interaction with no matching Customers-table record (its
+  // `firstPhone`/`emailAddress` are both blank). Gates the address field
+  // and Start Interaction button below so an agent can't select a channel
+  // that looks available but has nothing real behind it and silently
+  // no-ops on click — see this component's own `handleStartInteraction`
+  // guard, which already fails the same way but with no visible signal.
+  const hasAddress = fieldMeta.value.length > 0;
 
   const handleStartInteraction = () => {
-    if (!skillId) return;
+    if (!skillId || !hasAddress) return;
     // `OUTBOUND_CUSTOMERS` is built 1:1 (same order, same underlying
     // record) from the exact same `CREATE_NEW_CUSTOMERS` fixture
     // `CUSTOMER_LIST_RECORDS` maps into `row` from — its `subtitle` field
@@ -2331,15 +2340,30 @@ function CustomerChannelPicker({
         <div className="w-64 p-3 space-y-3">
           <RadioButtonGroup
             label="Select Channel"
-            options={available.map((c) => ({ value: c, label: CHANNEL_ICON_META[c].label }))}
+            // Disables (rather than hides) whichever channel options have
+            // no real phone/email on file for this row — same
+            // `customerChannelAddress` lookup `fieldMeta` below already
+            // uses. Kept selectable-looking-but-blocked instead of removed
+            // from the list entirely so the agent can still see every
+            // channel type this contact is nominally reachable on, just
+            // not proceed past it without real address data — the Select/
+            // Start Interaction gating below (`hasAddress`) is the same
+            // signal, just surfaced one step earlier.
+            options={available.map((c) => ({
+              value: c,
+              label: CHANNEL_ICON_META[c].label,
+              disabled: customerChannelAddress(row, c).value.length === 0,
+            }))}
             value={selectedChannel}
             onValueChange={(v: string) => setSelectedChannel(v as ChannelType)}
           />
           <Select
             label={fieldMeta.label}
-            value={address || undefined}
+            value={hasAddress ? address || undefined : undefined}
             onValueChange={setAddress}
-            options={[{ value: fieldMeta.value, label: fieldMeta.value }]}
+            disabled={!hasAddress}
+            placeholder={hasAddress ? undefined : `No ${selectedChannel === "email" ? "email address" : "phone number"} on file`}
+            options={hasAddress ? [{ value: fieldMeta.value, label: fieldMeta.value }] : []}
           />
           <Select
             label="Outbound Skill"
@@ -2348,7 +2372,13 @@ function CustomerChannelPicker({
             onValueChange={setSkillId}
             options={OUTBOUND_CONFIG.skillOptions}
           />
-          <Button variant="default" size="lg" className="w-full" disabled={!skillId} onClick={handleStartInteraction}>
+          <Button
+            variant="default"
+            size="lg"
+            className="w-full"
+            disabled={!skillId || !hasAddress}
+            onClick={handleStartInteraction}
+          >
             Start Interaction
           </Button>
         </div>
