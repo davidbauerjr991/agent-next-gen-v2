@@ -6414,61 +6414,32 @@ function CustomerRowInfoPanel({
               </ActionIconButton>
             </>
           )}
-          {/* Docked/narrow: prev/next move out of this cramped icon
-              cluster entirely and into their own full-width row below the
-              title (see `headerTabs` below) — per explicit request. Full
-              screen has the room to keep them here inline as before. */}
-          {!isNarrowActions && (
-            <>
-              <ActionIconButton title="Previous customer" disabled={!hasPrevious} onClick={onPrevious}>
-                <ChevronLeft className="h-4 w-4" />
-              </ActionIconButton>
-              <ActionIconButton title="Next customer" disabled={!hasNext} onClick={onNext}>
-                <ChevronRight className="h-4 w-4" />
-              </ActionIconButton>
-            </>
-          )}
+          {/* Back in this same header-actions row regardless of width (per
+              explicit follow-up request reverting the earlier "own row
+              below the title" layout) — but as bordered `Button
+              variant="outline"` icon buttons rather than the plain ghost
+              `ActionIconButton`s Refresh/Delete/Add Channel use above, so
+              they still read as visually distinct from that cluster even
+              while sharing its row. `size="icon-lg"` (36px) matches
+              `ActionIconButton`'s own default height (its `size="default"`
+              maps to this same Button size — see `ACTION_ICON_BUTTON_SIZE_
+              MAP` in actions.tsx) so nothing jumps between the two styles. */}
+          <Button variant="outline" size="icon-lg" title="Previous customer" disabled={!hasPrevious} onClick={onPrevious}>
+            <ChevronLeft className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+          </Button>
+          <Button variant="outline" size="icon-lg" title="Next customer" disabled={!hasNext} onClick={onNext}>
+            <ChevronRight className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+          </Button>
         </>
       }
       headerTabs={
-        <>
-          {/* Narrow/docked-only prev/next row — full-width outline
-              `Button`s (not the plain icon buttons used inline at full
-              screen above) since this row has real width to fill and
-              nothing else competing for it, per explicit request. Sits
-              above the tab row itself (own `border-b`, so it reads as a
-              distinct strip rather than blending into the tabs beneath
-              it). */}
-          {isNarrowActions && (
-            <div className="flex gap-2 px-4 py-2 border-b border-lyra-border-subtle">
-              <Button
-                variant="outline"
-                className="flex-1"
-                disabled={!hasPrevious}
-                onClick={onPrevious}
-              >
-                <ChevronLeft className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                className="flex-1"
-                disabled={!hasNext}
-                onClick={onNext}
-              >
-                Next
-                <ChevronRight className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-              </Button>
-            </div>
-          )}
-          <TabList className="px-4" overflowMenu>
-            {CUSTOMER_PANEL_TABS.map((label, i) => (
-              <Tab key={label} active={activeTab === i} onClick={() => setActiveTab(i)}>
-                {label}
-              </Tab>
-            ))}
-          </TabList>
-        </>
+        <TabList className="px-4" overflowMenu>
+          {CUSTOMER_PANEL_TABS.map((label, i) => (
+            <Tab key={label} active={activeTab === i} onClick={() => setActiveTab(i)}>
+              {label}
+            </Tab>
+          ))}
+        </TabList>
       }
     >
       <CustomerInformationPanelBody
