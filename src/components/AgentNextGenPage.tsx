@@ -7120,13 +7120,6 @@ function CustomerRowInfoPanel({
   // column, easily 800px+) — so this reliably reads "docked" as narrow and
   // "full screen" as wide, with no in-between flapping.
   const isNarrowActions = panelWidth < 480;
-  // `InteriorPanel`'s own full-screen state is deliberately not exposed to
-  // consumers (see `allowFullScreen`'s doc comment in interior-panel.tsx) —
-  // but since docked width can never exceed 425px (`maxWidth`, comfortably
-  // below the 480px line above), any measured width past that only ever
-  // happens while genuinely full-screen. Reusing that same line as a
-  // reliable proxy rather than adding a second detection.
-  const isFullScreen = !isNarrowActions;
 
   // Back to the Overview tab every time a *different* row is opened — same
   // reasoning `CustomerChannelPopoverButton`'s own reset effects use
@@ -7170,19 +7163,6 @@ function CustomerRowInfoPanel({
       allowFullScreen
       headerTitle={customerName ?? "Customer"}
       headerSubhead={recordId}
-      // Floats Add Channel next to the customer name itself instead of the
-      // far-right action cluster — only once full screen actually gives it
-      // real room to sit there; docked, it stays put in `headerActions`
-      // below (see that button's own comment there). `undefined` (not
-      // conditionally omitting the prop) when not full-screen, since
-      // `headerTitleBadge` itself is what's optional — matching
-      // `PanelHeader`'s own "no titleBadge" contract of just not rendering
-      // that slot at all.
-      headerTitleBadge={
-        isFullScreen ? (
-          <CustomerAddChannelButton row={row} onStartInteraction={onStartInteraction} />
-        ) : undefined
-      }
       // Sequential prev/next through the same filtered+sorted order the
       // Customers table itself is showing (`customerSortedRows`, lifted to
       // `AgentNextGenPage` — see that state's own doc comment). Plain
@@ -7196,16 +7176,20 @@ function CustomerRowInfoPanel({
       // cluster, per explicit request.
       headerActions={
         <>
-          {/* Add Channel stays its own always-visible button even once
-              narrow — it opens a whole "Select Channel/Address/Skill" form
-              (`CustomerChannelPicker`), which doesn't belong as a plain row
-              inside the Refresh/Delete kebab below; only true single-click
-              actions collapse there. Only rendered here while NOT full
-              screen — full screen floats it into `headerTitleBadge` above
-              instead, so it isn't shown (and clickable) twice. */}
-          {!isFullScreen && (
-            <CustomerAddChannelButton row={row} onStartInteraction={onStartInteraction} />
-          )}
+          {/* Add Channel stays its own always-visible button here regardless
+              of full-screen state — it opens a whole "Select Channel/
+              Address/Skill" form (`CustomerChannelPicker`), which doesn't
+              belong as a plain row inside the Refresh/Delete kebab below;
+              only true single-click actions collapse there. Previously
+              floated into `headerTitleBadge` (next to the customer name)
+              while full-screen instead of sitting here — reverted per
+              explicit follow-up request to keep it with the rest of the
+              action cluster in every mode; that floated placement was also
+              what forced the title+subhead box taller than its plain-text
+              case (see `container-header.tsx`'s own `min-h-10` fix), so
+              this also removes the one real consumer that ever needed that
+              extra headroom. */}
+          <CustomerAddChannelButton row={row} onStartInteraction={onStartInteraction} />
           {isNarrowActions ? (
             // `KebabMenuButton`'s own default trigger is a fixed h-6 w-6
             // (24px) — visibly smaller than every other icon button in
