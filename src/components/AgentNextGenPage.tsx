@@ -6403,7 +6403,19 @@ function CustomerRowInfoPanel({
             <CustomerAddChannelButton row={row} onStartInteraction={onStartInteraction} />
           )}
           {isNarrowActions ? (
-            <KebabMenuButton items={recordActionItems} ariaLabel="Record actions" />
+            // `KebabMenuButton`'s own default trigger is a fixed h-6 w-6
+            // (24px) — visibly smaller than every other icon button in
+            // this row (Add Channel/prev/next/the built-in fullscreen-
+            // toggle+close, all 32px+). `className` bumps it up to h-8 w-8
+            // (32px, matching prev/next's own `icon-md` and the built-in
+            // toggle/close buttons) and the glyph up to the same h-4 w-4
+            // every neighboring icon here uses, per explicit request.
+            <KebabMenuButton
+              items={recordActionItems}
+              ariaLabel="Record actions"
+              className="h-8 w-8"
+              icon={<MoreVertical className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
+            />
           ) : (
             <>
               <ActionIconButton title="Refresh record" disabled={!row}>
