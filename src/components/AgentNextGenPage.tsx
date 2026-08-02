@@ -6420,14 +6420,15 @@ function CustomerRowInfoPanel({
               variant="outline"` icon buttons rather than the plain ghost
               `ActionIconButton`s Refresh/Delete/Add Channel use above, so
               they still read as visually distinct from that cluster even
-              while sharing its row. `size="icon-lg"` (36px) matches
-              `ActionIconButton`'s own default height (its `size="default"`
-              maps to this same Button size — see `ACTION_ICON_BUTTON_SIZE_
-              MAP` in actions.tsx) so nothing jumps between the two styles. */}
-          <Button variant="outline" size="icon-lg" title="Previous customer" disabled={!hasPrevious} onClick={onPrevious}>
+              while sharing its row. `size="icon-md"` (32px, one step below
+              `ActionIconButton`'s own default "icon-lg"/36px — see
+              `ACTION_ICON_BUTTON_SIZE_MAP` in actions.tsx) per explicit
+              follow-up request to size these down a notch from the rest
+              of the cluster. */}
+          <Button variant="outline" size="icon-md" title="Previous customer" disabled={!hasPrevious} onClick={onPrevious}>
             <ChevronLeft className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
           </Button>
-          <Button variant="outline" size="icon-lg" title="Next customer" disabled={!hasNext} onClick={onNext}>
+          <Button variant="outline" size="icon-md" title="Next customer" disabled={!hasNext} onClick={onNext}>
             <ChevronRight className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
           </Button>
         </>
