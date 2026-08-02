@@ -5789,6 +5789,28 @@ function CustomerHistorySessionDetailPanel({
       side="right"
       open={entry !== null}
       onClose={onClose}
+      // `z-[3]` — overrides `InteriorPanel`'s own default `z-[5]` (via
+      // `cn()`'s `tailwind-merge` dedup, same "consumer className overrides
+      // the internal default" mechanism `CustomerInformationSidePanel`'s own
+      // header-icon `Popover` etc. already rely on elsewhere in this file).
+      // Needed because this panel's absolutely-positioned narrow/overlay
+      // branch (interior-panel.tsx, triggered below ~1024px of available
+      // width) and `CustomerInformationSidePanel`'s own unpinned/floating
+      // branch (side-panel.tsx) both otherwise land on that exact same
+      // `z-[5]` tier — and since neither of their shared ancestors (the
+      // "everything else" column, this body row) sets its own `z-index`,
+      // they compete in the SAME stacking context, where DOM order (this
+      // panel renders later/deeper) broke the tie in this panel's favor —
+      // confirmed live: opening a session's details in a narrow container
+      // painted this panel over top of the Customer Information panel
+      // instead of leaving it visible. `z-[3]` keeps this panel safely
+      // above the plain `CustomerHistoryTabContent` list it's meant to
+      // cover (unstyled, `z-auto`) while staying below the Customer
+      // Information panel's own `z-[5]` — same "pick a tier relative to
+      // that panel's z-[5]" convention already established for the
+      // transcript's own sticky session separator (`z-[1]`, see its own
+      // doc comment) and the shared panel's fullscreen overlay (`z-[9]`).
+      className="z-[3]"
       storageKey="customer-history-session-detail-panel-width"
       headerTitle="Session Details"
       headerSubhead={entry?.timestampDisplay}
@@ -7400,16 +7422,45 @@ export function AgentNextGenPage({
   // Which `CustomerHistorySessionEntry` (by index into that customer's own
   // `buildCustomerHistoryEntries` list, computed at the render site) has its
   // `CustomerHistorySessionDetailPanel` open — `null` when none does. Reset
-  // whenever the tab itself isn't showing, or the active interaction
-  // changes, so a stale index from a previous customer's (differently
-  // sized) history list can't linger and either point at the wrong session
-  // or silently fail `entries[index]`.
+  // whenever the tab itself isn't showing (below), or a genuinely
+  // DIFFERENT interaction becomes active (`lastActiveInteractionIdRef`
+  // effect further down), so a stale index from a previous customer's
+  // (differently sized) history list can't linger and either point at the
+  // wrong session or silently fail `entries[index]`.
   const [selectedHistoryIndex, setSelectedHistoryIndex] = useState<number | null>(null);
   useEffect(() => {
     if (!customerHistoryTabActive) setSelectedHistoryIndex(null);
   }, [customerHistoryTabActive]);
+  // Distinguishes "the agent navigated away (Home/Settings) and back to
+  // THIS SAME interaction" (`activeInteractionId` goes id → null → the
+  // exact same id again) from "the agent switched to a genuinely DIFFERENT
+  // interaction" (id → a different id, whether or not it passed through
+  // `null` on the way) — only the latter should reset which tab/session was
+  // showing, per explicit request: navigating away and back should leave
+  // the agent exactly where they left off (the interaction detail page's
+  // own `key={`interaction-${id}`}` below already forces a full remount
+  // whenever Home/Settings swaps in a different page branch entirely, which
+  // discards every piece of state actually owned INSIDE that subtree — but
+  // `customerHistoryTabActive`/`selectedHistoryIndex` live up here in the
+  // parent instead, specifically so they can survive that remount and this
+  // effect can choose whether to actually clear them). Landing on a
+  // genuinely new interaction should always show its transcript first, not
+  // wherever the PREVIOUS interaction's own tab/session happened to be
+  // left — same reasoning `CustomerRowInfoPanel`'s own state surviving a
+  // Desk-tab switch already established, just via a ref-based identity
+  // check here instead of that component's "stay mounted, toggle
+  // opacity-0/inert" mechanism (this page-level branch's remount-on-switch
+  // behavior is deliberate — see that ternary's own doc comment — so it
+  // isn't a candidate for the same always-mounted treatment).
+  const lastActiveInteractionIdRef = useRef<string | null>(null);
   useEffect(() => {
-    setSelectedHistoryIndex(null);
+    if (activeInteractionId && activeInteractionId !== lastActiveInteractionIdRef.current) {
+      setCustomerHistoryTabActive(false);
+      setSelectedHistoryIndex(null);
+    }
+    if (activeInteractionId) {
+      lastActiveInteractionIdRef.current = activeInteractionId;
+    }
   }, [activeInteractionId]);
   // Drives the main content area: whenever an interaction is active, the
   // Desk dashboard is replaced by that interaction's blank detail page (see
