@@ -6090,6 +6090,13 @@ function CustomerRowInfoPanel({
   // column, easily 800px+) — so this reliably reads "docked" as narrow and
   // "full screen" as wide, with no in-between flapping.
   const isNarrowActions = panelWidth < 480;
+  // `InteriorPanel`'s own full-screen state is deliberately not exposed to
+  // consumers (see `allowFullScreen`'s doc comment in interior-panel.tsx) —
+  // but since docked width can never exceed 425px (`maxWidth`, comfortably
+  // below the 480px line above), any measured width past that only ever
+  // happens while genuinely full-screen. Reusing that same line as a
+  // reliable proxy rather than adding a second detection.
+  const isFullScreen = !isNarrowActions;
 
   // Back to the Overview tab every time a *different* row is opened — same
   // reasoning `CustomerChannelPopoverButton`'s own reset effects use
@@ -6133,6 +6140,19 @@ function CustomerRowInfoPanel({
       allowFullScreen
       headerTitle={customerName ?? "Customer"}
       headerSubhead={recordId}
+      // Floats Add Channel next to the customer name itself instead of the
+      // far-right action cluster — only once full screen actually gives it
+      // real room to sit there; docked, it stays put in `headerActions`
+      // below (see that button's own comment there). `undefined` (not
+      // conditionally omitting the prop) when not full-screen, since
+      // `headerTitleBadge` itself is what's optional — matching
+      // `PanelHeader`'s own "no titleBadge" contract of just not rendering
+      // that slot at all.
+      headerTitleBadge={
+        isFullScreen ? (
+          <CustomerAddChannelButton row={row} onStartInteraction={onStartInteraction} />
+        ) : undefined
+      }
       // Sequential prev/next through the same filtered+sorted order the
       // Customers table itself is showing (`customerSortedRows`, lifted to
       // `AgentNextGenPage` — see that state's own doc comment). Plain
@@ -6141,21 +6161,21 @@ function CustomerRowInfoPanel({
       // pin/full-screen/close buttons elsewhere that reuse `PanelPinButton`.
       // Rendered via `headerActions` so they appear BEFORE `InteriorPanel`'s
       // own automatic full-screen-toggle/close buttons (its `actions={<>
-      // {headerActions}{fullScreenToggle}</>}` composition order).
+      // {headerActions}{fullScreenToggle}</>}` composition order). Ordered
+      // AFTER Refresh/Delete (the "trash icon") rather than leading the
+      // cluster, per explicit request.
       headerActions={
         <>
-          <ActionIconButton title="Previous customer" disabled={!hasPrevious} onClick={onPrevious}>
-            <ChevronLeft className="h-4 w-4" />
-          </ActionIconButton>
-          <ActionIconButton title="Next customer" disabled={!hasNext} onClick={onNext}>
-            <ChevronRight className="h-4 w-4" />
-          </ActionIconButton>
           {/* Add Channel stays its own always-visible button even once
               narrow — it opens a whole "Select Channel/Address/Skill" form
               (`CustomerChannelPicker`), which doesn't belong as a plain row
               inside the Refresh/Delete kebab below; only true single-click
-              actions collapse there. */}
-          <CustomerAddChannelButton row={row} onStartInteraction={onStartInteraction} />
+              actions collapse there. Only rendered here while NOT full
+              screen — full screen floats it into `headerTitleBadge` above
+              instead, so it isn't shown (and clickable) twice. */}
+          {!isFullScreen && (
+            <CustomerAddChannelButton row={row} onStartInteraction={onStartInteraction} />
+          )}
           {isNarrowActions ? (
             <KebabMenuButton items={recordActionItems} ariaLabel="Record actions" />
           ) : (
@@ -6168,6 +6188,12 @@ function CustomerRowInfoPanel({
               </ActionIconButton>
             </>
           )}
+          <ActionIconButton title="Previous customer" disabled={!hasPrevious} onClick={onPrevious}>
+            <ChevronLeft className="h-4 w-4" />
+          </ActionIconButton>
+          <ActionIconButton title="Next customer" disabled={!hasNext} onClick={onNext}>
+            <ChevronRight className="h-4 w-4" />
+          </ActionIconButton>
         </>
       }
       headerTabs={
