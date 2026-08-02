@@ -9477,7 +9477,15 @@ export function AgentNextGenPage({
                   onAddedFilterKeysChange={setCustomerAddedFilterKeys}
                   filterValues={customerFilterValues}
                   onFilterValuesChange={setCustomerFilterValues}
-                  onRowClick={setSelectedCustomerRow}
+                  // Clicking the row that's already open (its checkbox
+                  // shows checked via `isRowChecked`'s `id === openRowId`)
+                  // closes `CustomerRowInfoPanel` and un-checks it, instead
+                  // of just re-opening the same row it's already showing.
+                  onRowClick={(row) =>
+                    setSelectedCustomerRow((prev) =>
+                      prev?.contactNumber === row.contactNumber ? null : row
+                    )
+                  }
                   searchQuery={customerSearchQuery}
                   onSearchChange={setCustomerSearchQuery}
                   sortKey={customerSortKey}
