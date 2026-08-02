@@ -2603,7 +2603,6 @@ function CustomersListView({
     <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
       <TableToolbar
         className="px-6"
-        title="Recently Viewed"
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         filterDefs={filterDefs}
