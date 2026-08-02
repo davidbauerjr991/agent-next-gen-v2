@@ -7148,7 +7148,19 @@ export function AgentNextGenPage({
       if (idx === -1) {
         return [...prev, {
           id: selection.contact.id,
-          customerName: selection.contact.name,
+          // `adhoc:`-prefixed ids are lyra-ui's own "Continue with" flow
+          // (`buildAdHocSearchContact`, create-new.tsx) — a typed query that
+          // matched no real directory contact, so CreateNew builds a
+          // throwaway contact whose `name` is just the raw typed phone
+          // number/email itself (there's no real name to show). Passing
+          // that straight through as `customerName` made both this card's
+          // compact tile (`getInitials` deriving a stray leading digit, e.g.
+          // "1" off a phone number) and `CustomerInformationSidePanel`'s
+          // header (showing the raw number as if it were a name) look wrong
+          // — left `undefined` here instead, so every "no real name"
+          // consumer's own already-correct fallback takes over (the panel's
+          // "Customer" title, `InteractionNavItem`'s channel-icon tile).
+          customerName: selection.contact.id.startsWith("adhoc:") ? undefined : selection.contact.name,
           // `subtitle` is the contact's real id (customerId/agentId/
           // TEAM-.../SKL-.../ASN-...) whenever CreateNew's record set one —
           // only missing for records that genuinely have none.
