@@ -9327,35 +9327,52 @@ export function AgentNextGenPage({
                   about to show, that 250ms of shrinking width visibly
                   reflowed the new tab's content growing to fill the space
                   beside it — the "dashboard animating its position" bug.
-                  `hidden` (display:none) on this whole group instead removes
-                  it from layout instantly, with no transition to play at
-                  all, so switching tabs while the panel is open no longer
-                  drags any animation into the newly-shown tab. The panel's
-                  own real open/close animation still plays normally for
-                  actual same-tab closes (its header's × button, or
-                  `onRowClick` picking a different row) — only navigating
-                  AWAY from this tab now skips it, which is the only case
-                  that was ever broken.
+                  Removing it from layout instantly (rather than animating
+                  the panel closed) is what fixes the reported reflow — the
+                  panel's own real open/close animation still plays normally
+                  for actual same-tab closes (its header's × button, or
+                  `onRowClick` picking a different row); only navigating AWAY
+                  from this tab skips it.
 
-                  `InteriorPanel` inside `CustomerRowInfoPanel` still measures
+                  `display:none` (Tailwind's `hidden`) was the first attempt
+                  here, but it caused a SECOND, subtler bug on the way BACK
+                  in: `InteriorPanel` (inside `CustomerRowInfoPanel`) tracks
                   its own real DOM parent's width via `ResizeObserver` to
                   decide whether to auto-full-screen below 768px (see that
-                  component's own doc comment) — this wrapper being a real
-                  box (not `display:contents`) is what keeps that
-                  measurement correct; `display:none` while inactive doesn't
-                  reintroduce that old bug, since nothing is visible to
-                  mis-measure in the first place, and the real width is
-                  available again the instant `hidden` is lifted.
+                  component's own doc comment) — and `display:none` elements
+                  report a genuine 0×0 size to `ResizeObserver`, not just a
+                  stale old value. So the instant this wrapper went
+                  `display:none`, the observer fired with width 0, and that
+                  0 lingered as `InteriorPanel`'s last-known parent width
+                  until a NEW (necessarily asynchronous — `ResizeObserver`
+                  callbacks never run synchronously with the style change
+                  that caused them) callback caught up with the real width
+                  after switching back. For that one frame, `parentWidth`
+                  read as 0 (well under both the 1024px/768px thresholds),
+                  so `InteriorPanel` briefly rendered its full-screen/
+                  absolute-overlay layout before correcting itself back to
+                  its normal ~350-425px docked width and position — visible
+                  as the panel sliding in from full width, the left-to-right
+                  animation reported after this fix's first pass.
 
-                  `animate-in fade-in-0 duration-200` is re-applied fresh
-                  every time this element's `className` flips from `"hidden"`
-                  to the visible string (not left on permanently) — same
-                  "smooth fade-in on every switch" treatment as the other
-                  desk-tab branches below and the top-level Settings/
-                  interaction/dashboard branches above, without forcing a
-                  remount (a `key` here would reset all the local state this
-                  comment opens with). */}
-              <div className={activeDeskTab === "customers" ? "flex flex-1 overflow-hidden animate-in fade-in-0 duration-200" : "hidden"}>
+                  `visibility:hidden` + `position:absolute inset-0` (instead
+                  of `display:none`) fixes this: unlike `display:none`, a
+                  `visibility:hidden` element still generates a real box and
+                  reports its true, stable size to `ResizeObserver` at all
+                  times (`invisible`/`pointer-events-none` still fully hide
+                  it from sight/interaction/screen readers, same as `hidden`
+                  did) — `absolute inset-0` sizes it to match this row's own
+                  box exactly (same width it has when it's the sole `flex-1`
+                  participant), so `InteriorPanel`'s measured parent width
+                  never drops to 0 and never disagrees with reality, whether
+                  this group is showing or not. */}
+              <div
+                className={
+                  activeDeskTab === "customers"
+                    ? "relative flex flex-1 overflow-hidden animate-in fade-in-0 duration-200"
+                    : "absolute inset-0 flex overflow-hidden invisible pointer-events-none"
+                }
+              >
                 <CustomersListView
                   onStartInteraction={(contact, channel, phone, skillId) =>
                     handleStartCall({ contact, channel, phone, skillId })
