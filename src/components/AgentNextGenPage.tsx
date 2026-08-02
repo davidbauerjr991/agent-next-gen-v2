@@ -7038,7 +7038,11 @@ export function AgentNextGenPage({
   const panelRef       = useRef<HTMLDivElement>(null);
   const panelAnimTimer = useRef<ReturnType<typeof setTimeout>>();
   const fullScreenAnimTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const [screenPopApp, setScreenPopApp] = useState("");
+  // Defaults to "salesforce" (per explicit request) rather than starting
+  // unselected — Screen Pop should open straight into the mocked
+  // Salesforce login instead of an empty picker the agent has to act on
+  // first.
+  const [screenPopApp, setScreenPopApp] = useState("salesforce");
   // Search panel's own query — separate from `searchQuery` (contact
   // history search elsewhere in this file) since this is a distinct,
   // unrelated search surface that happens to share the same app-header
