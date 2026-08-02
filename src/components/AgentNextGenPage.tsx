@@ -79,6 +79,8 @@ import {
   PhoneInput,
   type PhoneValue,
   Tooltip,
+  DateRangeFilterChip,
+  type DateRangeFilterValue,
   type SelectOption,
   type NavItem,
   type SortDirection,
@@ -5302,6 +5304,14 @@ interface CustomerHistorySessionEntry {
    *  `conversationSummary` (reused as the email body) on the Conversation
    *  tab. */
   emailSubject?: string;
+  /** 1-2 labels drawn from `OUTCOME_TAG_OPTIONS` (the same vocabulary the
+   *  live-interaction Outcome tagging popover uses elsewhere in this file)
+   *  — reused rather than inventing a second tag vocabulary, and it's what
+   *  the history toolbar's own "Tags" filter checklist is built from (see
+   *  `CUSTOMER_HISTORY_TAG_FILTER_OPTIONS`). Not rendered anywhere on the
+   *  card itself (the reference screenshots never show tags on a history
+   *  row) — purely a filterable attribute here. */
+  tags: string[];
 }
 
 interface CustomerHistoryConversationMessage {
@@ -5534,6 +5544,16 @@ function buildCustomerHistoryEntries(
         channelType === "email"
           ? CUSTOMER_HISTORY_EMAIL_SUBJECT_POOL[Math.floor(seed / 23) % CUSTOMER_HISTORY_EMAIL_SUBJECT_POOL.length]
           : undefined,
+      // 1-2 tags per entry, drawn from the same `OUTCOME_TAG_OPTIONS`
+      // vocabulary the live Outcome popover uses — see the field's own doc
+      // comment on `CustomerHistorySessionEntry` above for why.
+      tags:
+        seed % 5 < 3
+          ? [OUTCOME_TAG_OPTIONS[Math.floor(seed / 29) % OUTCOME_TAG_OPTIONS.length].label]
+          : [
+              OUTCOME_TAG_OPTIONS[Math.floor(seed / 29) % OUTCOME_TAG_OPTIONS.length].label,
+              OUTCOME_TAG_OPTIONS[Math.floor(seed / 31) % OUTCOME_TAG_OPTIONS.length].label,
+            ].filter((label, idx, arr) => arr.indexOf(label) === idx),
     });
   }
 
@@ -5567,13 +5587,115 @@ function CustomerHistoryChannelIcon({
   );
 }
 
-/** The "Customer History" tab's own body — a scrollable list of
- *  `CustomerHistorySessionEntry` cards (see this section's own doc comment
- *  above). `selectedIndex`/`onSelectIndex` drive which one's own detail
- *  panel (`CustomerHistorySessionDetailPanel`, rendered as a sibling at the
- *  call site) is open; clicking the already-open card's own row toggles it
- *  back closed instead of just re-selecting the same one, same convention
- *  `CustomersListView`'s own `onRowClick` uses for `CustomerRowInfoPanel`. */
+// Static checklist options for the history toolbar's "Channel type" and
+// "Direction" filters — unlike `CUSTOMER_FILTER_FIELD_DEFS`'s "+ Filter"
+// add-menu system (12 optional fields, none active by default), this list
+// only ever has these 3 facets plus the date range below, so all 3 are
+// always shown in the toolbar rather than gated behind an add-filter step.
+const CUSTOMER_HISTORY_CHANNEL_TYPE_FILTER_OPTIONS: FilterChipOption[] = [
+  { value: "voice", label: "Voice" },
+  { value: "sms", label: "SMS" },
+  { value: "email", label: "Email" },
+];
+const CUSTOMER_HISTORY_DIRECTION_FILTER_OPTIONS: FilterChipOption[] = [
+  { value: "inbound", label: "Inbound" },
+  { value: "outbound", label: "Outbound" },
+];
+// Built from `OUTCOME_TAG_OPTIONS` (declared well above this section) so the
+// filter's checklist always matches whatever `tags` actually get synthesized
+// onto each entry, without a second hand-maintained label list to drift out
+// of sync with it.
+const CUSTOMER_HISTORY_TAG_FILTER_OPTIONS: FilterChipOption[] = OUTCOME_TAG_OPTIONS.map((t) => ({
+  value: t.label,
+  label: t.label,
+}));
+
+// `DateRangeFilterChip`'s own default `options` (`DATE_RANGE_FILTER_OPTIONS`)
+// stops at "Last 7 days" + "Custom" — too narrow here, since synthesized
+// entries can land up to ~16 days back (see `buildCustomerHistoryEntries`'s
+// per-step "2 to 47 hours" walk × 8 entries). Adds "Last 30/90 days" (already
+// supported by `DateRangeFilterValue`, just not in the default option list)
+// so the toolbar's default selection doesn't start out hiding most of a
+// customer's real history.
+const CUSTOMER_HISTORY_DATE_RANGE_OPTIONS = [
+  { value: "today" as const, label: "Today" },
+  { value: "yesterday" as const, label: "Yesterday" },
+  { value: "last7" as const, label: "Last 7 days" },
+  { value: "last30" as const, label: "Last 30 days" },
+  { value: "last90" as const, label: "Last 90 days" },
+  { value: "custom" as const, label: "Custom" },
+];
+
+/** Whether `timestamp` falls inside the selected date-range filter value —
+ *  mirrors `DateRangeFilterChip`'s own value vocabulary
+ *  (`DateRangeFilterValue`) rather than inventing a parallel one. `"custom"`
+ *  with no range picked yet (`customRange` undefined/`from` unset) passes
+ *  everything through, same "no filter applied yet" behavior the checklist
+ *  facets below have when their own value array is empty. */
+function isWithinCustomerHistoryDateRange(
+  timestamp: Date,
+  value: DateRangeFilterValue,
+  customRange?: DateRange
+): boolean {
+  const now = new Date();
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const today0 = startOfDay(now);
+
+  switch (value) {
+    case "today":
+      return timestamp >= today0;
+    case "yesterday": {
+      const y0 = new Date(today0);
+      y0.setDate(y0.getDate() - 1);
+      return timestamp >= y0 && timestamp < today0;
+    }
+    case "last7": {
+      const from = new Date(today0);
+      from.setDate(from.getDate() - 7);
+      return timestamp >= from;
+    }
+    case "last30": {
+      const from = new Date(today0);
+      from.setDate(from.getDate() - 30);
+      return timestamp >= from;
+    }
+    case "last90": {
+      const from = new Date(today0);
+      from.setDate(from.getDate() - 90);
+      return timestamp >= from;
+    }
+    case "custom": {
+      if (!customRange?.from) return true;
+      const from = startOfDay(customRange.from);
+      const toSource = customRange.to ?? customRange.from;
+      const to = new Date(toSource.getFullYear(), toSource.getMonth(), toSource.getDate(), 23, 59, 59, 999);
+      return timestamp >= from && timestamp <= to;
+    }
+    default:
+      return true;
+  }
+}
+
+/** The "Customer History" tab's own body — a toolbar (search + Channel
+ *  type/Direction/Tags checklists + a date-range filter) above a scrollable
+ *  list of `CustomerHistorySessionEntry` cards (see this section's own doc
+ *  comment above). `selectedIndex`/`onSelectIndex` drive which one's own
+ *  detail panel (`CustomerHistorySessionDetailPanel`, rendered as a sibling
+ *  at the call site) is open; clicking the already-open card's own row
+ *  toggles it back closed instead of just re-selecting the same one, same
+ *  convention `CustomersListView`'s own `onRowClick` uses for
+ *  `CustomerRowInfoPanel`.
+ *
+ *  Search/filter state is local (`useState` in here), not lifted to
+ *  `AgentNextGenPage` — unlike `selectedIndex` (which has to survive this
+ *  component unmounting, since the detail panel renders as its sibling),
+ *  nothing outside this component ever needs to read or restore the
+ *  toolbar's own state, so there's no reason to hoist it. `selectedIndex`
+ *  itself always refers to a position in the full, unfiltered `entries`
+ *  array (so `CustomerHistorySessionDetailPanel`'s prev/next chevrons keep
+ *  stepping through the customer's whole history, not just whatever's
+ *  currently visible under a filter) — the filtered rows below are mapped
+ *  with their original index preserved for exactly that reason. */
 function CustomerHistoryTabContent({
   entries,
   selectedIndex,
@@ -5583,6 +5705,49 @@ function CustomerHistoryTabContent({
   selectedIndex: number | null;
   onSelectIndex: (index: number | null) => void;
 }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterValues, setFilterValues] = useState<Record<string, string[]>>({});
+  const [dateRangeValue, setDateRangeValue] = useState<DateRangeFilterValue>("last30");
+  const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>(undefined);
+
+  const filterDefs = [
+    { key: "channelType", label: "Channel type", options: CUSTOMER_HISTORY_CHANNEL_TYPE_FILTER_OPTIONS },
+    { key: "direction", label: "Direction", options: CUSTOMER_HISTORY_DIRECTION_FILTER_OPTIONS },
+    { key: "tags", label: "Tags", options: CUSTOMER_HISTORY_TAG_FILTER_OPTIONS },
+  ];
+  const handleFilterChange = (key: string, values: string[]) =>
+    setFilterValues((prev) => ({ ...prev, [key]: values }));
+  const clearAllFilters = () => {
+    setFilterValues({});
+    setSearchQuery("");
+    setDateRangeValue("last30");
+    setCustomDateRange(undefined);
+  };
+
+  const channelTypeValues = filterValues.channelType ?? [];
+  const directionValues = filterValues.direction ?? [];
+  const tagValues = filterValues.tags ?? [];
+
+  // Keeps each visible row's ORIGINAL index into `entries` (see this
+  // component's own doc comment above for why that matters), rather than
+  // reassigning fresh 0-based indices to the filtered subset.
+  const filteredEntries = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return entries
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => {
+        if (query) {
+          const haystack = `${entry.target} ${entry.agentName} ${entry.typeLabel}`.toLowerCase();
+          if (!haystack.includes(query)) return false;
+        }
+        if (channelTypeValues.length && !channelTypeValues.includes(entry.channelType)) return false;
+        if (directionValues.length && !directionValues.includes(entry.direction)) return false;
+        if (tagValues.length && !entry.tags.some((tag) => tagValues.includes(tag))) return false;
+        if (!isWithinCustomerHistoryDateRange(entry.timestamp, dateRangeValue, customDateRange)) return false;
+        return true;
+      });
+  }, [entries, searchQuery, channelTypeValues, directionValues, tagValues, dateRangeValue, customDateRange]);
+
   if (entries.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
@@ -5593,50 +5758,78 @@ function CustomerHistoryTabContent({
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-y-auto">
-      {entries.map((entry, i) => {
-        const isSelected = selectedIndex === i;
-        return (
-          <div
-            key={entry.id}
-            role="button"
-            tabIndex={0}
-            aria-pressed={isSelected}
-            onClick={() => onSelectIndex(isSelected ? null : i)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onSelectIndex(isSelected ? null : i);
-              }
-            }}
-            className={cn(
-              "flex items-start gap-3 px-6 py-3 cursor-pointer transition-colors",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lyra-border-focus focus-visible:-ring-offset-2",
-              i > 0 && "border-t border-lyra-border-subtle",
-              isSelected
-                ? "bg-lyra-bg-active-subtle hover:bg-lyra-state-hover-active-subtle"
-                : "hover:bg-lyra-state-hover"
-            )}
-          >
-            <CustomerHistoryChannelIcon channelType={entry.channelType} direction={entry.direction} />
-            <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-              <span className="lyra-body-md text-lyra-fg-default truncate">{entry.target}</span>
-              <span className="lyra-body-sm text-lyra-fg-secondary">{entry.typeLabel}</span>
-              <span className="lyra-body-sm-emphasis text-lyra-fg-default truncate">
-                {entry.agentName} ({entry.agentEmail.toUpperCase()})
-              </span>
-            </div>
-            <div className="flex flex-col items-end gap-0.5 shrink-0 text-right">
-              <span className="lyra-body-sm text-lyra-fg-secondary whitespace-nowrap">{entry.timestampDisplay}</span>
-              {entry.statusLabel && (
-                <span className="lyra-body-sm-emphasis text-lyra-fg-default whitespace-nowrap">
-                  {entry.statusLabel}
-                </span>
-              )}
-            </div>
-          </div>
-        );
-      })}
+    <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
+      <TableToolbar
+        className="px-6"
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        filterDefs={filterDefs}
+        filterValues={filterValues}
+        onFilterChange={handleFilterChange}
+        onFilterClear={clearAllFilters}
+        filters={
+          <DateRangeFilterChip
+            value={dateRangeValue}
+            onValueChange={setDateRangeValue}
+            options={CUSTOMER_HISTORY_DATE_RANGE_OPTIONS}
+            customValue={customDateRange}
+            onCustomValueChange={setCustomDateRange}
+          />
+        }
+      />
+
+      {filteredEntries.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
+          <Inbox className="h-8 w-8 text-lyra-fg-disabled" strokeWidth={1.5} aria-hidden="true" />
+          <p className="lyra-body-md text-lyra-fg-disabled text-center">No interactions match these filters</p>
+        </div>
+      ) : (
+        <div className="flex flex-1 flex-col overflow-y-auto">
+          {filteredEntries.map(({ entry, index }, i) => {
+            const isSelected = selectedIndex === index;
+            return (
+              <div
+                key={entry.id}
+                role="button"
+                tabIndex={0}
+                aria-pressed={isSelected}
+                onClick={() => onSelectIndex(isSelected ? null : index)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelectIndex(isSelected ? null : index);
+                  }
+                }}
+                className={cn(
+                  "flex items-start gap-3 px-6 py-3 cursor-pointer transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lyra-border-focus focus-visible:-ring-offset-2",
+                  i > 0 && "border-t border-lyra-border-subtle",
+                  isSelected
+                    ? "bg-lyra-bg-active-subtle hover:bg-lyra-state-hover-active-subtle"
+                    : "hover:bg-lyra-state-hover"
+                )}
+              >
+                <CustomerHistoryChannelIcon channelType={entry.channelType} direction={entry.direction} />
+                <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                  <span className="lyra-body-md text-lyra-fg-default truncate">{entry.target}</span>
+                  <span className="lyra-body-sm text-lyra-fg-secondary">{entry.typeLabel}</span>
+                  <span className="lyra-body-sm-emphasis text-lyra-fg-default truncate">
+                    {entry.agentName} ({entry.agentEmail.toUpperCase()})
+                  </span>
+                </div>
+                <div className="flex flex-col items-end gap-0.5 shrink-0 text-right">
+                  <span className="lyra-body-sm text-lyra-fg-secondary whitespace-nowrap">{entry.timestampDisplay}</span>
+                  {entry.statusLabel && (
+                    <span className="lyra-body-sm-emphasis text-lyra-fg-default whitespace-nowrap">
+                      {entry.statusLabel}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
