@@ -2436,16 +2436,50 @@ function CustomerChannelPopoverButton({
  *  with no known contact) or every supported channel is already open —
  *  there's nothing meaningful to offer either way. */
 function ActiveInteractionAddChannelIcons({
+  customerName,
   recordId,
   openChannelTypes,
   onStartInteraction,
 }: {
+  customerName?: string;
   recordId: string;
   openChannelTypes: ChannelType[];
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
 }) {
-  const row = CUSTOMER_LIST_RECORDS.find((r) => r.contactNumber === recordId);
-  if (!row) return null;
+  const knownRow = CUSTOMER_LIST_RECORDS.find((r) => r.contactNumber === recordId);
+  // Most active interactions have NO real `CUSTOMER_LIST_RECORDS` match —
+  // the left nav's own seed interactions and agent-to-agent consults (e.g.
+  // `CREATE_NEW_AGENTS`' "AGT-…" ids) use entirely separate id spaces from
+  // the Customers table's "CST-…" fixture, and only an interaction actually
+  // launched via that table's own "Start Interaction" flow lines up. Rather
+  // than hiding the icons whenever that link is missing (which silently
+  // dropped them for the vast majority of interactions — caught from a
+  // screenshot of an open "Jamie Torres / AGT-2000" consult with no icons
+  // at all), fall back to a placeholder row offering every channel type:
+  // no real phone/email to prefill, and no matching `OUTBOUND_CUSTOMERS`
+  // contact for `CustomerChannelPicker` to actually start a real
+  // interaction from (so Start Interaction silently no-ops here) — the
+  // same "visible, but inert without real backing data" convention already
+  // used for this table's own Refresh button and delete-icon kebab.
+  const row: CustomerListRecord =
+    knownRow ?? {
+      contactNumber: recordId,
+      channels: CUSTOMER_CHANNEL_ORDER,
+      firstName: customerName?.split(" ")[0] ?? "Customer",
+      lastName: customerName?.split(" ").slice(1).join(" ") ?? "",
+      group: "",
+      firstPhone: "",
+      emailAddress: "",
+      address1: "",
+      city: "",
+      state: "",
+      postalCode: "",
+      originalCustomerId: recordId,
+      dateOfBirth: "",
+      agent: "",
+      agentTeam: "",
+      paymentBalance: "",
+    };
   const available = CUSTOMER_CHANNEL_ORDER.filter(
     (c) => row.channels.includes(c) && !openChannelTypes.includes(c)
   );
@@ -5992,6 +6026,7 @@ function CustomerInformationSidePanel({
               doc comment. */}
           {onStartInteraction && (
             <ActiveInteractionAddChannelIcons
+              customerName={customerName}
               recordId={recordId}
               openChannelTypes={channels.map((c) => c.type)}
               onStartInteraction={onStartInteraction}
