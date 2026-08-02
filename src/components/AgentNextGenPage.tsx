@@ -2147,6 +2147,11 @@ interface CustomerListRecord {
   city: string;
   state: string;
   postalCode: string;
+  originalCustomerId: string;
+  dateOfBirth: string;
+  agent: string;
+  agentTeam: string;
+  paymentBalance: string;
 }
 
 // Mapped 1:1 from lyra-ui's `CREATE_NEW_CUSTOMERS` — `customerId` (e.g.
@@ -2164,9 +2169,39 @@ const CUSTOMER_LIST_RECORDS: CustomerListRecord[] = CREATE_NEW_CUSTOMERS.map((c:
   city: c.city,
   state: c.state,
   postalCode: c.postalCode,
+  originalCustomerId: c.originalCustomerId,
+  dateOfBirth: c.dateOfBirth,
+  agent: c.agent,
+  agentTeam: c.agentTeam,
+  paymentBalance: c.paymentBalance,
 }));
 
-type CustomerColKey = keyof CustomerListRecord;
+// The table's actual rendered columns — deliberately NOT `keyof
+// CustomerListRecord` (`CUSTOMER_COLUMN_CONFIG` below is a per-COLUMN
+// config, one entry per key here, and needs to stay exhaustive over
+// exactly this set). originalCustomerId/dateOfBirth/agent/agentTeam/
+// paymentBalance are real `CustomerListRecord` fields but intentionally
+// filter-only, not columns — see `CustomerFilterKey` below, which does
+// cover them.
+type CustomerColKey =
+  | "contactNumber"
+  | "channels"
+  | "firstName"
+  | "lastName"
+  | "group"
+  | "firstPhone"
+  | "emailAddress"
+  | "address1"
+  | "city"
+  | "state"
+  | "postalCode";
+/** Every filterable string field on `CustomerListRecord` — everything
+ *  except `channels` (a `ChannelType[]`, not a plain string value a
+ *  checkbox-style `FilterChip` can compare against). Wider than
+ *  `CustomerColKey` on purpose: the "+ Filter" menu can filter on fields
+ *  (e.g. Original customer ID, Date of birth, Agent, Agent team, Payment
+ *  balance) that aren't rendered as their own table column. */
+type CustomerFilterKey = Exclude<keyof CustomerListRecord, "channels">;
 
 // Fixed left-to-right channel order the hover flyout renders in — only
 // channels the row's own `channels` array actually includes are shown
@@ -2389,11 +2424,38 @@ const CUSTOMER_ALL_COLUMN_DEFS: { key: string; label: string }[] = Object.entrie
 );
 const CUSTOMER_ALL_COLUMN_KEYS = Object.keys(CUSTOMER_COLUMN_CONFIG) as CustomerColKey[];
 
-// Real filter dimension (State) derived from the actual data, driving a
-// genuine `filterDefs` FilterChip — not decoration.
-const CUSTOMER_STATE_OPTIONS: FilterChipOption[] = Array.from(
-  new Set(CUSTOMER_LIST_RECORDS.map((r) => r.state).filter(Boolean))
-).map((state) => ({ value: state, label: state }));
+// Every field the "+ Filter" add-filter menu can offer — real, filterable
+// fields on `CUSTOMER_LIST_RECORDS` (not decoration), in the same order as
+// the reference "Add Filter" list this was built from. Picking one from the
+// menu is what actually adds it as a live `FilterChip` in the toolbar (see
+// `addedFilterKeys` in `CustomersListView`) — this array only lists what's
+// *available* to add, not what's currently active.
+const CUSTOMER_FILTER_FIELD_DEFS: { key: CustomerFilterKey; label: string }[] = [
+  { key: "contactNumber", label: "Customer ID" },
+  { key: "originalCustomerId", label: "Original customer ID" },
+  { key: "firstPhone", label: "Phone" },
+  { key: "emailAddress", label: "Email address" },
+  { key: "dateOfBirth", label: "Date of birth" },
+  { key: "group", label: "Group" },
+  { key: "agent", label: "Agent" },
+  { key: "agentTeam", label: "Agent team" },
+  { key: "address1", label: "Address 1" },
+  { key: "paymentBalance", label: "Payment balance" },
+  { key: "firstName", label: "First name" },
+  { key: "lastName", label: "Last name" },
+];
+
+// Options shown inside a given field's own `FilterChip` once it's been
+// added — the distinct values actually present across `CUSTOMER_LIST_
+// RECORDS` for that field. Precomputed once at module load (the records
+// themselves never change at runtime), same reasoning `CUSTOMER_STATE_
+// OPTIONS` used before this became a general multi-field system.
+const CUSTOMER_FILTER_VALUE_OPTIONS: Record<CustomerFilterKey, FilterChipOption[]> = Object.fromEntries(
+  CUSTOMER_FILTER_FIELD_DEFS.map(({ key }) => [
+    key,
+    Array.from(new Set(CUSTOMER_LIST_RECORDS.map((r) => r[key]).filter(Boolean))).map((v) => ({ value: v, label: v })),
+  ])
+) as Record<CustomerFilterKey, FilterChipOption[]>;
 
 function CustomersListView({
   onStartInteraction,
@@ -2403,10 +2465,25 @@ function CustomersListView({
   const [searchQuery, setSearchQuery] = useState("");
   const [visibleCols, setVisibleCols] = useState<Set<string>>(new Set(CUSTOMER_ALL_COLUMN_KEYS));
 
-  const [filterValues, setFilterValues] = useState<Record<string, string[]>>({ state: [] });
-  const filterDefs = [{ key: "state", label: "State", options: CUSTOMER_STATE_OPTIONS }];
+  // Which fields the agent has actually added via the "+ Filter" menu below
+  // — only these get rendered as live `FilterChip`s / applied to `filtered`.
+  // Starts empty: no filter is active until the agent explicitly adds one,
+  // matching the reference "Add Filter" menu this was built from.
+  const [addedFilterKeys, setAddedFilterKeys] = useState<string[]>([]);
+  const [filterValues, setFilterValues] = useState<Record<string, string[]>>({});
+  const filterDefs = addedFilterKeys.map((key) => {
+    const def = CUSTOMER_FILTER_FIELD_DEFS.find((f) => f.key === key)!;
+    return { key: def.key, label: def.label, options: CUSTOMER_FILTER_VALUE_OPTIONS[def.key] };
+  });
   const handleFilterChange = (key: string, values: string[]) => setFilterValues((prev) => ({ ...prev, [key]: values }));
-  const clearAllFilters = () => setFilterValues({ state: [] });
+  const clearAllFilters = () => setFilterValues({});
+  // Adding/removing a field from the "+ Filter" menu — removing one also
+  // drops its stored selected values, so re-adding it later starts fresh
+  // instead of resurrecting a stale selection nobody can see in the meantime.
+  const handleAddedFiltersChange = (keys: string[]) => {
+    setAddedFilterKeys(keys);
+    setFilterValues((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => keys.includes(k))));
+  };
 
   const filtered = CUSTOMER_LIST_RECORDS.filter((row) => {
     if (searchQuery) {
@@ -2414,7 +2491,10 @@ function CustomersListView({
       const haystack = `${row.firstName} ${row.lastName} ${row.contactNumber} ${row.emailAddress}`.toLowerCase();
       if (!haystack.includes(q)) return false;
     }
-    if (filterValues.state?.length && !filterValues.state.includes(row.state)) return false;
+    for (const key of addedFilterKeys) {
+      const selected = filterValues[key];
+      if (selected?.length && !selected.includes(row[key as CustomerFilterKey])) return false;
+    }
     return true;
   });
 
@@ -2517,6 +2597,40 @@ function CustomersListView({
         filterValues={filterValues}
         onFilterChange={handleFilterChange}
         onFilterClear={clearAllFilters}
+        // The "+ Filter" add-menu itself — `TableToolbar`'s own `filters`
+        // slot renders right alongside the `filterDefs`-driven chips above
+        // (table.tsx: filterChips, then filters, then the Clear button),
+        // exactly where FilterChip.stories.tsx's own "Removable" demo
+        // places this same trigger. Composed from `Select`
+        // (multiple/searchable/showSelectAll, a custom "+ Filter" trigger
+        // instead of its default text box) rather than lyra-ui's
+        // `FilterChip` itself — `FilterChip` renders ONE already-added
+        // filter's value picker; this is the separate "pick which fields
+        // are active at all" control that decides what shows up in
+        // `filterDefs` in the first place, same distinction
+        // FilterChip.stories.tsx's own demo draws between its per-filter
+        // chips and this single add-menu.
+        filters={
+          <Select
+            options={CUSTOMER_FILTER_FIELD_DEFS.map((f) => ({ value: f.key, label: f.label }))}
+            multiple
+            searchable
+            showSelectAll
+            dropdownAlign="left"
+            values={addedFilterKeys}
+            onValuesChange={handleAddedFiltersChange}
+            trigger={
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lyra-sm lyra-label transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lyra-border-focus focus-visible:ring-offset-2 border border-lyra-border-default bg-lyra-bg-control text-lyra-fg-action hover:bg-lyra-state-hover active:bg-lyra-state-pressed h-8 px-3"
+              >
+                <Plus className="h-4 w-4" strokeWidth={1.5} />
+                Filter
+              </button>
+            }
+            className="inline-flex relative"
+          />
+        }
         actionDefs={[
           { key: "refresh", label: "Refresh", icon: <RefreshCw className="h-4 w-4" strokeWidth={1.5} /> },
           { key: "new", label: "New", icon: <Plus className="h-4 w-4" strokeWidth={1.5} /> },
