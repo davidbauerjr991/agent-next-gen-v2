@@ -2450,6 +2450,8 @@ function CustomerChannelPopoverButton({
   disabled = false,
   onStartInteraction,
   alwaysVisible = false,
+  open: openProp,
+  onOpenChange: onOpenChangeProp,
 }: {
   row: CustomerListRecord;
   channel: ChannelType;
@@ -2475,8 +2477,20 @@ function CustomerChannelPopoverButton({
    *  Default `false` — existing table-row usage (`CustomerChannelCell`)
    *  unaffected. */
   alwaysVisible?: boolean;
+  /** Optionally controlled open state — lets a parent rendering several of
+   *  these siblings (`ActiveInteractionAddChannelIcons`) coordinate them so
+   *  opening one closes any other that was already open, instead of each
+   *  icon owning a fully independent popover that can stack up multiple
+   *  open "Select Channel" forms at once (caught from a screenshot of two
+   *  overlapping pickers open on Sarah Miller's card at the same time).
+   *  Uncontrolled (own internal state) when omitted — `CustomerChannelCell`
+   *  Customers-table usage is unaffected, each icon still independent. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = onOpenChangeProp ?? setOpenState;
   const meta = CHANNEL_ICON_META[channel];
   return (
     <CustomerChannelPicker
@@ -2550,6 +2564,13 @@ function ActiveInteractionAddChannelIcons({
   channels: TrackedChannel[];
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
 }) {
+  // Which one of these icons' popovers (if any) is currently open — shared
+  // across every icon this component renders so opening one closes
+  // whichever other one was already open (see each `CustomerChannelPopover-
+  // Button`'s own `open`/`onOpenChange` below). Declared before the early
+  // `available.length === 0` return so this hook still runs unconditionally
+  // regardless of that branch.
+  const [openChannel, setOpenChannel] = useState<ChannelType | null>(null);
   const knownRow = CUSTOMER_LIST_RECORDS.find((r) => r.contactNumber === recordId);
   // Most active interactions have NO real `CUSTOMER_LIST_RECORDS` match —
   // the left nav's own seed interactions and agent-to-agent consults (e.g.
@@ -2603,6 +2624,13 @@ function ActiveInteractionAddChannelIcons({
           disabled={addressOptionsForChannel(row, c).filter((o) => !(openAddresses[c] ?? []).includes(o.value)).length === 0}
           onStartInteraction={onStartInteraction}
           alwaysVisible
+          // Controlled + coordinated across every sibling icon here (see
+          // `openChannel` below) — per explicit request, opening one of
+          // these popovers should close any other one already open,
+          // rather than each icon owning its own fully independent open
+          // state and letting several stack up at once.
+          open={openChannel === c}
+          onOpenChange={(o) => setOpenChannel(o ? c : null)}
         />
       ))}
     </>
