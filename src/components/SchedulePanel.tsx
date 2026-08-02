@@ -90,6 +90,12 @@ const HOUR_HEIGHT = 64; // px per hour row
 const GUTTER_WIDTH = 56; // px, fixed time-label column
 const DAY_COLUMN_MIN_WIDTH = 112; // px, per day column in week view
 
+// `ScheduleToolbar`'s own single-row/two-row breakpoint — Tailwind's (and
+// lyra-ui's, which doesn't override the default `screens` scale) standard
+// `md` value, used here as a container-width threshold rather than a
+// viewport media query (see that component's own doc comment).
+const TOOLBAR_WIDE_BREAKPOINT = 768;
+
 type ScheduleView = "day" | "week";
 
 /* ── Current-time indicator ── a blue dot + line at the fractional-hour
@@ -251,100 +257,139 @@ function ScheduleToolbar({
   const goToNext = () => onAnchorDateChange(addDays(anchorDate, view === "day" ? 1 : 7));
   const goToToday = () => onAnchorDateChange(startOfDay(new Date()));
 
-  // Always two explicit rows, each spread edge-to-edge with its own
-  // `justify-between` — rather than one `flex-wrap` row that organically
-  // dropped to a second line once too narrow (that version left row 1
-  // clustered flush-left with Today right after it, and row 2's
-  // Day/Week+Add pushed flush-right via `ml-auto`, so each line only used
-  // part of its own width instead of balancing across it — the "why does
-  // half the row sit empty" feedback). Each row's own two clusters now
-  // pin to that row's opposite edges regardless of panel width, so both
-  // rows read as evenly using the full row rather than clustering to one
-  // side. Nav (chevrons + date) is kept together as one flex sub-block on
-  // row 1 so it doesn't itself get split apart from Today by the spread.
+  // Single row once there's genuinely enough room, two balanced rows
+  // below that — measured against this toolbar's OWN rendered width via
+  // `ResizeObserver` (the panel can be docked at its ~360px default,
+  // resized up to 1024px, or fullscreened to fill the main content
+  // area, so a viewport media query can't drive this; same "measure my
+  // own container" approach `TableToolbar` already uses for its own
+  // `isWide` breakpoint, table.tsx). `TOOLBAR_WIDE_BREAKPOINT` uses
+  // Tailwind's (and lyra-ui's, which doesn't override it) standard `md`
+  // breakpoint value rather than a one-off number — comfortably above
+  // this toolbar's single-row min-content width (~600px) with room to
+  // spare, and a recognizable, idiomatic value per the design system's
+  // own scale.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isWide, setIsWide] = useState(true);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setIsWide(entry.contentRect.width >= TOOLBAR_WIDE_BREAKPOINT));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const navCluster = (
+    <div className="flex items-center gap-2">
+      <Button variant="outline" size="icon" title="Previous" onClick={goToPrevious}>
+        <ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
+      </Button>
+
+      <Popover
+        open={datePopoverOpen}
+        onOpenChange={setDatePopoverOpen}
+        placement="bottom"
+        align="start"
+        sideOffset={4}
+        showArrow={false}
+        content={
+          <Calendar
+            mode="single"
+            selected={anchorDate}
+            defaultMonth={anchorDate}
+            onSelect={(date) => {
+              if (!date) return;
+              onAnchorDateChange(startOfDay(date));
+              setDatePopoverOpen(false);
+            }}
+          />
+        }
+      >
+        <button
+          type="button"
+          className={cn(buttonVariants({ variant: "outline", size: "lg" }), "justify-center whitespace-nowrap")}
+        >
+          {formatNavDate(anchorDate)}
+        </button>
+      </Popover>
+
+      <Button variant="outline" size="icon" title="Next" onClick={goToNext}>
+        <ChevronRight className="h-4 w-4" strokeWidth={1.5} />
+      </Button>
+    </div>
+  );
+
+  const todayButton = (
+    <Button variant="ghost" size="lg" className="shrink-0 gap-1.5" onClick={goToToday}>
+      <LocateFixed className="h-4 w-4" strokeWidth={1.5} />
+      Today
+    </Button>
+  );
+
+  const viewToggle = (
+    <ToggleGroup
+      items={[
+        { value: "day", label: "Day" },
+        { value: "week", label: "Week" },
+      ]}
+      value={view}
+      // ToggleGroup's single-select mode deselects on re-click of the
+      // already-active item (empty string) — a Day/Week switch should
+      // always have exactly one side active, so an empty next value is
+      // ignored rather than passed through.
+      onValueChange={(next) => {
+        if (next === "day" || next === "week") onViewChange(next);
+      }}
+    />
+  );
+
+  const addMenu = (
+    <Select
+      options={[
+        { value: "shift", label: "Shift" },
+        { value: "time-off", label: "Time Off" },
+        { value: "meeting", label: "Meeting" },
+      ]}
+      onValueChange={() => {}}
+      dropdownAlign="right"
+      trigger={
+        <button
+          type="button"
+          className={cn(buttonVariants({ variant: "default", size: "lg" }), "gap-1.5")}
+        >
+          <Plus className="h-4 w-4" strokeWidth={1.5} />
+          Add
+          <ChevronDown className="h-4 w-4" strokeWidth={1.5} />
+        </button>
+      }
+    />
+  );
+
   return (
-    <div className="flex w-full flex-col gap-2">
-      <div className="flex w-full items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" title="Previous" onClick={goToPrevious}>
-            <ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
-          </Button>
-
-          <Popover
-            open={datePopoverOpen}
-            onOpenChange={setDatePopoverOpen}
-            placement="bottom"
-            align="start"
-            sideOffset={4}
-            showArrow={false}
-            content={
-              <Calendar
-                mode="single"
-                selected={anchorDate}
-                defaultMonth={anchorDate}
-                onSelect={(date) => {
-                  if (!date) return;
-                  onAnchorDateChange(startOfDay(date));
-                  setDatePopoverOpen(false);
-                }}
-              />
-            }
-          >
-            <button
-              type="button"
-              className={cn(buttonVariants({ variant: "outline", size: "lg" }), "justify-center whitespace-nowrap")}
-            >
-              {formatNavDate(anchorDate)}
-            </button>
-          </Popover>
-
-          <Button variant="outline" size="icon" title="Next" onClick={goToNext}>
-            <ChevronRight className="h-4 w-4" strokeWidth={1.5} />
-          </Button>
+    <div ref={containerRef} className="w-full">
+      {isWide ? (
+        <div className="flex w-full items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            {navCluster}
+            {todayButton}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {viewToggle}
+            {addMenu}
+          </div>
         </div>
-
-        <Button variant="ghost" size="lg" className="gap-1.5" onClick={goToToday}>
-          <LocateFixed className="h-4 w-4" strokeWidth={1.5} />
-          Today
-        </Button>
-      </div>
-
-      <div className="flex w-full items-center justify-between gap-2">
-        <ToggleGroup
-          items={[
-            { value: "day", label: "Day" },
-            { value: "week", label: "Week" },
-          ]}
-          value={view}
-          // ToggleGroup's single-select mode deselects on re-click of the
-          // already-active item (empty string) — a Day/Week switch should
-          // always have exactly one side active, so an empty next value is
-          // ignored rather than passed through.
-          onValueChange={(next) => {
-            if (next === "day" || next === "week") onViewChange(next);
-          }}
-        />
-
-        <Select
-          options={[
-            { value: "shift", label: "Shift" },
-            { value: "time-off", label: "Time Off" },
-            { value: "meeting", label: "Meeting" },
-          ]}
-          onValueChange={() => {}}
-          dropdownAlign="right"
-          trigger={
-            <button
-              type="button"
-              className={cn(buttonVariants({ variant: "default", size: "lg" }), "gap-1.5")}
-            >
-              <Plus className="h-4 w-4" strokeWidth={1.5} />
-              Add
-              <ChevronDown className="h-4 w-4" strokeWidth={1.5} />
-            </button>
-          }
-        />
-      </div>
+      ) : (
+        <div className="flex w-full flex-col gap-2">
+          <div className="flex w-full items-center justify-between gap-2">
+            {navCluster}
+            {todayButton}
+          </div>
+          <div className="flex w-full items-center justify-between gap-2">
+            {viewToggle}
+            {addMenu}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
