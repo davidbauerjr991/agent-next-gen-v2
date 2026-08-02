@@ -66,6 +66,7 @@ import {
   PanelHeader,
   RadioGroup,
   RadioGroupItem,
+  RadioButtonGroup,
   DateRangePicker,
   filterChipVariants,
   Select,
@@ -2172,36 +2173,160 @@ type CustomerColKey = keyof CustomerListRecord;
 // ("only supported channels show", same rule as the Outbound picker).
 const CUSTOMER_CHANNEL_ORDER: ChannelType[] = ["voice", "sms", "email", "whatsapp"];
 
-/** Hover-reveal `ActionIconButton`s for a row's supported channels — reuses
+/** Which field the launch popover's address dropdown shows for a given
+ *  channel — email uses the row's `emailAddress`, voice/sms/whatsapp all
+ *  use its `firstPhone`. This dataset only carries one number/address per
+ *  customer (unlike the full Outbound picker's `resolveOutboundDetailField`,
+ *  which juggles several candidate numbers), so there's just one option to
+ *  offer either way. */
+function customerChannelAddress(row: CustomerListRecord, channel: ChannelType): { label: string; value: string } {
+  return channel === "email"
+    ? { label: "Select Email Address", value: row.emailAddress }
+    : { label: "Select Phone", value: row.firstPhone };
+}
+
+/** The launch popover behind one channel icon in a Customers row — same
+ *  "Select Channel / Select Phone (or Email) / Outbound Skill / Start
+ *  Interaction" shape as lyra-ui's own `OutboundAddButton` (create-new.tsx),
+ *  composed here from the same primitives (`Popover`/`RadioButtonGroup`/
+ *  `Select`/`Button`) rather than imported directly: `OutboundAddButton`'s
+ *  own trigger is a fixed "+" icon it can't swap out, but this needs one
+ *  popover per visible channel icon, anchored to whichever icon was
+ *  actually clicked and defaulted to that channel, not a single generic
+ *  add-channel trigger per row. Reuses `OUTBOUND_CONFIG.skillOptions` so
+ *  the skill list can't drift from the real Outbound picker's own list.
+ *  `placement="bottom"` is only a preferred side — `Popover`'s underlying
+ *  Radix collision detection (`avoidCollisions`, see popover.tsx) flips it
+ *  above the icon automatically when there isn't room below, same as every
+ *  other popover in this app, so it always renders on whichever side of
+ *  the clicked icon actually has room. */
+function CustomerChannelPopoverButton({
+  row,
+  channel,
+  available,
+}: {
+  row: CustomerListRecord;
+  channel: ChannelType;
+  available: ChannelType[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [selectedChannel, setSelectedChannel] = useState<ChannelType>(channel);
+  const [address, setAddress] = useState("");
+  const [skillId, setSkillId] = useState("");
+
+  // Re-derive from whichever icon was actually clicked every time this
+  // popover opens (not just on first mount) — same "only once actually
+  // open" timing `OutboundAddButton` uses (see its own effect comments),
+  // and for the same reason: this popover instance is reused across every
+  // open of this one icon, so a stale channel/skill from a previous open
+  // needs to be overwritten before the fields render again.
+  useEffect(() => {
+    if (!open) return;
+    setSelectedChannel(channel);
+    setSkillId("");
+  }, [open, channel]);
+
+  useEffect(() => {
+    if (!open) return;
+    setAddress(customerChannelAddress(row, selectedChannel).value);
+  }, [open, selectedChannel, row]);
+
+  const meta = CHANNEL_ICON_META[channel];
+  const fieldMeta = customerChannelAddress(row, selectedChannel);
+
+  const handleStartInteraction = () => {
+    if (!skillId) return;
+    // eslint-disable-next-line no-console
+    console.log(
+      "Start interaction:",
+      selectedChannel,
+      "→",
+      `${row.firstName} ${row.lastName}`,
+      `(address: ${address}, skill: ${skillId})`
+    );
+    setOpen(false);
+  };
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      placement="bottom"
+      sideOffset={4}
+      showArrow={false}
+      onOpenAutoFocus={(e: Event) => e.preventDefault()}
+      className="w-64"
+      bodyPadding={false}
+      content={
+        <div className="w-64 p-3 space-y-3">
+          <RadioButtonGroup
+            label="Select Channel"
+            options={available.map((c) => ({ value: c, label: CHANNEL_ICON_META[c].label }))}
+            value={selectedChannel}
+            onValueChange={(v: string) => setSelectedChannel(v as ChannelType)}
+          />
+          <Select
+            label={fieldMeta.label}
+            value={address || undefined}
+            onValueChange={setAddress}
+            options={[{ value: fieldMeta.value, label: fieldMeta.value }]}
+          />
+          <Select
+            label="Outbound Skill"
+            placeholder="Select Outbound Skill"
+            value={skillId || undefined}
+            onValueChange={setSkillId}
+            options={OUTBOUND_CONFIG.skillOptions}
+          />
+          <Button variant="default" size="lg" className="w-full" disabled={!skillId} onClick={handleStartInteraction}>
+            Start Interaction
+          </Button>
+        </div>
+      }
+    >
+      <ActionIconButton
+        size="sm"
+        title={meta.label}
+        aria-expanded={open}
+        onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.stopPropagation()}
+        className={cn(
+          "transition-opacity",
+          // Stays visible/interactive whenever ITS OWN popover is open —
+          // moving the pointer off the row and into the popover's content
+          // (portalled outside the row, so `group-hover` alone would end)
+          // shouldn't fade the trigger out from under an open popover, same
+          // "force visible while open" rule the message-bubble Copy/Add-tag
+          // toolbar and its TagPicker popover already use elsewhere in this
+          // file.
+          !open &&
+            "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+        )}
+      >
+        {meta.icon}
+      </ActionIconButton>
+    </Popover>
+  );
+}
+
+/** Hover-reveal channel icons for a row's supported channels — reuses
  *  lyra-ui's own `CHANNEL_TYPE_META` icon/label map (channel-row.tsx) so
  *  the icon-per-channel choice stays identical to every other channel
  *  picker in the app, rather than redeclaring Phone/Mail/MessageSquare/
- *  WhatsAppIcon here. Fades in on row hover/focus-within, matching the
- *  Copy/Add-tag hover-toolbar convention used on conversation bubbles
- *  elsewhere in this file (`pointer-events-none opacity-0` →
- *  `group-hover:`/`group-focus-within:` reveal); the row itself needs
- *  `className="group"` for this to fire (added on `TableRow` below). */
-function CustomerChannelCell({ channels }: { channels: ChannelType[] }) {
-  const available = CUSTOMER_CHANNEL_ORDER.filter((c) => channels.includes(c));
+ *  WhatsAppIcon here. Each icon opens its own launch popover — see
+ *  `CustomerChannelPopoverButton`. Fades in on row hover/focus-within,
+ *  matching the Copy/Add-tag hover-toolbar convention used on conversation
+ *  bubbles elsewhere in this file; the row itself needs `className="group"`
+ *  for this to fire (added on `TableRow` below). */
+function CustomerChannelCell({ row }: { row: CustomerListRecord }) {
+  const available = CUSTOMER_CHANNEL_ORDER.filter((c) => row.channels.includes(c));
   if (available.length === 0) {
     return <span className="lyra-body-sm text-lyra-fg-disabled">—</span>;
   }
   return (
     <div className="flex items-center gap-1">
-      {available.map((c) => {
-        const meta = CHANNEL_ICON_META[c];
-        return (
-          <ActionIconButton
-            key={c}
-            size="sm"
-            title={meta.label}
-            onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.stopPropagation()}
-            className="pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
-          >
-            {meta.icon}
-          </ActionIconButton>
-        );
-      })}
+      {available.map((c) => (
+        <CustomerChannelPopoverButton key={c} row={row} channel={c} available={available} />
+      ))}
     </div>
   );
 }
@@ -2439,7 +2564,7 @@ function CustomersListView() {
                     columnKey={key}
                     className={cn(CUSTOMER_COLUMN_CONFIG[key].flex, CUSTOMER_COLUMN_CONFIG[key].minWidth)}
                   >
-                    {key === "channels" ? <CustomerChannelCell channels={row.channels} /> : row[key]}
+                    {key === "channels" ? <CustomerChannelCell row={row} /> : row[key]}
                   </TableCell>
                 ))}
                 <TableCell className="w-[48px] shrink-0 sticky right-0 bg-lyra-bg-surface-base">
