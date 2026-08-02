@@ -9355,23 +9355,46 @@ export function AgentNextGenPage({
                   as the panel sliding in from full width, the left-to-right
                   animation reported after this fix's first pass.
 
-                  `visibility:hidden` + `position:absolute inset-0` (instead
-                  of `display:none`) fixes this: unlike `display:none`, a
-                  `visibility:hidden` element still generates a real box and
-                  reports its true, stable size to `ResizeObserver` at all
-                  times (`invisible`/`pointer-events-none` still fully hide
-                  it from sight/interaction/screen readers, same as `hidden`
-                  did) — `absolute inset-0` sizes it to match this row's own
-                  box exactly (same width it has when it's the sole `flex-1`
-                  participant), so `InteriorPanel`'s measured parent width
-                  never drops to 0 and never disagrees with reality, whether
-                  this group is showing or not. */}
+                  `visibility:hidden` (`invisible`) + `position:absolute
+                  inset-0` was the SECOND attempt, replacing `display:none` —
+                  it still generates a real box with a real, stable size for
+                  `ResizeObserver`, fixing the bug above. But it introduced a
+                  THIRD bug: `visibility` is inherited but overridable by a
+                  descendant that sets its own explicit value — and
+                  `InteriorPanel`'s inner content div does exactly that
+                  (`style={{ visibility: open ? "visible" : "hidden" }}`,
+                  interior-panel.tsx), keyed off its OWN `open` prop, which is
+                  `row !== null` — true regardless of which desk tab is
+                  active, since `row` is just `selectedCustomerRow` now, not
+                  gated on `activeDeskTab` (see the render call site below).
+                  So `invisible` on this wrapper got silently overridden back
+                  to visible one level down, and — still `position:absolute`,
+                  so no longer competing for flex space either — the panel
+                  rendered floating on top of whatever tab WAS actually
+                  active, confirmed from a screenshot showing it overlapping
+                  the Dashboard.
+
+                  `opacity-0` (this wrapper) + `inert` (native HTML attribute,
+                  supported as a real prop since React 19 — see this file's
+                  own React version) is the fix that actually holds up:
+                  unlike `visibility`, `opacity` composites the WHOLE
+                  subtree as one flattened layer, so a descendant's own
+                  inline `opacity`/`visibility` can't punch back through a
+                  `0`-opacity ancestor the way it could with `visibility`
+                  alone. `inert` (not just `pointer-events-none`) additionally
+                  drops the entire subtree out of tab order and the
+                  accessibility tree and blocks ALL interaction, not only
+                  pointer events — the same "fully inactive but still really
+                  there, still correctly sized" result `visibility:hidden`
+                  was reaching for, just via a property children genuinely
+                  cannot override. */}
               <div
                 className={
                   activeDeskTab === "customers"
                     ? "relative flex flex-1 overflow-hidden animate-in fade-in-0 duration-200"
-                    : "absolute inset-0 flex overflow-hidden invisible pointer-events-none"
+                    : "absolute inset-0 flex overflow-hidden opacity-0"
                 }
+                inert={activeDeskTab !== "customers"}
               >
                 <CustomersListView
                   onStartInteraction={(contact, channel, phone, skillId) =>
