@@ -5238,6 +5238,407 @@ function getFieldValue(fields: CustomerInfoField[], label: string): string {
   return fields.find((f) => f.label === label)?.value ?? "";
 }
 
+/* ── Customer History tab ──
+   Per a reference screenshot: a scrollable list of this customer's past
+   sessions (one card per past voice/SMS/email contact — target, direction +
+   channel, handling agent, timestamp, and an optional status like
+   "Disconnected"), and clicking a card opens a right-docked `InteriorPanel`
+   with that session's own detail fields (Start Date, Agent/Target, Type,
+   Call Center, Customer, External Interaction ID, External Thread ID) plus
+   a "Conversation Details" summary below them — same "click a row, open a
+   right InteriorPanel with details, chevron through the list" shape
+   `CustomerRowInfoPanel` already uses for the Customers table (see that
+   component's own doc comment), just scoped to one customer's own history
+   instead of the whole Customers table.
+
+   No real backend/session log exists for this prototype, so
+   `buildCustomerHistoryEntries` below deterministically synthesizes a
+   plausible list per customer — same `hashSeed`-on-`recordId` approach
+   `buildLatestInteraction`/`buildLatestNote` already use, salted per entry
+   index so a given customer always sees the same history across reopens
+   instead of it reshuffling every render. Target phone/email reuse the
+   exact same values `buildCustomerInfoFields` already synthesizes for the
+   Overview tab (via `getFieldValue` above) rather than a second,
+   independently-invented address that could disagree with it. */
+
+type CustomerHistoryDirection = "inbound" | "outbound";
+type CustomerHistoryChannelType = "voice" | "sms" | "email";
+
+interface CustomerHistorySessionEntry {
+  id: string;
+  direction: CustomerHistoryDirection;
+  channelType: CustomerHistoryChannelType;
+  /** e.g. "Outbound call" / "Inbound SMS" / "Outbound email" — precomputed
+   *  so the card and the detail panel's own "Type" field always agree on
+   *  the exact same string. */
+  typeLabel: string;
+  target: string;
+  agentName: string;
+  agentEmail: string;
+  timestamp: Date;
+  /** "MM/DD/YYYY h:mm:ss AM/PM" — shared by the card's own timestamp and
+   *  the detail panel's "Start Date" field (see `formatHistoryTimestamp`). */
+  timestampDisplay: string;
+  /** Only ever set for `channelType === "voice"` (see the reference
+   *  screenshots — SMS/email rows never carry one); undefined most of the
+   *  time even for voice, same "not every field is always present" shape
+   *  `TrackedChannel.addressLabel` etc. already have elsewhere. */
+  statusLabel?: string;
+  callCenter: string;
+  customerUsername: string;
+  externalInteractionId: string;
+  externalThreadId: string;
+  conversationSummary: string;
+}
+
+const CUSTOMER_HISTORY_DIRECTION_LABEL: Record<CustomerHistoryDirection, string> = {
+  inbound: "Inbound",
+  outbound: "Outbound",
+};
+
+// Lowercase per the reference screenshots ("Outbound call", "Outbound
+// email") except the SMS acronym, which stays upper — see `typeLabel`.
+const CUSTOMER_HISTORY_CHANNEL_LOWER_LABEL: Record<CustomerHistoryChannelType, string> = {
+  voice: "call",
+  sms: "SMS",
+  email: "email",
+};
+
+const CUSTOMER_HISTORY_CHANNEL_ICON: Record<CustomerHistoryChannelType, LucideIcon> = {
+  voice: Phone,
+  sms: MessageSquare,
+  email: Mail,
+};
+
+// Purple/green/pink per the reference screenshots — a different trio from
+// `CONTACT_HISTORY_CHANNEL_TAG_VARIANT`'s purple/teal/pink (that one only
+// has `TagVariant`'s 9 fixed categorical values to work with, and settled
+// on teal for chat/SMS; this is plain `text-*` on a bare icon, not a `Tag`,
+// so it isn't limited to that vocabulary and can use green directly).
+const CUSTOMER_HISTORY_CHANNEL_COLOR_CLASS: Record<CustomerHistoryChannelType, string> = {
+  voice: "text-lyra-accent-purple-strong",
+  sms: "text-lyra-accent-green-strong",
+  email: "text-lyra-accent-pink-strong",
+};
+
+const CUSTOMER_HISTORY_CALL_CENTER_POOL = [
+  "Testing Call Center", "Main Call Center", "East Region Call Center", "Overflow Call Center",
+];
+
+// Only `voice` entries ever roll against this — `undefined` (no status
+// shown) is deliberately in the pool twice, so most calls show nothing at
+// all, same as most rows in the reference screenshots.
+const CUSTOMER_HISTORY_VOICE_STATUS_POOL: (string | undefined)[] = [
+  "Disconnected", "Disconnected", undefined, undefined, "dialing",
+];
+
+/** "MM/DD/YYYY h:mm:ss AM/PM" — zero-padded month/day/seconds/minutes, but
+ *  NOT the hour (matches the reference screenshots: "4:39:42 PM" as well as
+ *  "12:58:22 PM") — deliberately hand-built rather than
+ *  `Date.prototype.toLocaleString`, whose default `"en-US"` format inserts
+ *  a comma before the time and never zero-pads month/day
+ *  ("7/27/2026, 4:39:42 PM"). */
+function formatHistoryTimestamp(date: Date): string {
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  const hour24 = date.getHours();
+  const ampm = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 || 12;
+  const min = String(date.getMinutes()).padStart(2, "0");
+  const sec = String(date.getSeconds()).padStart(2, "0");
+  return `${mm}/${dd}/${yyyy} ${hour12}:${min}:${sec} ${ampm}`;
+}
+
+/** Turns a numeric seed into a run of lowercase hex digits — just enough to
+ *  fake a plausible-looking UUID (`synthesizeExternalInteractionId` below);
+ *  not cryptographic, and doesn't need to be, since nothing here is a real
+ *  identifier. */
+function seededHex(seed: number, length: number): string {
+  let s = seed || 1;
+  let out = "";
+  while (out.length < length) {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    out += s.toString(16).padStart(8, "0");
+  }
+  return out.slice(0, length);
+}
+
+/** UUID-shaped (8-4-4-4-12), matching the reference screenshot's "External
+ *  Interaction ID" field — not a real UUID (no version/variant bits set),
+ *  just deterministic filler that reads like one. */
+function synthesizeExternalInteractionId(seed: number): string {
+  const hex = seededHex(seed, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** A 12-digit numeric string, matching the reference screenshot's "External
+ *  Thread ID" field. */
+function synthesizeExternalThreadId(seed: number): string {
+  return String(100000000000 + (seed % 900000000000));
+}
+
+const CUSTOMER_HISTORY_ENTRY_COUNT = 8;
+
+/** Deterministically synthesizes this customer's session history — see this
+ *  section's own doc comment above for why (no real session log exists).
+ *  Ordered most-recent-first: entry `0` is the most recent, walking
+ *  backward in time from "now" by a pseudo-random (but seed-stable) number
+ *  of hours per step. */
+function buildCustomerHistoryEntries(
+  customerName: string | undefined,
+  recordId: string,
+  channels: TrackedChannel[]
+): CustomerHistorySessionEntry[] {
+  const fields = buildCustomerInfoFields(customerName, recordId, channels);
+  const phone = getFieldValue(fields, "Phone #");
+  const email = getFieldValue(fields, "Email");
+  const { firstName, lastName } = splitCustomerName(customerName);
+
+  const entries: CustomerHistorySessionEntry[] = [];
+  let cursor = new Date();
+
+  for (let i = 0; i < CUSTOMER_HISTORY_ENTRY_COUNT; i++) {
+    const seed = hashSeed(`${recordId || customerName || "customer"}-history-${i}`);
+
+    // Step backward before creating this entry, so entry 0 isn't literally
+    // "right now" — a couple hours to just under two days between sessions.
+    cursor = new Date(cursor.getTime() - (2 + (seed % 46)) * 60 * 60 * 1000);
+
+    const direction: CustomerHistoryDirection = seed % 10 < 7 ? "outbound" : "inbound";
+    const channelPool: CustomerHistoryChannelType[] = ["voice", "voice", "sms", "email"];
+    const channelType = channelPool[Math.floor(seed / 7) % channelPool.length];
+
+    const agent = OUTBOUND_AGENTS[Math.floor(seed / 11) % OUTBOUND_AGENTS.length];
+    const agentName = agent?.name ?? "Support Team";
+    const { firstName: agentFirst, lastName: agentLast } = splitCustomerName(agentName);
+    const agentEmail = `${agentFirst.toLowerCase()}.${agentLast.toLowerCase()}@cxisme.com`;
+
+    entries.push({
+      id: `${recordId || customerName || "customer"}-history-${i}`,
+      direction,
+      channelType,
+      typeLabel: `${CUSTOMER_HISTORY_DIRECTION_LABEL[direction]} ${CUSTOMER_HISTORY_CHANNEL_LOWER_LABEL[channelType]}`,
+      target: channelType === "email" ? email : phone,
+      agentName,
+      agentEmail,
+      timestamp: cursor,
+      timestampDisplay: formatHistoryTimestamp(cursor),
+      statusLabel:
+        channelType === "voice"
+          ? CUSTOMER_HISTORY_VOICE_STATUS_POOL[Math.floor(seed / 13) % CUSTOMER_HISTORY_VOICE_STATUS_POOL.length]
+          : undefined,
+      callCenter: CUSTOMER_HISTORY_CALL_CENTER_POOL[Math.floor(seed / 17) % CUSTOMER_HISTORY_CALL_CENTER_POOL.length],
+      customerUsername: `${firstName.charAt(0).toLowerCase()}${lastName}${10 + (seed % 90)}`,
+      externalInteractionId: synthesizeExternalInteractionId(seed),
+      externalThreadId: synthesizeExternalThreadId(seed),
+      conversationSummary:
+        CUSTOMER_LATEST_INTERACTION_SUMMARY_POOL[Math.floor(seed / 19) % CUSTOMER_LATEST_INTERACTION_SUMMARY_POOL.length],
+    });
+  }
+
+  return entries;
+}
+
+/** Small directional-icon pair (an `ArrowUp`/`ArrowDown` beside the channel
+ *  icon) — no existing composed "inbound/outbound channel icon" exists
+ *  anywhere in this file or lyra-ui (checked); side-by-side rather than
+ *  overlaid as a corner badge (the convention `Button`'s own `badge` prop/
+ *  `channelCount` pill elsewhere in this file use) since at this small size
+ *  an overlaid arrow would mostly obscure the channel glyph underneath it,
+ *  and the reference screenshots show both fully visible side by side. */
+function CustomerHistoryChannelIcon({
+  channelType,
+  direction,
+}: {
+  channelType: CustomerHistoryChannelType;
+  direction: CustomerHistoryDirection;
+}) {
+  const ChannelIcon = CUSTOMER_HISTORY_CHANNEL_ICON[channelType];
+  const DirectionIcon = direction === "outbound" ? ArrowUp : ArrowDown;
+  return (
+    <span
+      className={cn("flex items-center gap-0.5 shrink-0 pt-0.5", CUSTOMER_HISTORY_CHANNEL_COLOR_CLASS[channelType])}
+      aria-hidden="true"
+    >
+      <DirectionIcon className="h-3.5 w-3.5" strokeWidth={2.5} />
+      <ChannelIcon className="h-4 w-4" strokeWidth={1.75} />
+    </span>
+  );
+}
+
+/** The "Customer History" tab's own body — a scrollable list of
+ *  `CustomerHistorySessionEntry` cards (see this section's own doc comment
+ *  above). `selectedIndex`/`onSelectIndex` drive which one's own detail
+ *  panel (`CustomerHistorySessionDetailPanel`, rendered as a sibling at the
+ *  call site) is open; clicking the already-open card's own row toggles it
+ *  back closed instead of just re-selecting the same one, same convention
+ *  `CustomersListView`'s own `onRowClick` uses for `CustomerRowInfoPanel`. */
+function CustomerHistoryTabContent({
+  entries,
+  selectedIndex,
+  onSelectIndex,
+}: {
+  entries: CustomerHistorySessionEntry[];
+  selectedIndex: number | null;
+  onSelectIndex: (index: number | null) => void;
+}) {
+  if (entries.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
+        <Inbox className="h-8 w-8 text-lyra-fg-disabled" strokeWidth={1.5} aria-hidden="true" />
+        <p className="lyra-body-md text-lyra-fg-disabled text-center">No previous interactions with this customer</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-1 flex-col overflow-y-auto">
+      {entries.map((entry, i) => {
+        const isSelected = selectedIndex === i;
+        return (
+          <div
+            key={entry.id}
+            role="button"
+            tabIndex={0}
+            aria-pressed={isSelected}
+            onClick={() => onSelectIndex(isSelected ? null : i)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelectIndex(isSelected ? null : i);
+              }
+            }}
+            className={cn(
+              "flex items-start gap-3 px-6 py-3 cursor-pointer transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lyra-border-focus focus-visible:-ring-offset-2",
+              i > 0 && "border-t border-lyra-border-subtle",
+              isSelected
+                ? "bg-lyra-bg-active-subtle hover:bg-lyra-state-hover-active-subtle"
+                : "hover:bg-lyra-state-hover"
+            )}
+          >
+            <CustomerHistoryChannelIcon channelType={entry.channelType} direction={entry.direction} />
+            <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+              <span className="lyra-body-md text-lyra-fg-default truncate">{entry.target}</span>
+              <span className="lyra-body-sm text-lyra-fg-secondary">{entry.typeLabel}</span>
+              <span className="lyra-body-sm-emphasis text-lyra-fg-default truncate">
+                {entry.agentName} ({entry.agentEmail.toUpperCase()})
+              </span>
+            </div>
+            <div className="flex flex-col items-end gap-0.5 shrink-0 text-right">
+              <span className="lyra-body-sm text-lyra-fg-secondary whitespace-nowrap">{entry.timestampDisplay}</span>
+              {entry.statusLabel && (
+                <span className="lyra-body-sm-emphasis text-lyra-fg-default whitespace-nowrap">
+                  {entry.statusLabel}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Read-only session-detail field, `Label` stacked above its value —
+ *  matches the reference screenshot's own layout (label above value, not
+ *  `CustomerInformationPanelBody`'s Overview-tab "label left, value right"
+ *  row), and reuses the plain `Label` atom rather than a hand-styled
+ *  uppercase span (CONTRIBUTING's "don't hand-roll `text-transform`" rule —
+ *  `Label`'s own built-in look is whatever this app already uses for every
+ *  other field label, so this stays visually consistent with the rest of
+ *  the panel even though it isn't pixel-identical to the reference). */
+function CustomerHistoryDetailField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-1 min-w-0">
+      <Label label={label} />
+      <span className="lyra-body-md text-lyra-fg-default break-words">{value}</span>
+    </div>
+  );
+}
+
+/** Right-docked `InteriorPanel` opened by clicking a `CustomerHistoryTabContent`
+ *  card — same "click a row, open a right `InteriorPanel`, chevron through
+ *  the list" shape `CustomerRowInfoPanel` already uses for the Customers
+ *  table (see that component's own doc comment), just over
+ *  `CustomerHistorySessionEntry` rows instead of `CustomerListRecord` ones. */
+function CustomerHistorySessionDetailPanel({
+  entry,
+  onClose,
+  onPrevious,
+  onNext,
+  hasPrevious,
+  hasNext,
+}: {
+  entry: CustomerHistorySessionEntry | null;
+  onClose: () => void;
+  onPrevious: () => void;
+  onNext: () => void;
+  hasPrevious: boolean;
+  hasNext: boolean;
+}) {
+  return (
+    <InteriorPanel
+      side="right"
+      open={entry !== null}
+      onClose={onClose}
+      storageKey="customer-history-session-detail-panel-width"
+      headerTitle="Session Details"
+      headerSubhead={entry?.timestampDisplay}
+      headerActions={
+        <>
+          <Button
+            variant="outline"
+            size="icon-md"
+            onClick={onPrevious}
+            disabled={!hasPrevious}
+            title="Previous session"
+          >
+            <ChevronLeft className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+          </Button>
+          <Button variant="outline" size="icon-md" onClick={onNext} disabled={!hasNext} title="Next session">
+            <ChevronRight className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+          </Button>
+        </>
+      }
+    >
+      {entry && (
+        <div className="flex flex-col gap-4 px-4 pt-3 pb-4 lyra-form-grid-wrap">
+          <div className={cn(CUSTOMER_INFO_ACCORDION_CLASSNAME, "flex flex-col gap-4 p-4")}>
+            <CustomerHistoryDetailField label="Start Date" value={entry.timestampDisplay} />
+            <div className="lyra-form-grid">
+              <CustomerHistoryDetailField
+                label="Agent"
+                value={`${entry.agentName} (${entry.agentEmail.toUpperCase()})`}
+              />
+              <CustomerHistoryDetailField label="Target" value={entry.target} />
+            </div>
+            <CustomerHistoryDetailField label="Type" value={entry.typeLabel} />
+            <CustomerHistoryDetailField label="Call Center" value={entry.callCenter} />
+            <CustomerHistoryDetailField label="Customer" value={entry.customerUsername} />
+            <CustomerHistoryDetailField label="External Interaction ID" value={entry.externalInteractionId} />
+            <CustomerHistoryDetailField label="External Thread ID" value={entry.externalThreadId} />
+          </div>
+          <Accordion
+            className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
+            defaultValue="conversation-details"
+            items={[
+              {
+                id: "conversation-details",
+                title: "Conversation Details",
+                content: (
+                  <p className="lyra-body-md text-lyra-fg-secondary">{entry.conversationSummary}</p>
+                ),
+              },
+            ]}
+          />
+        </div>
+      )}
+    </InteriorPanel>
+  );
+}
+
 const CUSTOMER_DETAIL_ACCOUNT_BLOCK_OPTIONS: SelectOption[] = [
   { value: "none", label: "None" },
   { value: "collections", label: "Collections" },
@@ -6765,15 +7166,49 @@ export function AgentNextGenPage({
   // side panel's open/pinned state and of which channel tab is selected —
   // mutually exclusive with the channel tabs (see `handleChannelSelect`,
   // which flips this back off whenever a channel tab is picked instead).
-  // No real content behind it yet (that's separate follow-up work); this
-  // just tracks which tab is showing as active.
   const [customerHistoryTabActive, setCustomerHistoryTabActive] = useState(false);
+  // Which `CustomerHistorySessionEntry` (by index into that customer's own
+  // `buildCustomerHistoryEntries` list, computed at the render site) has its
+  // `CustomerHistorySessionDetailPanel` open — `null` when none does. Reset
+  // whenever the tab itself isn't showing, or the active interaction
+  // changes, so a stale index from a previous customer's (differently
+  // sized) history list can't linger and either point at the wrong session
+  // or silently fail `entries[index]`.
+  const [selectedHistoryIndex, setSelectedHistoryIndex] = useState<number | null>(null);
+  useEffect(() => {
+    if (!customerHistoryTabActive) setSelectedHistoryIndex(null);
+  }, [customerHistoryTabActive]);
+  useEffect(() => {
+    setSelectedHistoryIndex(null);
+  }, [activeInteractionId]);
   // Drives the main content area: whenever an interaction is active, the
   // Desk dashboard is replaced by that interaction's blank detail page (see
   // the PageHeader "record header" mode below) — starting/quick-dialing/
   // redialing a new assignment always sets this, so the screen switches
   // over automatically the moment one is added.
   const activeInteraction = interactions.find((i) => i.id === activeInteractionId) ?? null;
+  // This customer's synthesized session history for the "Customer History"
+  // tab (`CustomerHistoryTabContent`/`CustomerHistorySessionDetailPanel` —
+  // see that section's own doc comment) — memoized on the customer's own
+  // identity (not `activeInteraction` itself, which is a fresh object most
+  // renders) so it doesn't resynthesize a brand new list on every
+  // unrelated re-render, only when the customer actually changes.
+  const customerHistoryEntries = useMemo(
+    () =>
+      activeInteraction
+        ? buildCustomerHistoryEntries(activeInteraction.customerName, activeInteraction.recordId, activeInteraction.channels)
+        : [],
+    [activeInteraction?.customerName, activeInteraction?.recordId, activeInteraction?.channels]
+  );
+  const selectedHistoryEntry = selectedHistoryIndex !== null ? customerHistoryEntries[selectedHistoryIndex] ?? null : null;
+  const handleHistoryNav = (direction: 1 | -1) => {
+    setSelectedHistoryIndex((prev) => {
+      if (prev === null) return prev;
+      const next = prev + direction;
+      if (next < 0 || next >= customerHistoryEntries.length) return prev;
+      return next;
+    });
+  };
   // Which channel type `InteractionTranscript` (below) should render content
   // for — the same "current" channel the record header's own
   // `ChannelToggleGroup` highlights (see its `active={... === key}` a few
@@ -9596,13 +10031,32 @@ export function AgentNextGenPage({
                       now, no docked panel sibling here anymore. */}
                   <div className="relative flex flex-1 overflow-hidden">
                     {customerHistoryTabActive ? (
-                      // "Customer History" tab — no real content yet, same
-                      // "blank placeholder" treatment already used elsewhere
-                      // in this file (e.g. Settings' own blank body) for a
-                      // not-yet-built tab body.
-                      <div className="flex flex-1 items-center justify-center p-4">
-                        <p className="lyra-body-md text-lyra-fg-disabled text-center">Coming soon</p>
-                      </div>
+                      // "Customer History" tab — a scrollable list of this
+                      // customer's own past sessions
+                      // (`CustomerHistoryTabContent`), with the selected
+                      // one's own detail panel
+                      // (`CustomerHistorySessionDetailPanel`) docked right
+                      // as a sibling — same "list + right InteriorPanel"
+                      // shape `CustomersListView`/`CustomerRowInfoPanel`
+                      // already use, see that section's own doc comment.
+                      // This wrapping div's own `relative` (on the parent
+                      // above) is what lets the panel dock/overlay
+                      // correctly without an extra positioning context.
+                      <>
+                        <CustomerHistoryTabContent
+                          entries={customerHistoryEntries}
+                          selectedIndex={selectedHistoryIndex}
+                          onSelectIndex={setSelectedHistoryIndex}
+                        />
+                        <CustomerHistorySessionDetailPanel
+                          entry={selectedHistoryEntry}
+                          onClose={() => setSelectedHistoryIndex(null)}
+                          onPrevious={() => handleHistoryNav(-1)}
+                          onNext={() => handleHistoryNav(1)}
+                          hasPrevious={selectedHistoryIndex !== null && selectedHistoryIndex > 0}
+                          hasNext={selectedHistoryIndex !== null && selectedHistoryIndex < customerHistoryEntries.length - 1}
+                        />
+                      </>
                     ) : (
                       <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
                         {/* Reopened-from-history, closed interaction — read-only
