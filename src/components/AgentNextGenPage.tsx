@@ -140,6 +140,7 @@ import {
   Pin,
   PanelLeftClose,
   History,
+  ChevronLeft,
   ChevronRight,
   Copy,
   Paperclip,
@@ -2464,6 +2465,12 @@ function CustomersListView({
   filterValues,
   onFilterValuesChange,
   onRowClick,
+  searchQuery,
+  onSearchChange,
+  sortKey,
+  sortDir,
+  onSort,
+  sortedRows,
 }: {
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
   // Filter state is a controlled prop, not local `useState`, so it lives on
@@ -2482,8 +2489,19 @@ function CustomersListView({
    *  the right of it, not nested inside), so its "which row" state has to
    *  live on their common parent, not in here. */
   onRowClick: (row: CustomerListRecord) => void;
+  // Search/sort are also controlled props now, computed into `sortedRows`
+  // by `AgentNextGenPage` (not locally in here) — so `CustomerRowInfoPanel`'s
+  // next/back chevrons can step through the exact same order this table is
+  // rendering, rather than each maintaining its own possibly-divergent copy
+  // of the same filter/sort logic. See that state's own declaration comment
+  // in `AgentNextGenPage`.
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
+  sortKey: CustomerColKey | null;
+  sortDir: SortDirection;
+  onSort: (key: CustomerColKey) => void;
+  sortedRows: CustomerListRecord[];
 }) {
-  const [searchQuery, setSearchQuery] = useState("");
   const [visibleCols, setVisibleCols] = useState<Set<string>>(new Set(CUSTOMER_ALL_COLUMN_KEYS));
 
   // Which fields the agent has actually added via the "+ Filter" menu below
@@ -2504,22 +2522,6 @@ function CustomersListView({
     onAddedFilterKeysChange(keys);
     onFilterValuesChange(Object.fromEntries(Object.entries(filterValues).filter(([k]) => keys.includes(k))));
   };
-
-  const filtered = CUSTOMER_LIST_RECORDS.filter((row) => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      const haystack = `${row.firstName} ${row.lastName} ${row.contactNumber} ${row.emailAddress}`.toLowerCase();
-      if (!haystack.includes(q)) return false;
-    }
-    for (const key of addedFilterKeys) {
-      const selected = filterValues[key];
-      if (selected?.length && !selected.includes(row[key as CustomerFilterKey])) return false;
-    }
-    return true;
-  });
-
-  const [sortKey, setSortKey] = useState<CustomerColKey | null>(null);
-  const [sortDir, setSortDir] = useState<SortDirection>(null);
 
   const { columnOrder: allColumnOrder, dragOverKey, dragHandlers } = useColumnReorder<CustomerColKey>(
     CUSTOMER_ALL_COLUMN_KEYS
@@ -2549,11 +2551,11 @@ function CustomersListView({
     columnOrder.reduce((sum: number, key: CustomerColKey) => sum + CUSTOMER_COLUMN_CONFIG[key].minWidthPx, 0);
 
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
-  const allSelected = selectedRows.size === filtered.length && filtered.length > 0;
+  const allSelected = selectedRows.size === sortedRows.length && sortedRows.length > 0;
   const someSelected = selectedRows.size > 0 && !allSelected;
   const toggleSelectAll = () => {
     if (allSelected || someSelected) setSelectedRows(new Set());
-    else setSelectedRows(new Set(filtered.map((r) => r.contactNumber)));
+    else setSelectedRows(new Set(sortedRows.map((r) => r.contactNumber)));
   };
   const toggleRow = (id: string) => {
     setSelectedRows((prev) => {
@@ -2567,26 +2569,8 @@ function CustomersListView({
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
 
-  const handleSort = (key: CustomerColKey) => {
-    if (sortKey === key) {
-      const next = nextCustomerSortDirection(sortDir);
-      setSortDir(next);
-      if (next === null) setSortKey(null);
-    } else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
-  };
   const dirFor = (key: CustomerColKey): SortDirection => (sortKey === key ? sortDir : null);
-
-  const sorted = [...filtered].sort((a, b) => {
-    if (!sortKey || !sortDir) return 0;
-    const aVal = String(a[sortKey]).toLowerCase();
-    const bVal = String(b[sortKey]).toLowerCase();
-    if (aVal < bVal) return sortDir === "asc" ? -1 : 1;
-    if (aVal > bVal) return sortDir === "asc" ? 1 : -1;
-    return 0;
-  });
+  const sorted = sortedRows;
 
   const totalRecords = sorted.length;
   const totalPages = Math.max(1, Math.ceil(totalRecords / rowsPerPage));
@@ -2611,7 +2595,7 @@ function CustomersListView({
       <TableToolbar
         className="px-6"
         searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
+        onSearchChange={onSearchChange}
         filterDefs={filterDefs}
         filterValues={filterValues}
         onFilterChange={handleFilterChange}
@@ -2682,7 +2666,7 @@ function CustomersListView({
                     key={key}
                     className={cn(col.flex, col.minWidth, "relative")}
                     sortDirection={dirFor(key)}
-                    onSort={() => handleSort(key)}
+                    onSort={() => onSort(key)}
                     columnKey={key}
                     dragHandlers={dragHandlers}
                     isDragOver={dragOverKey === key}
@@ -5976,6 +5960,10 @@ function CustomerInformationSidePanel({
 function CustomerRowInfoPanel({
   row,
   onClose,
+  onPrevious,
+  onNext,
+  hasPrevious,
+  hasNext,
 }: {
   /** The clicked customer row, or `null` when the panel is closed. Kept as
    *  the single source of both "is it open" (`open={row !== null}`) and
@@ -5984,6 +5972,15 @@ function CustomerRowInfoPanel({
    *  further down this file. */
   row: CustomerListRecord | null;
   onClose: () => void;
+  /** Step to the previous/next customer in `AgentNextGenPage`'s
+   *  `customerSortedRows` — the exact same filtered+sorted order the table
+   *  itself is currently showing (see that state's own doc comment) — not
+   *  a separate, potentially-different order this panel would otherwise
+   *  have to recompute on its own. */
+  onPrevious: () => void;
+  onNext: () => void;
+  hasPrevious: boolean;
+  hasNext: boolean;
 }) {
   const [activeTab, setActiveTab] = useState(0);
 
@@ -6018,6 +6015,25 @@ function CustomerRowInfoPanel({
       allowFullScreen
       headerTitle={customerName ?? "Customer"}
       headerSubhead={recordId}
+      // Sequential prev/next through the same filtered+sorted order the
+      // Customers table itself is showing (`customerSortedRows`, lifted to
+      // `AgentNextGenPage` — see that state's own doc comment). Plain
+      // `ActionIconButton`s, not `PanelPinButton`: these are momentary
+      // one-shot actions with no on/off state to reflect, unlike the
+      // pin/full-screen/close buttons elsewhere that reuse `PanelPinButton`.
+      // Rendered via `headerActions` so they appear BEFORE `InteriorPanel`'s
+      // own automatic full-screen-toggle/close buttons (its `actions={<>
+      // {headerActions}{fullScreenToggle}</>}` composition order).
+      headerActions={
+        <>
+          <ActionIconButton title="Previous customer" disabled={!hasPrevious} onClick={onPrevious}>
+            <ChevronLeft className="h-4 w-4" />
+          </ActionIconButton>
+          <ActionIconButton title="Next customer" disabled={!hasNext} onClick={onNext}>
+            <ChevronRight className="h-4 w-4" />
+          </ActionIconButton>
+        </>
+      }
       headerTabs={
         <TabList className="px-4" overflowMenu>
           {CUSTOMER_PANEL_TABS.map((label, i) => (
@@ -6288,6 +6304,67 @@ export function AgentNextGenPage({
   // only matters for the "still open on that row" case, not the panel
   // literally staying visible over other tabs.
   const [selectedCustomerRow, setSelectedCustomerRow] = useState<CustomerListRecord | null>(null);
+  // Search/sort — also lifted up here, alongside the filter state above,
+  // for a second reason beyond survival-across-unmount: `CustomerRowInfoPanel`'s
+  // next/back chevrons (`handleCustomerRowNav` below) need to step through
+  // the *exact same* filtered+sorted order the table itself is currently
+  // showing, not the raw `CUSTOMER_LIST_RECORDS` order — and since that
+  // panel is a sibling of `CustomersListView`, not a child of it, the only
+  // way both can agree on "the current order" is computing it once here
+  // (`customerSortedRows` below) and having `CustomersListView` render
+  // *that*, instead of each independently deriving its own possibly-
+  // different-by-a-render-cycle copy.
+  const [customerSearchQuery, setCustomerSearchQuery] = useState("");
+  const [customerSortKey, setCustomerSortKey] = useState<CustomerColKey | null>(null);
+  const [customerSortDir, setCustomerSortDir] = useState<SortDirection>(null);
+  const handleCustomerSort = (key: CustomerColKey) => {
+    if (customerSortKey === key) {
+      const next = nextCustomerSortDirection(customerSortDir);
+      setCustomerSortDir(next);
+      if (next === null) setCustomerSortKey(null);
+    } else {
+      setCustomerSortKey(key);
+      setCustomerSortDir("asc");
+    }
+  };
+  // Same filter/search/sort logic `CustomersListView` used to compute this
+  // itself locally — moved up here so `CustomerRowInfoPanel`'s chevrons and
+  // `CustomersListView`'s own render both read the one shared result.
+  const customerSortedRows = useMemo(() => {
+    const filtered = CUSTOMER_LIST_RECORDS.filter((row) => {
+      if (customerSearchQuery) {
+        const q = customerSearchQuery.toLowerCase();
+        const haystack = `${row.firstName} ${row.lastName} ${row.contactNumber} ${row.emailAddress}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      for (const key of customerAddedFilterKeys) {
+        const selected = customerFilterValues[key];
+        if (selected?.length && !selected.includes(row[key as CustomerFilterKey])) return false;
+      }
+      return true;
+    });
+    return [...filtered].sort((a, b) => {
+      if (!customerSortKey || !customerSortDir) return 0;
+      const aVal = String(a[customerSortKey]).toLowerCase();
+      const bVal = String(b[customerSortKey]).toLowerCase();
+      if (aVal < bVal) return customerSortDir === "asc" ? -1 : 1;
+      if (aVal > bVal) return customerSortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [customerSearchQuery, customerAddedFilterKeys, customerFilterValues, customerSortKey, customerSortDir]);
+  // Index of the row currently open in `CustomerRowInfoPanel`, within that
+  // same shared order — `-1` (nothing selected, or the selected row got
+  // filtered out from under the panel by a search/filter change) disables
+  // both chevrons via `hasPrevious`/`hasNext` below rather than throwing.
+  const selectedCustomerIndex = selectedCustomerRow
+    ? customerSortedRows.findIndex((r) => r.contactNumber === selectedCustomerRow.contactNumber)
+    : -1;
+  const handleCustomerRowNav = (direction: 1 | -1) => {
+    if (selectedCustomerIndex === -1) return;
+    const nextIndex = selectedCustomerIndex + direction;
+    if (nextIndex < 0 || nextIndex >= customerSortedRows.length) return;
+    setSelectedCustomerRow(customerSortedRows[nextIndex]);
+  };
   // Whether the record header's own "Customer History" tab (not the
   // Customer Information toggle icon next to it — a separate, unrelated
   // control) is the selected tab. A real selection, independent of both the
@@ -9076,6 +9153,12 @@ export function AgentNextGenPage({
                   filterValues={customerFilterValues}
                   onFilterValuesChange={setCustomerFilterValues}
                   onRowClick={setSelectedCustomerRow}
+                  searchQuery={customerSearchQuery}
+                  onSearchChange={setCustomerSearchQuery}
+                  sortKey={customerSortKey}
+                  sortDir={customerSortDir}
+                  onSort={handleCustomerSort}
+                  sortedRows={customerSortedRows}
                 />
               </div>
               {/* Rendered OUTSIDE the `display:contents` wrapper above, not
@@ -9101,6 +9184,10 @@ export function AgentNextGenPage({
               <CustomerRowInfoPanel
                 row={activeDeskTab === "customers" ? selectedCustomerRow : null}
                 onClose={() => setSelectedCustomerRow(null)}
+                onPrevious={() => handleCustomerRowNav(-1)}
+                onNext={() => handleCustomerRowNav(1)}
+                hasPrevious={selectedCustomerIndex > 0}
+                hasNext={selectedCustomerIndex !== -1 && selectedCustomerIndex < customerSortedRows.length - 1}
               />
               {activeDeskTab !== "customers" && (activeDeskTab !== "home" ? (
                 // Accounts/Tickets/WEM — no content built yet; same
