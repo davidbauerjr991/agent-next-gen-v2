@@ -5289,6 +5289,25 @@ interface CustomerHistorySessionEntry {
   externalInteractionId: string;
   externalThreadId: string;
   conversationSummary: string;
+  /** Only set for `channelType === "sms"` — the actual reconstructed
+   *  message thread shown on the detail panel's "Conversation" tab (see
+   *  `CustomerHistoryConversationContent`). Voice/email have no message
+   *  thread of their own; they use `callDurationDisplay`/`emailSubject`
+   *  below instead. */
+  conversationMessages?: CustomerHistoryConversationMessage[];
+  /** Only set for `channelType === "voice"` — "m:ss", shown on the
+   *  Conversation tab's call-notes card. */
+  callDurationDisplay?: string;
+  /** Only set for `channelType === "email"` — shown above
+   *  `conversationSummary` (reused as the email body) on the Conversation
+   *  tab. */
+  emailSubject?: string;
+}
+
+interface CustomerHistoryConversationMessage {
+  sender: "customer" | "agent";
+  text: string;
+  timestampDisplay: string;
 }
 
 const CUSTOMER_HISTORY_DIRECTION_LABEL: Record<CustomerHistoryDirection, string> = {
@@ -5378,6 +5397,81 @@ function synthesizeExternalThreadId(seed: number): string {
   return String(100000000000 + (seed % 900000000000));
 }
 
+// SMS thread content (Conversation tab, `channelType === "sms"`) — a short
+// alternating customer/agent exchange. Indexed independently by sender so a
+// synthesized thread doesn't accidentally pair an agent line that doesn't
+// answer the customer line right before it; realism isn't the bar here (no
+// real transcript data exists to reproduce), just a plausible-looking
+// back-and-forth.
+const CUSTOMER_HISTORY_SMS_CUSTOMER_MESSAGE_POOL = [
+  "Hi, I had a question about my last bill.",
+  "Can you check if my address on file is up to date?",
+  "I don't think I received the confirmation text yet.",
+  "Thanks, that answers my question!",
+  "Is there a fee for that?",
+  "Sorry, one more thing — when does that take effect?",
+];
+const CUSTOMER_HISTORY_SMS_AGENT_MESSAGE_POOL = [
+  "Sure, let me pull that up for you.",
+  "I can see that on your account now.",
+  "You're all set — that's been updated.",
+  "No problem, happy to help!",
+  "That fee was waived for your account.",
+  "It'll take effect on your next billing cycle.",
+];
+
+// Email content (Conversation tab, `channelType === "email"`) — `subject`
+// only; the body reuses `conversationSummary` (already a customer-facing
+// paragraph, no need for a second, near-duplicate pool).
+const CUSTOMER_HISTORY_EMAIL_SUBJECT_POOL = [
+  "Following up on your account",
+  "Your recent request",
+  "Question about your invoice",
+  "Update to your account details",
+  "Re: your last message",
+];
+
+/** "m:ss" — a plausible call length, from ~20 seconds up to ~14 minutes.
+ *  Shown on the Conversation tab's call-notes card for `channelType ===
+ *  "voice"` entries. */
+function synthesizeCallDuration(seed: number): string {
+  const totalSeconds = 20 + (seed % 840);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
+
+/** Builds the "sms" conversation thread for one history entry — 3 to 5
+ *  messages, alternating strictly by sender, starting with whichever side
+ *  actually initiated the session (`direction`): an outbound session opens
+ *  with the agent reaching out, an inbound one opens with the customer.
+ *  Timestamps step forward a minute or two per message from the session's
+ *  own start time, so they read in order without ever running past it. */
+function buildCustomerHistorySmsMessages(
+  seed: number,
+  direction: CustomerHistoryDirection,
+  sessionStart: Date
+): CustomerHistoryConversationMessage[] {
+  const messageCount = 3 + (seed % 3);
+  const startsWithAgent = direction === "outbound";
+  const messages: CustomerHistoryConversationMessage[] = [];
+  let cursor = new Date(sessionStart);
+
+  for (let i = 0; i < messageCount; i++) {
+    const isAgentTurn = startsWithAgent ? i % 2 === 0 : i % 2 === 1;
+    const pool = isAgentTurn ? CUSTOMER_HISTORY_SMS_AGENT_MESSAGE_POOL : CUSTOMER_HISTORY_SMS_CUSTOMER_MESSAGE_POOL;
+    const text = pool[(seed + i * 5) % pool.length];
+    cursor = new Date(cursor.getTime() + (60 + ((seed + i) % 90)) * 1000);
+    messages.push({
+      sender: isAgentTurn ? "agent" : "customer",
+      text,
+      timestampDisplay: formatHistoryTimestamp(cursor),
+    });
+  }
+
+  return messages;
+}
+
 const CUSTOMER_HISTORY_ENTRY_COUNT = 8;
 
 /** Deterministically synthesizes this customer's session history — see this
@@ -5434,6 +5528,12 @@ function buildCustomerHistoryEntries(
       externalThreadId: synthesizeExternalThreadId(seed),
       conversationSummary:
         CUSTOMER_LATEST_INTERACTION_SUMMARY_POOL[Math.floor(seed / 19) % CUSTOMER_LATEST_INTERACTION_SUMMARY_POOL.length],
+      conversationMessages: channelType === "sms" ? buildCustomerHistorySmsMessages(seed, direction, cursor) : undefined,
+      callDurationDisplay: channelType === "voice" ? synthesizeCallDuration(seed) : undefined,
+      emailSubject:
+        channelType === "email"
+          ? CUSTOMER_HISTORY_EMAIL_SUBJECT_POOL[Math.floor(seed / 23) % CUSTOMER_HISTORY_EMAIL_SUBJECT_POOL.length]
+          : undefined,
     });
   }
 
@@ -5558,11 +5658,112 @@ function CustomerHistoryDetailField({ label, value }: { label: string; value: st
   );
 }
 
+const CUSTOMER_HISTORY_DETAIL_TABS = ["Details", "Conversation"];
+
+/** One read-only customer/agent bubble for the Conversation tab's SMS
+ *  thread (`CustomerHistoryConversationContent` below) — a trimmed-down
+ *  sibling of `TranscriptMessageBubble` (this file's live-transcript
+ *  bubble), reusing the exact same avatar/bubble/timestamp classes for
+ *  visual consistency. No hover toolbar (Copy/Add tag) or tags row here —
+ *  both are live-editing affordances for an open conversation, and every
+ *  session this panel shows is already closed history; there's nothing to
+ *  tag or copy-in-progress. */
+function CustomerHistoryConversationMessageBubble({ message }: { message: CustomerHistoryConversationMessage }) {
+  const isCustomer = message.sender === "customer";
+  return (
+    <div className={cn("flex flex-col", isCustomer ? "items-start" : "items-end")}>
+      <div className={cn("flex max-w-[85%] items-start gap-2", isCustomer ? "flex-row" : "flex-row-reverse")}>
+        <span
+          className={cn(
+            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full lyra-body-sm-emphasis lyra-transcript-avatar",
+            isCustomer
+              ? "bg-lyra-accent-green-soft text-lyra-accent-green-strong"
+              : "bg-lyra-bg-primary text-lyra-fg-on-primary"
+          )}
+          aria-hidden="true"
+        >
+          {isCustomer ? "C" : "A"}
+        </span>
+        <div className="flex min-w-0 flex-col gap-1">
+          <div
+            className={cn(
+              "rounded-lyra-lg px-4 py-3 border border-transparent",
+              isCustomer ? "rounded-tl-none bg-lyra-state-hover" : "rounded-tr-none"
+            )}
+            style={!isCustomer ? { backgroundColor: "var(--lyra-color-bg-conversation-user)" } : undefined}
+          >
+            <p className="lyra-body-md text-lyra-fg-default">{message.text}</p>
+            <span className="mt-2 block lyra-body-sm text-lyra-fg-secondary">{message.timestampDisplay}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The Conversation tab's actual body — what it shows depends on
+ *  `entry.channelType`, since a call/SMS thread/email genuinely don't look
+ *  like the same kind of content (same reasoning `InteractionTranscript`'s
+ *  own per-channel branching already uses, see that component's doc
+ *  comment): an SMS session renders its real reconstructed message thread
+ *  (`conversationMessages`); a voice session has no messages at all, just a
+ *  call-notes card (`conversationSummary`) with its `callDurationDisplay`;
+ *  an email session renders as `emailSubject` + body (`conversationSummary`
+ *  again) rather than chat bubbles, since an email doesn't read as a
+ *  back-and-forth the way SMS does. */
+function CustomerHistoryConversationContent({ entry }: { entry: CustomerHistorySessionEntry }) {
+  if (entry.channelType === "sms") {
+    return (
+      <div className="flex flex-col gap-4 px-4 py-3">
+        {(entry.conversationMessages ?? []).map((message, i) => (
+          <CustomerHistoryConversationMessageBubble key={i} message={message} />
+        ))}
+      </div>
+    );
+  }
+
+  if (entry.channelType === "email") {
+    return (
+      <div className="flex flex-col gap-3 p-4">
+        <div className={cn(CUSTOMER_INFO_ACCORDION_CLASSNAME, "flex flex-col gap-3 p-4")}>
+          <CustomerHistoryDetailField label="Subject" value={entry.emailSubject ?? ""} />
+          <div className="flex flex-col gap-1">
+            <Label label="Body" />
+            <p className="lyra-body-md text-lyra-fg-default">{entry.conversationSummary}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Voice — call notes + duration, no message thread.
+  return (
+    <div className="flex flex-col gap-3 p-4">
+      <div className={cn(CUSTOMER_INFO_ACCORDION_CLASSNAME, "flex flex-col gap-3 p-4")}>
+        <CustomerHistoryDetailField label="Duration" value={entry.callDurationDisplay ?? ""} />
+        <div className="flex flex-col gap-1">
+          <Label label="Call Notes" />
+          <p className="lyra-body-md text-lyra-fg-default">{entry.conversationSummary}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Right-docked `InteriorPanel` opened by clicking a `CustomerHistoryTabContent`
  *  card — same "click a row, open a right `InteriorPanel`, chevron through
  *  the list" shape `CustomerRowInfoPanel` already uses for the Customers
  *  table (see that component's own doc comment), just over
- *  `CustomerHistorySessionEntry` rows instead of `CustomerListRecord` ones. */
+ *  `CustomerHistorySessionEntry` rows instead of `CustomerListRecord` ones.
+ *
+ *  Two tabs, per explicit request: "Details" (this session's own identity
+ *  fields — now a collapsible `Accordion`, same as "Conversation Details"
+ *  right below it, rather than a permanently-expanded block — plus that
+ *  same summary blurb) and "Conversation" (the actual reconstructed
+ *  conversation content, `CustomerHistoryConversationContent` above). Own
+ *  `activeTab` state, reset back to "Details" whenever a different
+ *  session's entry is opened (via `entry?.id`) — a `Conversation` tab left
+ *  open on session A shouldn't carry over silently to session B. */
 function CustomerHistorySessionDetailPanel({
   entry,
   onClose,
@@ -5578,6 +5779,11 @@ function CustomerHistorySessionDetailPanel({
   hasPrevious: boolean;
   hasNext: boolean;
 }) {
+  const [activeTab, setActiveTab] = useState(0);
+  useEffect(() => {
+    setActiveTab(0);
+  }, [entry?.id]);
+
   return (
     <InteriorPanel
       side="right"
@@ -5602,24 +5808,45 @@ function CustomerHistorySessionDetailPanel({
           </Button>
         </>
       }
+      headerTabs={
+        <TabList className="px-4" overflowMenu>
+          {CUSTOMER_HISTORY_DETAIL_TABS.map((label, i) => (
+            <Tab key={label} active={activeTab === i} onClick={() => setActiveTab(i)}>
+              {label}
+            </Tab>
+          ))}
+        </TabList>
+      }
     >
-      {entry && (
+      {entry && activeTab === CUSTOMER_HISTORY_DETAIL_TABS.indexOf("Details") && (
         <div className="flex flex-col gap-4 px-4 pt-3 pb-4 lyra-form-grid-wrap">
-          <div className={cn(CUSTOMER_INFO_ACCORDION_CLASSNAME, "flex flex-col gap-4 p-4")}>
-            <CustomerHistoryDetailField label="Start Date" value={entry.timestampDisplay} />
-            <div className="lyra-form-grid">
-              <CustomerHistoryDetailField
-                label="Agent"
-                value={`${entry.agentName} (${entry.agentEmail.toUpperCase()})`}
-              />
-              <CustomerHistoryDetailField label="Target" value={entry.target} />
-            </div>
-            <CustomerHistoryDetailField label="Type" value={entry.typeLabel} />
-            <CustomerHistoryDetailField label="Call Center" value={entry.callCenter} />
-            <CustomerHistoryDetailField label="Customer" value={entry.customerUsername} />
-            <CustomerHistoryDetailField label="External Interaction ID" value={entry.externalInteractionId} />
-            <CustomerHistoryDetailField label="External Thread ID" value={entry.externalThreadId} />
-          </div>
+          <Accordion
+            className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
+            defaultValue="session-details"
+            items={[
+              {
+                id: "session-details",
+                title: "Session Details",
+                content: (
+                  <div className="flex flex-col gap-4">
+                    <CustomerHistoryDetailField label="Start Date" value={entry.timestampDisplay} />
+                    <div className="lyra-form-grid">
+                      <CustomerHistoryDetailField
+                        label="Agent"
+                        value={`${entry.agentName} (${entry.agentEmail.toUpperCase()})`}
+                      />
+                      <CustomerHistoryDetailField label="Target" value={entry.target} />
+                    </div>
+                    <CustomerHistoryDetailField label="Type" value={entry.typeLabel} />
+                    <CustomerHistoryDetailField label="Call Center" value={entry.callCenter} />
+                    <CustomerHistoryDetailField label="Customer" value={entry.customerUsername} />
+                    <CustomerHistoryDetailField label="External Interaction ID" value={entry.externalInteractionId} />
+                    <CustomerHistoryDetailField label="External Thread ID" value={entry.externalThreadId} />
+                  </div>
+                ),
+              },
+            ]}
+          />
           <Accordion
             className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
             defaultValue="conversation-details"
@@ -5634,6 +5861,9 @@ function CustomerHistorySessionDetailPanel({
             ]}
           />
         </div>
+      )}
+      {entry && activeTab === CUSTOMER_HISTORY_DETAIL_TABS.indexOf("Conversation") && (
+        <CustomerHistoryConversationContent entry={entry} />
       )}
     </InteriorPanel>
   );
