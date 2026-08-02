@@ -2463,6 +2463,7 @@ function CustomersListView({
   onAddedFilterKeysChange,
   filterValues,
   onFilterValuesChange,
+  onRowClick,
 }: {
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
   // Filter state is a controlled prop, not local `useState`, so it lives on
@@ -2475,6 +2476,12 @@ function CustomersListView({
   onAddedFilterKeysChange: (keys: string[]) => void;
   filterValues: Record<string, string[]>;
   onFilterValuesChange: (values: Record<string, string[]>) => void;
+  /** Opens `CustomerRowInfoPanel` for the clicked row — lifted up to
+   *  `AgentNextGenPage` for the same reason the filter state above is:
+   *  that panel renders as a sibling of this whole component (docked to
+   *  the right of it, not nested inside), so its "which row" state has to
+   *  live on their common parent, not in here. */
+  onRowClick: (row: CustomerListRecord) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [visibleCols, setVisibleCols] = useState<Set<string>>(new Set(CUSTOMER_ALL_COLUMN_KEYS));
@@ -2695,10 +2702,17 @@ function CustomersListView({
             {pageRows.map((row) => (
               <TableRow
                 key={row.contactNumber}
-                className="group"
+                className="group cursor-pointer"
                 data-state={selectedRows.has(row.contactNumber) ? "selected" : undefined}
+                onClick={() => onRowClick(row)}
               >
-                <TableCell className="w-[40px] shrink-0">
+                {/* `stopPropagation` on both cells below — same reason the
+                    channel popover buttons already stop it (see
+                    `CustomerChannelCell`): without it, toggling this row's
+                    checkbox or clicking its "More options" kebab would
+                    ALSO open the Customer Information panel via the row's
+                    own `onClick` above. */}
+                <TableCell className="w-[40px] shrink-0" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                   <Checkbox
                     checked={selectedRows.has(row.contactNumber)}
                     onCheckedChange={() => toggleRow(row.contactNumber)}
@@ -2718,7 +2732,10 @@ function CustomersListView({
                     )}
                   </TableCell>
                 ))}
-                <TableCell className="w-[48px] shrink-0 sticky right-0 bg-lyra-bg-surface-base">
+                <TableCell
+                  className="w-[48px] shrink-0 sticky right-0 bg-lyra-bg-surface-base"
+                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                >
                   <button
                     aria-label="More options"
                     className="flex h-7 w-7 items-center justify-center rounded-lyra-sm text-lyra-fg-secondary hover:bg-lyra-bg-surface-shell transition-colors"
@@ -5936,6 +5953,85 @@ function CustomerInformationSidePanel({
   );
 }
 
+/* ── CustomerRowInfoPanel ──
+   Right-docked `InteriorPanel` opened by clicking a row in the Customers
+   list view (`CustomersListView`'s `onRowClick`) — reuses the exact same
+   "Customer Information" content (`CustomerInformationPanelBody`, and the
+   `buildCustomerInfoFields`/`buildLatestInteraction`/`buildLatestNote`
+   helpers that feed it) `CustomerInformationSidePanel` already shows for an
+   active interaction, rather than a second hand-built copy of that same
+   Overview/Detail/Directory content. Two real differences from that
+   component, both per explicit request: docked RIGHT via `InteriorPanel`
+   (that one is left-docked via `SidePanel`, for an unrelated reason — see
+   its own doc comment), and no `footer`/`AIInput` at all — this panel is
+   read-only reference info about whichever customer row was clicked, not
+   the seat of an active conversation to ask the AI assistant about.
+
+   `channels: []` passed to `buildCustomerInfoFields` below — that param
+   only exists so a real *active* interaction's actually-open voice/email
+   channel can override the synthesized phone/email fallback (see that
+   function's own doc comment); a Customers-table row was never opened as
+   an interaction, so there's no such channel to prefer over the
+   synthesized one. */
+function CustomerRowInfoPanel({
+  row,
+  onClose,
+}: {
+  /** The clicked customer row, or `null` when the panel is closed. Kept as
+   *  the single source of both "is it open" (`open={row !== null}`) and
+   *  "whose info to show" — same pattern the Dashboard's own queue
+   *  drill-down `InteriorPanel` already uses (`selectedQueueId`) a bit
+   *  further down this file. */
+  row: CustomerListRecord | null;
+  onClose: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState(0);
+
+  // Back to the Overview tab every time a *different* row is opened — same
+  // reasoning `CustomerChannelPopoverButton`'s own reset effects use
+  // elsewhere in this file: reopening this panel on the previous row's
+  // last-viewed tab would be a mildly confusing default. `row?.contactNumber`
+  // (not `row` itself, a fresh object reference every render) is what this
+  // actually keys off, so this doesn't also fire on every unrelated re-render
+  // while the same row's panel is already open.
+  useEffect(() => {
+    if (row) setActiveTab(0);
+  }, [row?.contactNumber]);
+
+  const customerName = row ? `${row.firstName} ${row.lastName}` : undefined;
+  const recordId = row?.contactNumber ?? "";
+  const fields = useMemo(() => buildCustomerInfoFields(customerName, recordId, []), [customerName, recordId]);
+  const latestInteraction = useMemo(() => buildLatestInteraction(customerName, recordId), [customerName, recordId]);
+  const latestNote = useMemo(() => buildLatestNote(customerName, recordId), [customerName, recordId]);
+
+  return (
+    <InteriorPanel
+      side="right"
+      open={row !== null}
+      onClose={onClose}
+      headerTitle={customerName ?? "Customer"}
+      headerSubhead={recordId}
+      headerTabs={
+        <TabList className="px-4" overflowMenu>
+          {CUSTOMER_PANEL_TABS.map((label, i) => (
+            <Tab key={label} active={activeTab === i} onClick={() => setActiveTab(i)}>
+              {label}
+            </Tab>
+          ))}
+        </TabList>
+      }
+    >
+      <CustomerInformationPanelBody
+        activeTab={activeTab}
+        customerName={customerName}
+        fields={fields}
+        latestInteraction={latestInteraction}
+        latestNote={latestNote}
+      />
+    </InteriorPanel>
+  );
+}
+
 /* ── AgentNextGenPage ── */
 
 type Page = "agent-workspace" | "agent" | "outbound" | "login";
@@ -6173,6 +6269,18 @@ export function AgentNextGenPage({
   // and back to Customers, not just switching between desk tabs.
   const [customerAddedFilterKeys, setCustomerAddedFilterKeys] = useState<string[]>([]);
   const [customerFilterValues, setCustomerFilterValues] = useState<Record<string, string[]>>({});
+  // Which Customers-table row (if any) has its Customer Information panel
+  // open — also lifted up here rather than local to `CustomersListView`,
+  // since `CustomerRowInfoPanel` (the panel itself) renders as a SIBLING of
+  // `CustomersListView`, docked to its right, not nested inside it; two
+  // sibling components can only share state through a common parent. Not
+  // reset to `null` on unmount either way, for the same "survives
+  // navigating to an interaction/Settings and back" reason the filter
+  // state above lives here — though `CustomerRowInfoPanel` itself is only
+  // ever rendered while the Customers tab is active, so in practice this
+  // only matters for the "still open on that row" case, not the panel
+  // literally staying visible over other tabs.
+  const [selectedCustomerRow, setSelectedCustomerRow] = useState<CustomerListRecord | null>(null);
   // Whether the record header's own "Customer History" tab (not the
   // Customer Information toggle icon next to it — a separate, unrelated
   // control) is the selected tab. A real selection, independent of both the
@@ -8960,7 +9068,9 @@ export function AgentNextGenPage({
                   onAddedFilterKeysChange={setCustomerAddedFilterKeys}
                   filterValues={customerFilterValues}
                   onFilterValuesChange={setCustomerFilterValues}
+                  onRowClick={setSelectedCustomerRow}
                 />
+                <CustomerRowInfoPanel row={selectedCustomerRow} onClose={() => setSelectedCustomerRow(null)} />
               </div>
               {activeDeskTab !== "customers" && (activeDeskTab !== "home" ? (
                 // Accounts/Tickets/WEM — no content built yet; same
