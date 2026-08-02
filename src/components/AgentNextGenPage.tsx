@@ -2241,6 +2241,29 @@ function customerChannelAddress(row: CustomerListRecord, channel: ChannelType): 
     : { label: "Select Phone", value: row.firstPhone };
 }
 
+/** Every known address this row can be reached at for a given channel —
+ *  the row's own number/email first (same value `customerChannelAddress`
+ *  returns), then, for phone-based channels only, the same shared fallback
+ *  pool (`OUTBOUND_CONFIG.phoneOptions`) already offered everywhere else a
+ *  phone number needs to be picked (e.g. the `CreateNew` outbound picker's
+ *  own "Select Phone" screen) — deduped so the row's own number isn't
+ *  listed twice if it happens to coincide with a pool entry. Without this,
+ *  a channel type already open on its ONE known number read as fully
+ *  exhausted here even though the very same contact still has other real
+ *  numbers reachable elsewhere in the app (caught from a screenshot of
+ *  Sarah Miller's SMS icon disappearing entirely despite her own "Add
+ *  Channel" picker still listing 3 more unused numbers). Email has no such
+ *  shared pool — a customer only ever has the one address on file. */
+function addressOptionsForChannel(row: CustomerListRecord, channel: ChannelType): { value: string; label: string }[] {
+  const own = customerChannelAddress(row, channel);
+  const options = own.value ? [{ value: own.value, label: own.value }] : [];
+  if (channel === "email") return options;
+  for (const opt of OUTBOUND_CONFIG.phoneOptions) {
+    if (!options.some((o) => o.value === opt.value)) options.push(opt);
+  }
+  return options;
+}
+
 /** Shared "Select Channel / Select Phone (or Email) / Outbound Skill /
  *  Start Interaction" popover body — same shape as lyra-ui's own
  *  `OutboundAddButton` (create-new.tsx), composed here from the same
@@ -2259,6 +2282,7 @@ function CustomerChannelPicker({
   row,
   defaultChannel,
   available,
+  openAddresses = {},
   onStartInteraction,
   trigger,
   open,
@@ -2270,6 +2294,14 @@ function CustomerChannelPicker({
    *  for `CustomerAddChannelButton`'s single generic trigger. */
   defaultChannel: ChannelType;
   available: ChannelType[];
+  /** Address values already open on THIS interaction, keyed by channel
+   *  type — subtracted from `addressOptionsForChannel`'s full pool so an
+   *  agent can't pick a number/address that's already an open channel
+   *  (would just duplicate it) while still seeing/picking any other real
+   *  one that isn't. Omitted entirely by `CustomerChannelCell`'s Customers-
+   *  table usage, where there's no active interaction to already have
+   *  channels open against — defaults to `{}` (nothing excluded) there. */
+  openAddresses?: Partial<Record<ChannelType, string[]>>;
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
   trigger: React.ReactNode;
   /** Open state lives in whichever wrapper renders `trigger` (not in here),
@@ -2282,6 +2314,14 @@ function CustomerChannelPicker({
   const [selectedChannel, setSelectedChannel] = useState<ChannelType>(defaultChannel);
   const [address, setAddress] = useState("");
   const [skillId, setSkillId] = useState("");
+
+  // Every real address for a channel MINUS whichever of those are already
+  // open on this interaction — see `openAddresses`'s own doc comment above.
+  // An empty result means this channel is genuinely exhausted (every known
+  // number/address for it is already an open channel), not merely that one
+  // particular number happens to be taken.
+  const remainingOptionsFor = (channel: ChannelType) =>
+    addressOptionsForChannel(row, channel).filter((o) => !(openAddresses[channel] ?? []).includes(o.value));
 
   // Re-derive every time this popover opens (not just on first mount) —
   // same "only once actually open" timing `OutboundAddButton` uses (see its
@@ -2296,19 +2336,23 @@ function CustomerChannelPicker({
 
   useEffect(() => {
     if (!open) return;
-    setAddress(customerChannelAddress(row, selectedChannel).value);
-  }, [open, selectedChannel, row]);
+    setAddress(remainingOptionsFor(selectedChannel)[0]?.value ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, selectedChannel, row, openAddresses]);
 
   const fieldMeta = customerChannelAddress(row, selectedChannel);
-  // No real phone/email on file for this channel — true whenever `row` is
-  // the placeholder stub `ActiveInteractionAddChannelIcons` falls back to
-  // for an interaction with no matching Customers-table record (its
-  // `firstPhone`/`emailAddress` are both blank). Gates the address field
-  // and Start Interaction button below so an agent can't select a channel
-  // that looks available but has nothing real behind it and silently
-  // no-ops on click — see this component's own `handleStartInteraction`
-  // guard, which already fails the same way but with no visible signal.
-  const hasAddress = fieldMeta.value.length > 0;
+  const remainingOptions = remainingOptionsFor(selectedChannel);
+  // No real, still-unused phone/email left for this channel — true both
+  // for the placeholder stub `ActiveInteractionAddChannelIcons` falls back
+  // to when there's no matching Customers-table record (blank `firstPhone`/
+  // `emailAddress`, see that component's own doc comment) AND for a real
+  // row whose only known number(s) are already open as other channels on
+  // this same interaction. Gates the address field and Start Interaction
+  // button below so an agent can't select a channel that looks available
+  // but has nothing real (or nothing UNUSED) behind it and silently no-ops
+  // on click — see this component's own `handleStartInteraction` guard,
+  // which already fails the same way but with no visible signal.
+  const hasAddress = remainingOptions.length > 0;
 
   const handleStartInteraction = () => {
     if (!skillId || !hasAddress) return;
@@ -2341,18 +2385,19 @@ function CustomerChannelPicker({
           <RadioButtonGroup
             label="Select Channel"
             // Disables (rather than hides) whichever channel options have
-            // no real phone/email on file for this row — same
-            // `customerChannelAddress` lookup `fieldMeta` below already
-            // uses. Kept selectable-looking-but-blocked instead of removed
-            // from the list entirely so the agent can still see every
-            // channel type this contact is nominally reachable on, just
-            // not proceed past it without real address data — the Select/
-            // Start Interaction gating below (`hasAddress`) is the same
-            // signal, just surfaced one step earlier.
+            // no real, still-unused phone/email left for this row — same
+            // `remainingOptionsFor` lookup the address Select below uses.
+            // Kept selectable-looking-but-blocked instead of removed from
+            // the list entirely so the agent can still see every channel
+            // type this contact is nominally reachable on, just not
+            // proceed past it once every real address for that type is
+            // either unknown or already open elsewhere on this interaction
+            // — the Select/Start Interaction gating below (`hasAddress`)
+            // is the same signal, just surfaced one step earlier.
             options={available.map((c) => ({
               value: c,
               label: CHANNEL_ICON_META[c].label,
-              disabled: customerChannelAddress(row, c).value.length === 0,
+              disabled: remainingOptionsFor(c).length === 0,
             }))}
             value={selectedChannel}
             onValueChange={(v: string) => setSelectedChannel(v as ChannelType)}
@@ -2362,8 +2407,12 @@ function CustomerChannelPicker({
             value={hasAddress ? address || undefined : undefined}
             onValueChange={setAddress}
             disabled={!hasAddress}
-            placeholder={hasAddress ? undefined : `No ${selectedChannel === "email" ? "email address" : "phone number"} on file`}
-            options={hasAddress ? [{ value: fieldMeta.value, label: fieldMeta.value }] : []}
+            placeholder={
+              hasAddress
+                ? undefined
+                : `No ${selectedChannel === "email" ? "email address" : "unused phone number"} available`
+            }
+            options={remainingOptions}
           />
           <Select
             label="Outbound Skill"
@@ -2397,12 +2446,25 @@ function CustomerChannelPopoverButton({
   row,
   channel,
   available,
+  openAddresses,
+  disabled = false,
   onStartInteraction,
   alwaysVisible = false,
 }: {
   row: CustomerListRecord;
   channel: ChannelType;
   available: ChannelType[];
+  /** Forwarded as-is to `CustomerChannelPicker`'s own `openAddresses` —
+   *  see that prop's doc comment. */
+  openAddresses?: Partial<Record<ChannelType, string[]>>;
+  /** Disables the trigger itself (native `disabled`, so it can't even be
+   *  clicked to open the popover) rather than hiding it — per explicit
+   *  request, a channel with no real address left to offer should stay
+   *  visible but blocked, not disappear outright. `CustomerChannelPicker`'s
+   *  own internal per-channel disabling only ever applies to entries in
+   *  ITS "Select Channel" list; this is the equivalent for a single
+   *  standalone icon, which has no such list to grey an entry out in. */
+  disabled?: boolean;
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
   /** Skips the hover/focus-reveal fade below entirely — for a context with
    *  no `.group` hover/focus-within ancestor to key off (e.g. always-
@@ -2421,6 +2483,7 @@ function CustomerChannelPopoverButton({
       row={row}
       defaultChannel={channel}
       available={available}
+      openAddresses={openAddresses}
       onStartInteraction={onStartInteraction}
       open={open}
       onOpenChange={setOpen}
@@ -2429,6 +2492,7 @@ function CustomerChannelPopoverButton({
           size="sm"
           title={meta.label}
           aria-expanded={open}
+          disabled={disabled}
           onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.stopPropagation()}
           className={cn(
             "transition-opacity",
@@ -2457,23 +2521,33 @@ function CustomerChannelPopoverButton({
  *  `CustomerRowInfoPanel`'s single generic `CustomerAddChannelButton`, since
  *  that request was specifically about the Customers-table row panel, not
  *  this one. "Available" here means channels this customer record supports
- *  (`CUSTOMER_LIST_RECORDS`, same source `CustomerChannelCell` reads) that
- *  AREN'T already one of this interaction's own currently-open channels —
- *  starting a channel that's already open belongs to the existing
- *  `ChannelToggle` bar (switching between open channels), not this "start a
- *  new one" affordance. Renders nothing at all whenever there's no matching
- *  customer record (e.g. a quick-dialed number or a Contact History redial
- *  with no known contact) or every supported channel is already open —
- *  there's nothing meaningful to offer either way. */
+ *  (`CUSTOMER_LIST_RECORDS`, same source `CustomerChannelCell` reads) —
+ *  every one of those always renders an icon, even ones already open on
+ *  this interaction: per explicit follow-up request, a channel type being
+ *  open doesn't mean every real address for it is exhausted (a customer
+ *  with several phone numbers can still be reached on a second one while
+ *  SMS is already open on the first — caught from a screenshot of Sarah
+ *  Miller's SMS icon disappearing entirely despite her own number pool
+ *  still having unused entries). Each icon is individually DISABLED
+ *  (`CustomerChannelPopoverButton`'s own `disabled`) rather than removed
+ *  once `addressOptionsForChannel` has nothing left for it after
+ *  subtracting whatever's already open (`openAddresses`) — genuinely
+ *  nothing left to offer, not just "this one type is open." Renders
+ *  nothing at all only when there's no matching customer record AND no
+ *  channel types are even nominally supported — see `row`'s own fallback
+ *  comment below for why that's effectively never the case in practice. */
 function ActiveInteractionAddChannelIcons({
   customerName,
   recordId,
-  openChannelTypes,
+  channels,
   onStartInteraction,
 }: {
   customerName?: string;
   recordId: string;
-  openChannelTypes: ChannelType[];
+  /** This interaction's own currently-open channels — read for both their
+   *  `.type` (which channel types exist at all) and `.value` (which exact
+   *  addresses are already in use, grouped below into `openAddresses`). */
+  channels: TrackedChannel[];
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
 }) {
   const knownRow = CUSTOMER_LIST_RECORDS.find((r) => r.contactNumber === recordId);
@@ -2510,10 +2584,13 @@ function ActiveInteractionAddChannelIcons({
       agentTeam: "",
       paymentBalance: "",
     };
-  const available = CUSTOMER_CHANNEL_ORDER.filter(
-    (c) => row.channels.includes(c) && !openChannelTypes.includes(c)
-  );
+  const available = CUSTOMER_CHANNEL_ORDER.filter((c) => row.channels.includes(c));
   if (available.length === 0) return null;
+  const openAddresses: Partial<Record<ChannelType, string[]>> = {};
+  for (const c of channels) {
+    if (!c.value) continue;
+    (openAddresses[c.type] ??= []).push(c.value);
+  }
   return (
     <>
       {available.map((c) => (
@@ -2522,6 +2599,8 @@ function ActiveInteractionAddChannelIcons({
           row={row}
           channel={c}
           available={available}
+          openAddresses={openAddresses}
+          disabled={addressOptionsForChannel(row, c).filter((o) => !(openAddresses[c] ?? []).includes(o.value)).length === 0}
           onStartInteraction={onStartInteraction}
           alwaysVisible
         />
@@ -6050,15 +6129,16 @@ function CustomerInformationSidePanel({
               generic Add Channel affordance into multiple channel-specific
               icons here (contrast `CustomerRowInfoPanel`'s
               `CustomerAddChannelButton`, a different panel this request
-              didn't touch). Renders nothing when there's no matching
-              `CUSTOMER_LIST_RECORDS` entry or every supported channel is
-              already open — see `ActiveInteractionAddChannelIcons`'s own
-              doc comment. */}
+              didn't touch). Each icon disables itself once every real
+              address for that channel is already open on this
+              interaction (rather than the whole icon disappearing the
+              moment ANY one address of that type is open) — see
+              `ActiveInteractionAddChannelIcons`'s own doc comment. */}
           {onStartInteraction && (
             <ActiveInteractionAddChannelIcons
               customerName={customerName}
               recordId={recordId}
-              openChannelTypes={channels.map((c) => c.type)}
+              channels={channels}
               onStartInteraction={onStartInteraction}
             />
           )}
