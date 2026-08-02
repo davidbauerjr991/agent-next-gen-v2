@@ -2471,6 +2471,7 @@ function CustomersListView({
   sortDir,
   onSort,
   sortedRows,
+  openRowId,
 }: {
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
   // Filter state is a controlled prop, not local `useState`, so it lives on
@@ -2501,6 +2502,13 @@ function CustomersListView({
   sortDir: SortDirection;
   onSort: (key: CustomerColKey) => void;
   sortedRows: CustomerListRecord[];
+  /** `contactNumber` of the row currently open in `CustomerRowInfoPanel`
+   *  (or `null`), so that row can show as checked/selected in the table
+   *  itself while its panel is open — purely a visual reflection of the
+   *  panel's own open state, ORed into the checkbox's `checked` below
+   *  rather than added to `selectedRows` itself, so it doesn't also count
+   *  toward bulk-action selection (e.g. the "Delete" toolbar button). */
+  openRowId: string | null;
 }) {
   const [visibleCols, setVisibleCols] = useState<Set<string>>(new Set(CUSTOMER_ALL_COLUMN_KEYS));
 
@@ -2565,6 +2573,7 @@ function CustomersListView({
       return next;
     });
   };
+  const isRowChecked = (id: string) => selectedRows.has(id) || id === openRowId;
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
@@ -2687,7 +2696,7 @@ function CustomersListView({
               <TableRow
                 key={row.contactNumber}
                 className="group cursor-pointer"
-                data-state={selectedRows.has(row.contactNumber) ? "selected" : undefined}
+                data-state={isRowChecked(row.contactNumber) ? "selected" : undefined}
                 onClick={() => onRowClick(row)}
               >
                 {/* `stopPropagation` on both cells below — same reason the
@@ -2698,7 +2707,7 @@ function CustomersListView({
                     own `onClick` above. */}
                 <TableCell className="w-[40px] shrink-0" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                   <Checkbox
-                    checked={selectedRows.has(row.contactNumber)}
+                    checked={isRowChecked(row.contactNumber)}
                     onCheckedChange={() => toggleRow(row.contactNumber)}
                     aria-label={`Select ${row.firstName} ${row.lastName}`}
                   />
@@ -9159,6 +9168,7 @@ export function AgentNextGenPage({
                   sortDir={customerSortDir}
                   onSort={handleCustomerSort}
                   sortedRows={customerSortedRows}
+                  openRowId={activeDeskTab === "customers" ? selectedCustomerRow?.contactNumber ?? null : null}
                 />
               </div>
               {/* Rendered OUTSIDE the `display:contents` wrapper above, not
