@@ -5855,6 +5855,65 @@ function CustomerInformationPanelBody({
   );
 }
 
+/** Compact read-only summary shown in a `Popover` when the agent hovers the
+ *  record header's Customer Information toggle icon while the real panel is
+ *  closed (see the render site further down) — lets the agent glance at who
+ *  they're talking to, the phone/email on file, and a one-line recap of the
+ *  last time this customer reached out, without having to open the full
+ *  panel first. Built from the exact same `buildCustomerInfoFields`/
+ *  `buildLatestInteraction` synthesis the real panel's own Overview tab
+ *  already uses (see those functions' own doc comments), so this preview
+ *  can never drift out of sync with what actually opening the panel would
+ *  show.
+ *
+ *  `onMouseEnter`/`onMouseLeave` are wired by the caller to the exact same
+ *  open-immediately/close-on-a-short-delay handlers as the trigger icon
+ *  itself — Radix `Popover.Content` portals straight to `document.body`,
+ *  outside the trigger icon's own DOM subtree, so without re-arming here
+ *  too, moving the pointer from the icon into this (portaled) popover would
+ *  fire the icon's own `onMouseLeave` and close the preview before the
+ *  agent can actually read it — same fix already applied once for
+ *  `InteractionNavItem`'s own hover-preview card (interaction-nav-item.tsx). */
+function CustomerInfoHoverPreview({
+  customerName,
+  recordId,
+  channels,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  customerName?: string;
+  recordId: string;
+  channels: TrackedChannel[];
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}) {
+  const fields = buildCustomerInfoFields(customerName, recordId, channels);
+  const latestInteraction = buildLatestInteraction(customerName, recordId);
+  const phone = getFieldValue(fields, "Phone #");
+  const email = getFieldValue(fields, "Email");
+
+  return (
+    <div onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} className="w-72 py-3">
+      <p className="lyra-label-strong text-lyra-fg-default truncate">{customerName ?? "Customer"}</p>
+      <p className="lyra-body-sm text-lyra-fg-secondary">{recordId}</p>
+      <div className="mt-3 space-y-1.5 border-t border-lyra-border-subtle pt-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="lyra-body-sm text-lyra-fg-secondary shrink-0">Phone</span>
+          <span className="lyra-body-sm text-lyra-fg-default truncate">{phone}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="lyra-body-sm text-lyra-fg-secondary shrink-0">Email</span>
+          <span className="lyra-body-sm text-lyra-fg-default truncate">{email}</span>
+        </div>
+      </div>
+      <div className="mt-3 border-t border-lyra-border-subtle pt-3">
+        <p className="lyra-label-strong text-lyra-fg-default">Latest Interaction</p>
+        <p className="lyra-body-sm text-lyra-fg-secondary mt-1 line-clamp-2">{latestInteraction.summary}</p>
+      </div>
+    </div>
+  );
+}
+
 /* ── CustomerInformationSidePanel ──
    Owns `activeTab` — the one piece of state both the header's `TabList`
    (via `SidePanel`'s `headerTabs`) and the scrolling body below it
@@ -7061,6 +7120,13 @@ export function AgentNextGenPage({
   // panel shouldn't silently reopen full-screen from a previous session.
   const [sidePanelFullScreen, setSidePanelFullScreen] = useState(false);
   const sidePanelHoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Header icon's hover preview (`CustomerInfoHoverPreview`, only rendered
+  // while the real panel is closed — see the render site) — same
+  // open-now/close-on-a-short-delay shape as `sidePanelHoverTimer` above,
+  // just its own independent state/timer since this is a lightweight
+  // `Popover` preview of the panel, not the panel itself.
+  const [customerInfoPreviewOpen, setCustomerInfoPreviewOpen] = useState(false);
+  const customerInfoPreviewTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // The agent's own last explicit open/closed choice (the header's
   // "Customer History" toggle icon while pinned, or the panel's own close
   // button) — per explicit request, a freshly started/quick-dialed/
@@ -7186,7 +7252,35 @@ export function AgentNextGenPage({
       lastSidePanelOpenChoice.current = next;
       return next;
     });
+    // Clicking always opens the real panel from here (this icon only
+    // renders while it's closed — see the render site's own comment), which
+    // unmounts the hover-preview `Popover` right along with it. Explicitly
+    // closing the preview's own state too so it doesn't reopen instantly
+    // (no real hover) the next time this icon happens to render again.
+    clearTimeout(customerInfoPreviewTimer.current);
+    setCustomerInfoPreviewOpen(false);
   };
+  // Open immediately on hover-in, close on a short delay on hover-out —
+  // same hover-intent shape as `onSidePanelHoverStart`/`onSidePanelHoverEnd`
+  // above, just for the lightweight preview `Popover` instead of the real
+  // panel. Both the trigger icon and the preview's own content
+  // (`CustomerInfoHoverPreview`) call these, so moving the pointer from one
+  // to the other keeps it open — see that component's own doc comment for
+  // why the preview needs to re-arm this itself too.
+  const openCustomerInfoPreview = () => {
+    clearTimeout(customerInfoPreviewTimer.current);
+    setCustomerInfoPreviewOpen(true);
+  };
+  const scheduleCloseCustomerInfoPreview = () => {
+    clearTimeout(customerInfoPreviewTimer.current);
+    customerInfoPreviewTimer.current = setTimeout(() => setCustomerInfoPreviewOpen(false), 150);
+  };
+  // Guards against a stale `true` leaking into the next interaction this
+  // icon renders for (e.g. switching interactions mid-hover, without ever
+  // moving the pointer far enough away to fire the close timer above).
+  useEffect(() => {
+    setCustomerInfoPreviewOpen(false);
+  }, [activeInteraction?.id]);
 
   // Track window width — still drives `isCompactHeader` below.
   useEffect(() => {
@@ -9278,19 +9372,59 @@ export function AgentNextGenPage({
                               (`PanelPinButton` has no outline variant, and
                               always paints a selected bg once `pinned` and a
                               custom `icon` are both set — see its own doc
-                              comment). Plain `onClick`, no hover-preview
-                              wiring either: hover-to-preview only matters
-                              while the panel might already be showing, and
-                              this button only renders while it's closed. */}
-                          <Button
-                            variant="outline"
-                            size="icon-md"
-                            className="shrink-0"
-                            onClick={handleSidePanelIconToggle}
-                            title={sidePanelToggleLabel ?? "Open Customer Information"}
+                              comment). Plain `onClick`, unchanged.
+
+                              Wrapped in a `Popover` showing
+                              `CustomerInfoHoverPreview` on hover (per
+                              explicit request) — replaces the plain
+                              text `Tooltip` `Button` auto-wraps a `title`
+                              prop in (see button.tsx) with a richer
+                              preview of the very panel this icon opens,
+                              since hover-to-preview only matters while
+                              the panel might already be showing... except
+                              it's exactly the opposite here: this button
+                              only renders while the panel is CLOSED (see
+                              the gate above), which is precisely when a
+                              quick glance at the customer without a full
+                              click is most useful. `title` is dropped in
+                              favor of a plain `aria-label` so `Button`
+                              doesn't also auto-wrap its own competing
+                              `Tooltip` around the same trigger (its
+                              `isIconVariant && title` branch — button.tsx).
+                              `onFocus`/`onBlur` mirror the mouse handlers
+                              for keyboard parity, same as every other
+                              hover-preview in this app. */}
+                          <Popover
+                            open={customerInfoPreviewOpen}
+                            onOpenChange={setCustomerInfoPreviewOpen}
+                            placement="bottom"
+                            align="start"
+                            showArrow={false}
+                            className="w-72"
+                            content={
+                              <CustomerInfoHoverPreview
+                                customerName={activeInteraction.customerName}
+                                recordId={activeInteraction.recordId}
+                                channels={activeInteraction.channels}
+                                onMouseEnter={openCustomerInfoPreview}
+                                onMouseLeave={scheduleCloseCustomerInfoPreview}
+                              />
+                            }
                           >
-                            <User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-                          </Button>
+                            <Button
+                              variant="outline"
+                              size="icon-md"
+                              className="shrink-0"
+                              onClick={handleSidePanelIconToggle}
+                              onMouseEnter={openCustomerInfoPreview}
+                              onMouseLeave={scheduleCloseCustomerInfoPreview}
+                              onFocus={openCustomerInfoPreview}
+                              onBlur={scheduleCloseCustomerInfoPreview}
+                              aria-label={sidePanelToggleLabel ?? "Open Customer Information"}
+                            >
+                              <User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                            </Button>
+                          </Popover>
                           <div className="h-8 w-px bg-lyra-border-subtle shrink-0" aria-hidden="true" />
                         </>
                       )}
