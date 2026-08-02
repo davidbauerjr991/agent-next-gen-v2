@@ -292,17 +292,29 @@ function ScheduleToolbar({
         align="start"
         sideOffset={4}
         showArrow={false}
+        // `bodyPadding`'s default only insets left/right (`px-5`) — vertical
+        // space around `content` normally comes from the `title`/`header`
+        // slot's own padding, neither of which this popover uses. lyra-ui's
+        // own `DatePicker` (date-picker.tsx's `CalendarPanel`) sidesteps
+        // this by wrapping its Calendar in a plain, uniform `p-3` — matching
+        // that exactly here (and opting out of `bodyPadding`, which would
+        // otherwise double up the left/right inset to 20px+12px) instead of
+        // leaving the calendar flush against the popover's top edge.
+        bodyPadding={false}
+        className="w-[288px]"
         content={
-          <Calendar
-            mode="single"
-            selected={anchorDate}
-            defaultMonth={anchorDate}
-            onSelect={(date) => {
-              if (!date) return;
-              onAnchorDateChange(startOfDay(date));
-              setDatePopoverOpen(false);
-            }}
-          />
+          <div className="p-3">
+            <Calendar
+              mode="single"
+              selected={anchorDate}
+              defaultMonth={anchorDate}
+              onSelect={(date) => {
+                if (!date) return;
+                onAnchorDateChange(startOfDay(date));
+                setDatePopoverOpen(false);
+              }}
+            />
+          </div>
         }
       >
         <button
