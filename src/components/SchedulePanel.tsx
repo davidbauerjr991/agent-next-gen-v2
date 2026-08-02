@@ -391,14 +391,20 @@ function ScheduleToolbar({
           </div>
         </div>
       ) : (
+        // Today moves down to the second row here (alongside Day/Week +
+        // Add) rather than sharing row 1 with the date nav — at narrow
+        // widths, a long formatted date (e.g. "November 4, 2021") left
+        // Today competing with it for the same row's space and could push
+        // it off the edge. Row 1 is just the nav cluster now, free to use
+        // the full row width on its own.
         <div className="flex w-full flex-col gap-2">
+          <div className="flex w-full items-center">{navCluster}</div>
           <div className="flex w-full items-center justify-between gap-2">
-            {navCluster}
             {todayButton}
-          </div>
-          <div className="flex w-full items-center justify-between gap-2">
-            {viewToggle}
-            {addMenu}
+            <div className="flex shrink-0 items-center gap-2">
+              {viewToggle}
+              {addMenu}
+            </div>
           </div>
         </div>
       )}
