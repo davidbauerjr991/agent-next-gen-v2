@@ -2343,15 +2343,14 @@ function CustomerChannelPicker({
   const fieldMeta = customerChannelAddress(row, selectedChannel);
   const remainingOptions = remainingOptionsFor(selectedChannel);
   // No real, still-unused phone/email left for this channel — true both
-  // for the placeholder stub `ActiveInteractionAddChannelIcons` falls back
-  // to when there's no matching Customers-table record (blank `firstPhone`/
-  // `emailAddress`, see that component's own doc comment) AND for a real
-  // row whose only known number(s) are already open as other channels on
-  // this same interaction. Gates the address field and Start Interaction
-  // button below so an agent can't select a channel that looks available
-  // but has nothing real (or nothing UNUSED) behind it and silently no-ops
-  // on click — see this component's own `handleStartInteraction` guard,
-  // which already fails the same way but with no visible signal.
+  // for a customer record with a blank `firstPhone`/`emailAddress` on file
+  // AND for a real row whose only known number(s) are already open as other
+  // channels on this same interaction. Gates the address field and Start
+  // Interaction button below so an agent can't select a channel that looks
+  // available but has nothing real (or nothing UNUSED) behind it and
+  // silently no-ops on click — see this component's own
+  // `handleStartInteraction` guard, which already fails the same way but
+  // with no visible signal.
   const hasAddress = remainingOptions.length > 0;
 
   const handleStartInteraction = () => {
@@ -2446,58 +2445,20 @@ function CustomerChannelPopoverButton({
   row,
   channel,
   available,
-  openAddresses,
-  disabled = false,
   onStartInteraction,
-  alwaysVisible = false,
-  open: openProp,
-  onOpenChange: onOpenChangeProp,
 }: {
   row: CustomerListRecord;
   channel: ChannelType;
   available: ChannelType[];
-  /** Forwarded as-is to `CustomerChannelPicker`'s own `openAddresses` —
-   *  see that prop's doc comment. */
-  openAddresses?: Partial<Record<ChannelType, string[]>>;
-  /** Disables the trigger itself (native `disabled`, so it can't even be
-   *  clicked to open the popover) rather than hiding it — per explicit
-   *  request, a channel with no real address left to offer should stay
-   *  visible but blocked, not disappear outright. `CustomerChannelPicker`'s
-   *  own internal per-channel disabling only ever applies to entries in
-   *  ITS "Select Channel" list; this is the equivalent for a single
-   *  standalone icon, which has no such list to grey an entry out in. */
-  disabled?: boolean;
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
-  /** Skips the hover/focus-reveal fade below entirely — for a context with
-   *  no `.group` hover/focus-within ancestor to key off (e.g. always-
-   *  visible channel icons in a panel header, see
-   *  `ActiveInteractionAddChannelIcons`), where the default table-row
-   *  hover-reveal convention would otherwise leave these permanently
-   *  invisible (nothing ever sets `.group`'s hover/focus state there).
-   *  Default `false` — existing table-row usage (`CustomerChannelCell`)
-   *  unaffected. */
-  alwaysVisible?: boolean;
-  /** Optionally controlled open state — lets a parent rendering several of
-   *  these siblings (`ActiveInteractionAddChannelIcons`) coordinate them so
-   *  opening one closes any other that was already open, instead of each
-   *  icon owning a fully independent popover that can stack up multiple
-   *  open "Select Channel" forms at once (caught from a screenshot of two
-   *  overlapping pickers open on Sarah Miller's card at the same time).
-   *  Uncontrolled (own internal state) when omitted — `CustomerChannelCell`
-   *  Customers-table usage is unaffected, each icon still independent. */
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
 }) {
-  const [openState, setOpenState] = useState(false);
-  const open = openProp ?? openState;
-  const setOpen = onOpenChangeProp ?? setOpenState;
+  const [open, setOpen] = useState(false);
   const meta = CHANNEL_ICON_META[channel];
   return (
     <CustomerChannelPicker
       row={row}
       defaultChannel={channel}
       available={available}
-      openAddresses={openAddresses}
       onStartInteraction={onStartInteraction}
       open={open}
       onOpenChange={setOpen}
@@ -2506,7 +2467,6 @@ function CustomerChannelPopoverButton({
           size="sm"
           title={meta.label}
           aria-expanded={open}
-          disabled={disabled}
           onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.stopPropagation()}
           className={cn(
             "transition-opacity",
@@ -2517,7 +2477,7 @@ function CustomerChannelPopoverButton({
             // "force visible while open" rule the message-bubble Copy/Add-tag
             // toolbar and its TagPicker popover already use elsewhere in this
             // file.
-            !alwaysVisible && !open &&
+            !open &&
               "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
           )}
         >
@@ -2525,115 +2485,6 @@ function CustomerChannelPopoverButton({
         </ActionIconButton>
       }
     />
-  );
-}
-
-/** Multiple always-visible per-channel "add channel" icons for the Customer
- *  Information panel of an ACTIVE interaction (`CustomerInformationSidePanel`)
- *  — per explicit request, broken into one icon per available channel
- *  (reusing `CustomerChannelPopoverButton`, `alwaysVisible`) rather than
- *  `CustomerRowInfoPanel`'s single generic `CustomerAddChannelButton`, since
- *  that request was specifically about the Customers-table row panel, not
- *  this one. "Available" here means channels this customer record supports
- *  (`CUSTOMER_LIST_RECORDS`, same source `CustomerChannelCell` reads) —
- *  every one of those always renders an icon, even ones already open on
- *  this interaction: per explicit follow-up request, a channel type being
- *  open doesn't mean every real address for it is exhausted (a customer
- *  with several phone numbers can still be reached on a second one while
- *  SMS is already open on the first — caught from a screenshot of Sarah
- *  Miller's SMS icon disappearing entirely despite her own number pool
- *  still having unused entries). Each icon is individually DISABLED
- *  (`CustomerChannelPopoverButton`'s own `disabled`) rather than removed
- *  once `addressOptionsForChannel` has nothing left for it after
- *  subtracting whatever's already open (`openAddresses`) — genuinely
- *  nothing left to offer, not just "this one type is open." Renders
- *  nothing at all only when there's no matching customer record AND no
- *  channel types are even nominally supported — see `row`'s own fallback
- *  comment below for why that's effectively never the case in practice. */
-function ActiveInteractionAddChannelIcons({
-  customerName,
-  recordId,
-  channels,
-  onStartInteraction,
-}: {
-  customerName?: string;
-  recordId: string;
-  /** This interaction's own currently-open channels — read for both their
-   *  `.type` (which channel types exist at all) and `.value` (which exact
-   *  addresses are already in use, grouped below into `openAddresses`). */
-  channels: TrackedChannel[];
-  onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
-}) {
-  // Which one of these icons' popovers (if any) is currently open — shared
-  // across every icon this component renders so opening one closes
-  // whichever other one was already open (see each `CustomerChannelPopover-
-  // Button`'s own `open`/`onOpenChange` below). Declared before the early
-  // `available.length === 0` return so this hook still runs unconditionally
-  // regardless of that branch.
-  const [openChannel, setOpenChannel] = useState<ChannelType | null>(null);
-  const knownRow = CUSTOMER_LIST_RECORDS.find((r) => r.contactNumber === recordId);
-  // Most active interactions have NO real `CUSTOMER_LIST_RECORDS` match —
-  // the left nav's own seed interactions and agent-to-agent consults (e.g.
-  // `CREATE_NEW_AGENTS`' "AGT-…" ids) use entirely separate id spaces from
-  // the Customers table's "CST-…" fixture, and only an interaction actually
-  // launched via that table's own "Start Interaction" flow lines up. Rather
-  // than hiding the icons whenever that link is missing (which silently
-  // dropped them for the vast majority of interactions — caught from a
-  // screenshot of an open "Jamie Torres / AGT-2000" consult with no icons
-  // at all), fall back to a placeholder row offering every channel type:
-  // no real phone/email to prefill, and no matching `OUTBOUND_CUSTOMERS`
-  // contact for `CustomerChannelPicker` to actually start a real
-  // interaction from (so Start Interaction silently no-ops here) — the
-  // same "visible, but inert without real backing data" convention already
-  // used for this table's own Refresh button and delete-icon kebab.
-  const row: CustomerListRecord =
-    knownRow ?? {
-      contactNumber: recordId,
-      channels: CUSTOMER_CHANNEL_ORDER,
-      firstName: customerName?.split(" ")[0] ?? "Customer",
-      lastName: customerName?.split(" ").slice(1).join(" ") ?? "",
-      group: "",
-      firstPhone: "",
-      emailAddress: "",
-      address1: "",
-      city: "",
-      state: "",
-      postalCode: "",
-      originalCustomerId: recordId,
-      dateOfBirth: "",
-      agent: "",
-      agentTeam: "",
-      paymentBalance: "",
-    };
-  const available = CUSTOMER_CHANNEL_ORDER.filter((c) => row.channels.includes(c));
-  if (available.length === 0) return null;
-  const openAddresses: Partial<Record<ChannelType, string[]>> = {};
-  for (const c of channels) {
-    if (!c.value) continue;
-    (openAddresses[c.type] ??= []).push(c.value);
-  }
-  return (
-    <>
-      {available.map((c) => (
-        <CustomerChannelPopoverButton
-          key={c}
-          row={row}
-          channel={c}
-          available={available}
-          openAddresses={openAddresses}
-          disabled={addressOptionsForChannel(row, c).filter((o) => !(openAddresses[c] ?? []).includes(o.value)).length === 0}
-          onStartInteraction={onStartInteraction}
-          alwaysVisible
-          // Controlled + coordinated across every sibling icon here (see
-          // `openChannel` below) — per explicit request, opening one of
-          // these popovers should close any other one already open,
-          // rather than each icon owning its own fully independent open
-          // state and letting several stack up at once.
-          open={openChannel === c}
-          onOpenChange={(o) => setOpenChannel(o ? c : null)}
-        />
-      ))}
-    </>
   );
 }
 
@@ -6069,7 +5920,6 @@ function CustomerInformationSidePanel({
   containerWidth,
   onWidthChange,
   onResizeStateChange,
-  onStartInteraction,
 }: {
   open: boolean;
   pinned: boolean;
@@ -6101,13 +5951,6 @@ function CustomerInformationSidePanel({
   containerWidth: number;
   onWidthChange: (width: number) => void;
   onResizeStateChange?: (isResizing: boolean) => void;
-  /** Starts a new channel for this interaction's customer — wired to the
-   *  same `handleStartCall` every other channel-launch affordance in this
-   *  file already uses (see `ActiveInteractionAddChannelIcons`'s own doc
-   *  comment for why reusing it needs no new merge logic). Optional/no-op
-   *  when omitted so this panel still renders standalone (e.g. Storybook)
-   *  without a real interaction-launch handler wired up. */
-  onStartInteraction?: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState(0);
   const fields = useMemo(
@@ -6151,25 +5994,6 @@ function CustomerInformationSidePanel({
       // a toggle with a persistent on/off state to reflect.
       headerActions={
         <>
-          {/* Per-channel "add channel" icons — one per channel this
-              customer supports that isn't already open in this
-              interaction, per explicit request to break the single
-              generic Add Channel affordance into multiple channel-specific
-              icons here (contrast `CustomerRowInfoPanel`'s
-              `CustomerAddChannelButton`, a different panel this request
-              didn't touch). Each icon disables itself once every real
-              address for that channel is already open on this
-              interaction (rather than the whole icon disappearing the
-              moment ANY one address of that type is open) — see
-              `ActiveInteractionAddChannelIcons`'s own doc comment. */}
-          {onStartInteraction && (
-            <ActiveInteractionAddChannelIcons
-              customerName={customerName}
-              recordId={recordId}
-              channels={channels}
-              onStartInteraction={onStartInteraction}
-            />
-          )}
           {/* Full-screen toggle — same `PanelPinButton` atom as the close
               button below (just another icon/label/handler over the shared
               "small icon button in a panel header" shape), per explicit
@@ -9331,9 +9155,6 @@ export function AgentNextGenPage({
                   containerWidth={sidePanelContainerWidth}
                   onWidthChange={setSidePanelWidth}
                   onResizeStateChange={setSidePanelResizing}
-                  onStartInteraction={(contact, channel, phone, skillId) =>
-                    handleStartCall({ contact, channel, phone, skillId })
-                  }
                 />
               )}
               <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
