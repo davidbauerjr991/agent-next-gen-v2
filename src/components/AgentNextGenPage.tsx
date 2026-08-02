@@ -2204,10 +2204,12 @@ function CustomerChannelPopoverButton({
   row,
   channel,
   available,
+  onStartInteraction,
 }: {
   row: CustomerListRecord;
   channel: ChannelType;
   available: ChannelType[];
+  onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState<ChannelType>(channel);
@@ -2236,14 +2238,17 @@ function CustomerChannelPopoverButton({
 
   const handleStartInteraction = () => {
     if (!skillId) return;
-    // eslint-disable-next-line no-console
-    console.log(
-      "Start interaction:",
-      selectedChannel,
-      "→",
-      `${row.firstName} ${row.lastName}`,
-      `(address: ${address}, skill: ${skillId})`
-    );
+    // `OUTBOUND_CUSTOMERS` is built 1:1 (same order, same underlying
+    // record) from the exact same `CREATE_NEW_CUSTOMERS` fixture
+    // `CUSTOMER_LIST_RECORDS` maps into `row` from — its `subtitle` field
+    // is that customer's `customerId`, i.e. exactly this row's own
+    // `contactNumber` (see `CUSTOMER_LIST_RECORDS`'s own mapping comment
+    // above) — so this reliably finds the matching `CreateNewOutboundContact`
+    // `handleStartCall` needs, without this table needing its own parallel
+    // copy of that lookup/contact-shape logic.
+    const contact = OUTBOUND_CUSTOMERS.find((c: CreateNewOutboundContact) => c.subtitle === row.contactNumber);
+    if (!contact) return;
+    onStartInteraction(contact, selectedChannel, address, skillId);
     setOpen(false);
   };
 
@@ -2317,7 +2322,13 @@ function CustomerChannelPopoverButton({
  *  matching the Copy/Add-tag hover-toolbar convention used on conversation
  *  bubbles elsewhere in this file; the row itself needs `className="group"`
  *  for this to fire (added on `TableRow` below). */
-function CustomerChannelCell({ row }: { row: CustomerListRecord }) {
+function CustomerChannelCell({
+  row,
+  onStartInteraction,
+}: {
+  row: CustomerListRecord;
+  onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
+}) {
   const available = CUSTOMER_CHANNEL_ORDER.filter((c) => row.channels.includes(c));
   if (available.length === 0) {
     return <span className="lyra-body-sm text-lyra-fg-disabled">—</span>;
@@ -2325,7 +2336,13 @@ function CustomerChannelCell({ row }: { row: CustomerListRecord }) {
   return (
     <div className="flex items-center gap-1">
       {available.map((c) => (
-        <CustomerChannelPopoverButton key={c} row={row} channel={c} available={available} />
+        <CustomerChannelPopoverButton
+          key={c}
+          row={row}
+          channel={c}
+          available={available}
+          onStartInteraction={onStartInteraction}
+        />
       ))}
     </div>
   );
@@ -2378,7 +2395,11 @@ const CUSTOMER_STATE_OPTIONS: FilterChipOption[] = Array.from(
   new Set(CUSTOMER_LIST_RECORDS.map((r) => r.state).filter(Boolean))
 ).map((state) => ({ value: state, label: state }));
 
-function CustomersListView() {
+function CustomersListView({
+  onStartInteraction,
+}: {
+  onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
+}) {
   const [searchQuery, setSearchQuery] = useState("");
   const [visibleCols, setVisibleCols] = useState<Set<string>>(new Set(CUSTOMER_ALL_COLUMN_KEYS));
 
@@ -2564,7 +2585,11 @@ function CustomersListView() {
                     columnKey={key}
                     className={cn(CUSTOMER_COLUMN_CONFIG[key].flex, CUSTOMER_COLUMN_CONFIG[key].minWidth)}
                   >
-                    {key === "channels" ? <CustomerChannelCell row={row} /> : row[key]}
+                    {key === "channels" ? (
+                      <CustomerChannelCell row={row} onStartInteraction={onStartInteraction} />
+                    ) : (
+                      row[key]
+                    )}
                   </TableCell>
                 ))}
                 <TableCell className="w-[48px] shrink-0 sticky right-0 bg-lyra-bg-surface-base">
@@ -8774,7 +8799,11 @@ export function AgentNextGenPage({
               {/* Body row: main content + interior panel */}
               <div className="relative flex flex-1 overflow-hidden">
               {activeDeskTab === "customers" ? (
-                <CustomersListView />
+                <CustomersListView
+                  onStartInteraction={(contact, channel, phone, skillId) =>
+                    handleStartCall({ contact, channel, phone, skillId })
+                  }
+                />
               ) : activeDeskTab !== "home" ? (
                 // Accounts/Tickets/WEM — no content built yet; same
                 // "Coming soon" placeholder treatment used elsewhere in
