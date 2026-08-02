@@ -7151,16 +7151,17 @@ export function AgentNextGenPage({
           // `adhoc:`-prefixed ids are lyra-ui's own "Continue with" flow
           // (`buildAdHocSearchContact`, create-new.tsx) — a typed query that
           // matched no real directory contact, so CreateNew builds a
-          // throwaway contact whose `name` is just the raw typed phone
-          // number/email itself (there's no real name to show). Passing
-          // that straight through as `customerName` made both this card's
-          // compact tile (`getInitials` deriving a stray leading digit, e.g.
-          // "1" off a phone number) and `CustomerInformationSidePanel`'s
-          // header (showing the raw number as if it were a name) look wrong
-          // — left `undefined` here instead, so every "no real name"
-          // consumer's own already-correct fallback takes over (the panel's
-          // "Customer" title, `InteractionNavItem`'s channel-icon tile).
-          customerName: selection.contact.id.startsWith("adhoc:") ? undefined : selection.contact.name,
+          // throwaway contact whose `name` IS the raw typed phone number/
+          // email itself. Passed straight through as `customerName` (not
+          // blanked out) — per explicit request, the raw address is exactly
+          // what should show as this card's name/title text (both here and
+          // in `CustomerInformationSidePanel`'s header) when there's no real
+          // customer — only the AVATAR needs different treatment for that
+          // case (a channel icon instead of initials derived from the
+          // address's own leading character), which is driven by the
+          // separate `customerIdentified` prop at the `InteractionNavItem`
+          // render call site below, not by blanking this out.
+          customerName: selection.contact.name,
           // `subtitle` is the contact's real id (customerId/agentId/
           // TEAM-.../SKL-.../ASN-...) whenever CreateNew's record set one —
           // only missing for records that genuinely have none.
@@ -8893,6 +8894,17 @@ export function AgentNextGenPage({
                   <InteractionNavItem
                     key={interaction.id}
                     customerName={interaction.customerName}
+                    // `adhoc:`-prefixed ids are lyra-ui's own "Continue
+                    // with" ad-hoc flow (`buildAdHocSearchContact`, create-
+                    // new.tsx) — a typed number/email with no matching
+                    // directory contact, whose `customerName` above is that
+                    // raw address itself, not a real name (see
+                    // `handleStartCall`'s own comment on this same check).
+                    // Tells the compact tile to show a channel icon in its
+                    // avatar instead of deriving meaningless initials off
+                    // that address — `customerName` itself is untouched, so
+                    // the card's title text still reads as the address.
+                    customerIdentified={!interaction.id.startsWith("adhoc:")}
                     active={activeInteractionId === interaction.id}
                     // Exits fullscreen directly here (not just via the
                     // `activeInteractionId`-keyed effect near
