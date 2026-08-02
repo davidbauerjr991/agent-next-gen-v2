@@ -8912,13 +8912,26 @@ export function AgentNextGenPage({
                   )}
               {/* Body row: main content + interior panel */}
               <div className="relative flex flex-1 overflow-hidden">
-              {activeDeskTab === "customers" ? (
+              {/* Customers list view stays mounted across desk-tab switches
+                  (never unmounted by the conditional below) so its search/
+                  sort/filters/added-filter-keys/visible-columns/pagination/
+                  row-selection state all survive navigating away to another
+                  tab and back — a plain `cond ? <CustomersListView/> : ...`
+                  would remount it fresh (and lose every one of those) each
+                  time. `display:contents` while active keeps this wrapper
+                  invisible to layout, so `CustomersListView` is still a
+                  normal flex child of the row below it; `hidden` fully
+                  removes it from layout/screen-readers/tab order without
+                  unmounting it, exactly like `hidden` already does for the
+                  currently-inactive branch further down. */}
+              <div className={activeDeskTab === "customers" ? "contents" : "hidden"}>
                 <CustomersListView
                   onStartInteraction={(contact, channel, phone, skillId) =>
                     handleStartCall({ contact, channel, phone, skillId })
                   }
                 />
-              ) : activeDeskTab !== "home" ? (
+              </div>
+              {activeDeskTab !== "customers" && (activeDeskTab !== "home" ? (
                 // Accounts/Tickets/WEM — no content built yet; same
                 // "Coming soon" placeholder treatment used elsewhere in
                 // this file for in-progress tabs (e.g. the Customer
@@ -9094,7 +9107,7 @@ export function AgentNextGenPage({
                   </InteriorPanel>
                 )}
                 </>
-              )}
+              ))}
               </div>
                 </>
               )}
