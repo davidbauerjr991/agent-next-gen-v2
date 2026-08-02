@@ -9005,10 +9005,24 @@ export function AgentNextGenPage({
                 // uses. Takes priority over both Desk and an active
                 // interaction — see the `showSettings` state's own doc
                 // comment for how the three views stay mutually exclusive.
-                <>
+                // `key="settings"` (here and on the other two branches
+                // below) forces a fresh mount every time the agent switches
+                // between Settings/an interaction/the Desk dashboard, which
+                // is what makes `animate-in fade-in-0` actually replay on
+                // every switch — without a distinct key, React just patches
+                // the existing tree in place (same position, same type where
+                // it happens to coincide) and the "enter" animation only
+                // fires once, on this whole page's very first mount. Plain
+                // `div` instead of the bare `<>...</>` these three branches
+                // used to be — a Fragment contributes no box of its own for
+                // an animation/opacity class to apply to; classes here match
+                // the parent "Content column" div's own
+                // `flex flex-1 flex-col min-w-0 overflow-hidden` exactly, so
+                // this extra nesting level is layout-inert.
+                <div key="settings" className="flex flex-1 flex-col min-w-0 overflow-hidden animate-in fade-in-0 duration-200">
                   {showPageHeader && <PageHeader title="Settings" />}
                   <div className="flex-1 overflow-y-auto" />
-                </>
+                </div>
               ) : activeInteraction ? (
                 // ── Active interaction's detail page — replaces the Desk
                 // dashboard the moment a new assignment is started/quick-
@@ -9016,8 +9030,14 @@ export function AgentNextGenPage({
                 // record header for now; the blank body below is where a
                 // real case/contact detail view will go. Reverts back to
                 // the dashboard automatically once the interaction is
-                // dismissed (`activeInteractionId` clears).
-                <>
+                // dismissed (`activeInteractionId` clears). Keyed on the
+                // interaction's own `id` (not a static string, unlike the
+                // Settings/dashboard branches) — switching directly between
+                // two different active interactions (redial/quick-dial while
+                // one's already open) should still remount and replay the
+                // fade-in, not just re-render the same subtree with new
+                // props, the way a static key would.
+                <div key={`interaction-${activeInteraction.id}`} className="flex flex-1 flex-col min-w-0 overflow-hidden animate-in fade-in-0 duration-200">
                   {showPageHeader && (
                     // ── Record header, replaced with a tab bar ──
                     // Per explicit request: the old `PageHeader` (customer
@@ -9231,9 +9251,9 @@ export function AgentNextGenPage({
                       </div>
                     )}
                   </div>
-                </>
+                </div>
               ) : (
-                <>
+                <div key="dashboard" className="flex flex-1 flex-col min-w-0 overflow-hidden animate-in fade-in-0 duration-200">
                   {showPageHeader && (
                     <>
                       {/* Page header — main title is the same time-of-day
@@ -9285,19 +9305,57 @@ export function AgentNextGenPage({
                   )}
               {/* Body row: main content + interior panel */}
               <div className="relative flex flex-1 overflow-hidden">
-              {/* Customers list view stays mounted across desk-tab switches
-                  (never unmounted by the conditional below) so its search/
-                  sort/filters/added-filter-keys/visible-columns/pagination/
-                  row-selection state all survive navigating away to another
-                  tab and back — a plain `cond ? <CustomersListView/> : ...`
-                  would remount it fresh (and lose every one of those) each
-                  time. `display:contents` while active keeps this wrapper
-                  invisible to layout, so `CustomersListView` is still a
-                  normal flex child of the row below it; `hidden` fully
-                  removes it from layout/screen-readers/tab order without
-                  unmounting it, exactly like `hidden` already does for the
-                  currently-inactive branch further down. */}
-              <div className={activeDeskTab === "customers" ? "contents" : "hidden"}>
+              {/* Customers list view + row-info panel stay mounted across
+                  desk-tab switches (never unmounted by the `hidden` toggle
+                  below) so `CustomersListView`'s own search/sort/filters/
+                  added-filter-keys/visible-columns/pagination/row-selection
+                  state all survive navigating away to another tab and back
+                  — a plain `cond ? <CustomersListView/> : ...` would remount
+                  it fresh (and lose every one of those) each time.
+
+                  Both now live together in ONE real box (`flex flex-1
+                  overflow-hidden`, not `display:contents`) that toggles
+                  `hidden` as a whole, rather than each having its own
+                  separate visibility mechanism the way this used to be
+                  split (`CustomersListView` behind a `contents`/`hidden`
+                  wrapper, `CustomerRowInfoPanel` driven by nulling its own
+                  `row` prop instead). That split was the actual cause of a
+                  reported bug: nulling `row` on tab-switch didn't hide the
+                  panel — it told `InteriorPanel` to CLOSE, which plays its
+                  own 250ms width-close transition. Because the panel was a
+                  real flex sibling of whatever the newly-selected tab was
+                  about to show, that 250ms of shrinking width visibly
+                  reflowed the new tab's content growing to fill the space
+                  beside it — the "dashboard animating its position" bug.
+                  `hidden` (display:none) on this whole group instead removes
+                  it from layout instantly, with no transition to play at
+                  all, so switching tabs while the panel is open no longer
+                  drags any animation into the newly-shown tab. The panel's
+                  own real open/close animation still plays normally for
+                  actual same-tab closes (its header's × button, or
+                  `onRowClick` picking a different row) — only navigating
+                  AWAY from this tab now skips it, which is the only case
+                  that was ever broken.
+
+                  `InteriorPanel` inside `CustomerRowInfoPanel` still measures
+                  its own real DOM parent's width via `ResizeObserver` to
+                  decide whether to auto-full-screen below 768px (see that
+                  component's own doc comment) — this wrapper being a real
+                  box (not `display:contents`) is what keeps that
+                  measurement correct; `display:none` while inactive doesn't
+                  reintroduce that old bug, since nothing is visible to
+                  mis-measure in the first place, and the real width is
+                  available again the instant `hidden` is lifted.
+
+                  `animate-in fade-in-0 duration-200` is re-applied fresh
+                  every time this element's `className` flips from `"hidden"`
+                  to the visible string (not left on permanently) — same
+                  "smooth fade-in on every switch" treatment as the other
+                  desk-tab branches below and the top-level Settings/
+                  interaction/dashboard branches above, without forcing a
+                  remount (a `key` here would reset all the local state this
+                  comment opens with). */}
+              <div className={activeDeskTab === "customers" ? "flex flex-1 overflow-hidden animate-in fade-in-0 duration-200" : "hidden"}>
                 <CustomersListView
                   onStartInteraction={(contact, channel, phone, skillId) =>
                     handleStartCall({ contact, channel, phone, skillId })
@@ -9313,52 +9371,38 @@ export function AgentNextGenPage({
                   sortDir={customerSortDir}
                   onSort={handleCustomerSort}
                   sortedRows={customerSortedRows}
-                  openRowId={activeDeskTab === "customers" ? selectedCustomerRow?.contactNumber ?? null : null}
+                  openRowId={selectedCustomerRow?.contactNumber ?? null}
+                />
+                <CustomerRowInfoPanel
+                  row={selectedCustomerRow}
+                  onClose={() => setSelectedCustomerRow(null)}
+                  onPrevious={() => handleCustomerRowNav(-1)}
+                  onNext={() => handleCustomerRowNav(1)}
+                  hasPrevious={selectedCustomerIndex > 0}
+                  hasNext={selectedCustomerIndex !== -1 && selectedCustomerIndex < customerSortedRows.length - 1}
+                  onStartInteraction={(contact, channel, phone, skillId) =>
+                    handleStartCall({ contact, channel, phone, skillId })
+                  }
                 />
               </div>
-              {/* Rendered OUTSIDE the `display:contents` wrapper above, not
-                  inside it — `InteriorPanel` measures its own real DOM
-                  parent's width (via `ResizeObserver`) to decide whether to
-                  auto-full-screen below 768px, and a `display:contents`
-                  element reports zero width to that observer (it generates
-                  no box at all). Nested inside that wrapper, this panel's
-                  parent WAS that zero-width div, so it read as permanently
-                  narrower than 768px and force-opened full-screen every
-                  time, with no way to size down — confirmed the actual bug
-                  behind "don't have it go full screen, just fly out
-                  normal." Sitting here instead, its real parent is this row
-                  div (its normal, correctly-measured width), so it opens as
-                  a normal docked flyout like every other `InteriorPanel` in
-                  this file. `row` still resets to `null` whenever the
-                  agent's off the Customers tab (rather than stapling this
-                  render to `activeDeskTab === "customers"` outright), so it
-                  doesn't linger open over Accounts/Tickets/WEM/Dashboard if
-                  left open when the agent switches tabs — `selectedCustomerRow`
-                  itself is untouched, so it reopens on the same row if the
-                  agent comes back without picking a new one. */}
-              <CustomerRowInfoPanel
-                row={activeDeskTab === "customers" ? selectedCustomerRow : null}
-                onClose={() => setSelectedCustomerRow(null)}
-                onPrevious={() => handleCustomerRowNav(-1)}
-                onNext={() => handleCustomerRowNav(1)}
-                hasPrevious={selectedCustomerIndex > 0}
-                hasNext={selectedCustomerIndex !== -1 && selectedCustomerIndex < customerSortedRows.length - 1}
-                onStartInteraction={(contact, channel, phone, skillId) =>
-                  handleStartCall({ contact, channel, phone, skillId })
-                }
-              />
               {activeDeskTab !== "customers" && (activeDeskTab !== "home" ? (
                 // Accounts/Tickets/WEM — no content built yet; same
                 // "Coming soon" placeholder treatment used elsewhere in
                 // this file for in-progress tabs (e.g. the Customer
                 // History tab), rather than silently falling through to
                 // the Dashboard's own queue widgets/summary cards below.
-                <div className="flex flex-1 items-center justify-center p-4">
+                // `key={activeDeskTab}` forces a fresh mount on every
+                // switch (including Accounts → Tickets, which would
+                // otherwise reuse this exact same element/position and
+                // never replay `animate-in`) — same reasoning as the
+                // top-level Settings/interaction/dashboard branches' own
+                // `key`s above.
+                <div key={activeDeskTab} className="flex flex-1 items-center justify-center p-4 animate-in fade-in-0 duration-200">
                   <p className="lyra-body-md text-lyra-fg-disabled text-center">Coming soon</p>
                 </div>
               ) : (
                 <>
-                <div className="flex flex-1 flex-col min-w-0 overflow-y-auto px-6 py-6">
+                <div key={activeDeskTab} className="flex flex-1 flex-col min-w-0 overflow-y-auto px-6 py-6 animate-in fade-in-0 duration-200">
                   <div className="w-full max-w-[1200px] mx-auto lyra-container-grid-wrap">
                     {/* ── Queue widgets ──
                         `DashboardQueue` ("cards" variant, its default) —
@@ -9525,7 +9569,7 @@ export function AgentNextGenPage({
                 </>
               ))}
               </div>
-                </>
+                </div>
               )}
             </div>
 
