@@ -2519,11 +2519,10 @@ const CUSTOMER_COLUMN_CONFIG: Record<CustomerColKey, { label: string; flex: stri
   postalCode:    { label: "Postal Code",    flex: "flex-[0.8]",  minWidth: "min-w-[100px]", minWidthPx: 100 },
 };
 
-// Fixed-width columns outside `CUSTOMER_COLUMN_CONFIG` — the leading
-// checkbox column and the trailing sticky "Actions" kebab column — added to
-// the visible columns' summed `minWidthPx` below to get the table's true
-// minimum width.
-const CUSTOMER_FIXED_COLUMNS_WIDTH = 40 /* checkbox */ + 48 /* actions */;
+// Fixed-width column outside `CUSTOMER_COLUMN_CONFIG` — the trailing sticky
+// "Actions" (delete) column — added to the visible columns' summed
+// `minWidthPx` below to get the table's true minimum width.
+const CUSTOMER_FIXED_COLUMNS_WIDTH = 48 /* actions */;
 
 const CUSTOMER_ALL_COLUMN_DEFS: { key: string; label: string }[] = Object.entries(CUSTOMER_COLUMN_CONFIG).map(
   ([key, val]) => ({ key, label: val.label })
@@ -2608,11 +2607,8 @@ function CustomersListView({
   onSort: (key: CustomerColKey) => void;
   sortedRows: CustomerListRecord[];
   /** `contactNumber` of the row currently open in `CustomerRowInfoPanel`
-   *  (or `null`), so that row can show as checked/selected in the table
-   *  itself while its panel is open — purely a visual reflection of the
-   *  panel's own open state, ORed into the checkbox's `checked` below
-   *  rather than added to `selectedRows` itself, so it doesn't also count
-   *  toward bulk-action selection (e.g. the "Delete" toolbar button). */
+   *  (or `null`), so that row can show as selected/highlighted in the
+   *  table itself while its panel is open. */
   openRowId: string | null;
 }) {
   const [visibleCols, setVisibleCols] = useState<Set<string>>(new Set(CUSTOMER_ALL_COLUMN_KEYS));
@@ -2662,23 +2658,6 @@ function CustomersListView({
   const tableMinWidth =
     CUSTOMER_FIXED_COLUMNS_WIDTH +
     columnOrder.reduce((sum: number, key: CustomerColKey) => sum + CUSTOMER_COLUMN_CONFIG[key].minWidthPx, 0);
-
-  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
-  const allSelected = selectedRows.size === sortedRows.length && sortedRows.length > 0;
-  const someSelected = selectedRows.size > 0 && !allSelected;
-  const toggleSelectAll = () => {
-    if (allSelected || someSelected) setSelectedRows(new Set());
-    else setSelectedRows(new Set(sortedRows.map((r) => r.contactNumber)));
-  };
-  const toggleRow = (id: string) => {
-    setSelectedRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-  const isRowChecked = (id: string) => selectedRows.has(id) || id === openRowId;
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
@@ -2751,7 +2730,6 @@ function CustomersListView({
         actionDefs={[
           { key: "refresh", label: "Refresh", icon: <RefreshCw className="h-4 w-4" strokeWidth={1.5} /> },
           { key: "new", label: "New", icon: <Plus className="h-4 w-4" strokeWidth={1.5} /> },
-          { key: "delete", label: "Delete", icon: <Trash2 className="h-4 w-4" strokeWidth={1.5} />, disabled: selectedRows.size === 0 },
         ]}
         actions={
           <ColumnToggle
@@ -2766,13 +2744,6 @@ function CustomersListView({
         <Table style={{ minWidth: tableMinWidth }}>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-[40px] shrink-0">
-                <Checkbox
-                  checked={allSelected ? true : someSelected ? "indeterminate" : false}
-                  onCheckedChange={toggleSelectAll}
-                  aria-label="Select all rows"
-                />
-              </TableHead>
               {columnOrder.map((key: CustomerColKey) => {
                 const col = CUSTOMER_COLUMN_CONFIG[key];
                 return (
@@ -2801,22 +2772,14 @@ function CustomersListView({
               <TableRow
                 key={row.contactNumber}
                 className="group cursor-pointer"
-                data-state={isRowChecked(row.contactNumber) ? "selected" : undefined}
+                data-state={row.contactNumber === openRowId ? "selected" : undefined}
                 onClick={() => onRowClick(row)}
               >
-                {/* `stopPropagation` on both cells below — same reason the
-                    channel popover buttons already stop it (see
-                    `CustomerChannelCell`): without it, toggling this row's
-                    checkbox or clicking its "More options" kebab would
-                    ALSO open the Customer Information panel via the row's
-                    own `onClick` above. */}
-                <TableCell className="w-[40px] shrink-0" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                  <Checkbox
-                    checked={isRowChecked(row.contactNumber)}
-                    onCheckedChange={() => toggleRow(row.contactNumber)}
-                    aria-label={`Select ${row.firstName} ${row.lastName}`}
-                  />
-                </TableCell>
+                {/* `stopPropagation` below — same reason the channel popover
+                    buttons already stop it (see `CustomerChannelCell`):
+                    without it, clicking this row's delete button would ALSO
+                    open the Customer Information panel via the row's own
+                    `onClick` above. */}
                 {columnOrder.map((key: CustomerColKey) => (
                   <TableCell
                     key={key}
@@ -2835,10 +2798,10 @@ function CustomersListView({
                   onClick={(e: React.MouseEvent) => e.stopPropagation()}
                 >
                   <button
-                    aria-label="More options"
+                    aria-label={`Delete ${row.firstName} ${row.lastName}`}
                     className="flex h-7 w-7 items-center justify-center rounded-lyra-sm text-lyra-fg-secondary hover:bg-lyra-bg-surface-shell transition-colors"
                   >
-                    <MoreVertical className="h-4 w-4" strokeWidth={1.5} />
+                    <Trash2 className="h-4 w-4" strokeWidth={1.5} />
                   </button>
                 </TableCell>
               </TableRow>
@@ -9477,10 +9440,9 @@ export function AgentNextGenPage({
                   onAddedFilterKeysChange={setCustomerAddedFilterKeys}
                   filterValues={customerFilterValues}
                   onFilterValuesChange={setCustomerFilterValues}
-                  // Clicking the row that's already open (its checkbox
-                  // shows checked via `isRowChecked`'s `id === openRowId`)
-                  // closes `CustomerRowInfoPanel` and un-checks it, instead
-                  // of just re-opening the same row it's already showing.
+                  // Clicking the row that's already open (highlighted via
+                  // `openRowId`) closes `CustomerRowInfoPanel` instead of
+                  // just re-opening the same row it's already showing.
                   onRowClick={(row) =>
                     setSelectedCustomerRow((prev) =>
                       prev?.contactNumber === row.contactNumber ? null : row
