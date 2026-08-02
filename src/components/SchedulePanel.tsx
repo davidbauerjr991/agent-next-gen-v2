@@ -251,69 +251,65 @@ function ScheduleToolbar({
   const goToNext = () => onAnchorDateChange(addDays(anchorDate, view === "day" ? 1 : 7));
   const goToToday = () => onAnchorDateChange(startOfDay(new Date()));
 
-  // Three fixed-content groups (nav, Today, Day/Week+Add), each `shrink-0`
-  // — none of them are allowed to compress below their natural content
-  // width. The outer `flex-wrap` then wraps a whole group down to its own
-  // line once the row genuinely runs out of room, rather than squeezing
-  // every group down to fit one line. An earlier version instead put
-  // `flex-1 min-w-0 truncate` on the date button so the row visually
-  // stayed on one line at any width — but `min-w-0` removes a flex item's
-  // natural min-content floor, which is also what `flex-wrap` needs to
-  // ever trigger a wrap in the first place, so that button just kept
-  // shrinking past legibility (down to a few clipped middle characters,
-  // e.g. "August 3, 2026" reading as "st 3,") instead of ever dropping to a
-  // second row.
+  // Always two explicit rows, each spread edge-to-edge with its own
+  // `justify-between` — rather than one `flex-wrap` row that organically
+  // dropped to a second line once too narrow (that version left row 1
+  // clustered flush-left with Today right after it, and row 2's
+  // Day/Week+Add pushed flush-right via `ml-auto`, so each line only used
+  // part of its own width instead of balancing across it — the "why does
+  // half the row sit empty" feedback). Each row's own two clusters now
+  // pin to that row's opposite edges regardless of panel width, so both
+  // rows read as evenly using the full row rather than clustering to one
+  // side. Nav (chevrons + date) is kept together as one flex sub-block on
+  // row 1 so it doesn't itself get split apart from Today by the spread.
   return (
-    <div className="flex w-full flex-wrap items-center gap-2">
-      <div className="flex shrink-0 items-center gap-2">
-        <Button variant="outline" size="icon" title="Previous" onClick={goToPrevious}>
-          <ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
-        </Button>
+    <div className="flex w-full flex-col gap-2">
+      <div className="flex w-full items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="icon" title="Previous" onClick={goToPrevious}>
+            <ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
+          </Button>
 
-        <Popover
-          open={datePopoverOpen}
-          onOpenChange={setDatePopoverOpen}
-          placement="bottom"
-          align="start"
-          sideOffset={4}
-          showArrow={false}
-          content={
-            <Calendar
-              mode="single"
-              selected={anchorDate}
-              defaultMonth={anchorDate}
-              onSelect={(date) => {
-                if (!date) return;
-                onAnchorDateChange(startOfDay(date));
-                setDatePopoverOpen(false);
-              }}
-            />
-          }
-        >
-          <button
-            type="button"
-            className={cn(buttonVariants({ variant: "outline", size: "lg" }), "justify-center whitespace-nowrap")}
+          <Popover
+            open={datePopoverOpen}
+            onOpenChange={setDatePopoverOpen}
+            placement="bottom"
+            align="start"
+            sideOffset={4}
+            showArrow={false}
+            content={
+              <Calendar
+                mode="single"
+                selected={anchorDate}
+                defaultMonth={anchorDate}
+                onSelect={(date) => {
+                  if (!date) return;
+                  onAnchorDateChange(startOfDay(date));
+                  setDatePopoverOpen(false);
+                }}
+              />
+            }
           >
-            {formatNavDate(anchorDate)}
-          </button>
-        </Popover>
+            <button
+              type="button"
+              className={cn(buttonVariants({ variant: "outline", size: "lg" }), "justify-center whitespace-nowrap")}
+            >
+              {formatNavDate(anchorDate)}
+            </button>
+          </Popover>
 
-        <Button variant="outline" size="icon" title="Next" onClick={goToNext}>
-          <ChevronRight className="h-4 w-4" strokeWidth={1.5} />
+          <Button variant="outline" size="icon" title="Next" onClick={goToNext}>
+            <ChevronRight className="h-4 w-4" strokeWidth={1.5} />
+          </Button>
+        </div>
+
+        <Button variant="ghost" size="lg" className="gap-1.5" onClick={goToToday}>
+          <LocateFixed className="h-4 w-4" strokeWidth={1.5} />
+          Today
         </Button>
       </div>
 
-      <Button variant="ghost" size="lg" className="shrink-0 gap-1.5" onClick={goToToday}>
-        <LocateFixed className="h-4 w-4" strokeWidth={1.5} />
-        Today
-      </Button>
-
-      {/* `ml-auto` right-aligns this group against the nav/Today groups
-          above when everything fits on one line (matching the reference
-          screenshots' full-width layout); once wrapped onto its own line,
-          it just sits flush left there instead — a reasonable fallback
-          that still keeps Day/Week and Add from ever being compressed. */}
-      <div className="ml-auto flex shrink-0 items-center gap-2">
+      <div className="flex w-full items-center justify-between gap-2">
         <ToggleGroup
           items={[
             { value: "day", label: "Day" },
