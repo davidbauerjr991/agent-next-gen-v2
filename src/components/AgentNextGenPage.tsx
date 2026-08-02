@@ -6414,22 +6414,61 @@ function CustomerRowInfoPanel({
               </ActionIconButton>
             </>
           )}
-          <ActionIconButton title="Previous customer" disabled={!hasPrevious} onClick={onPrevious}>
-            <ChevronLeft className="h-4 w-4" />
-          </ActionIconButton>
-          <ActionIconButton title="Next customer" disabled={!hasNext} onClick={onNext}>
-            <ChevronRight className="h-4 w-4" />
-          </ActionIconButton>
+          {/* Docked/narrow: prev/next move out of this cramped icon
+              cluster entirely and into their own full-width row below the
+              title (see `headerTabs` below) — per explicit request. Full
+              screen has the room to keep them here inline as before. */}
+          {!isNarrowActions && (
+            <>
+              <ActionIconButton title="Previous customer" disabled={!hasPrevious} onClick={onPrevious}>
+                <ChevronLeft className="h-4 w-4" />
+              </ActionIconButton>
+              <ActionIconButton title="Next customer" disabled={!hasNext} onClick={onNext}>
+                <ChevronRight className="h-4 w-4" />
+              </ActionIconButton>
+            </>
+          )}
         </>
       }
       headerTabs={
-        <TabList className="px-4" overflowMenu>
-          {CUSTOMER_PANEL_TABS.map((label, i) => (
-            <Tab key={label} active={activeTab === i} onClick={() => setActiveTab(i)}>
-              {label}
-            </Tab>
-          ))}
-        </TabList>
+        <>
+          {/* Narrow/docked-only prev/next row — full-width outline
+              `Button`s (not the plain icon buttons used inline at full
+              screen above) since this row has real width to fill and
+              nothing else competing for it, per explicit request. Sits
+              above the tab row itself (own `border-b`, so it reads as a
+              distinct strip rather than blending into the tabs beneath
+              it). */}
+          {isNarrowActions && (
+            <div className="flex gap-2 px-4 py-2 border-b border-lyra-border-subtle">
+              <Button
+                variant="outline"
+                className="flex-1"
+                disabled={!hasPrevious}
+                onClick={onPrevious}
+              >
+                <ChevronLeft className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                disabled={!hasNext}
+                onClick={onNext}
+              >
+                Next
+                <ChevronRight className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+              </Button>
+            </div>
+          )}
+          <TabList className="px-4" overflowMenu>
+            {CUSTOMER_PANEL_TABS.map((label, i) => (
+              <Tab key={label} active={activeTab === i} onClick={() => setActiveTab(i)}>
+                {label}
+              </Tab>
+            ))}
+          </TabList>
+        </>
       }
     >
       <CustomerInformationPanelBody
