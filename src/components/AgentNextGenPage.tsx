@@ -142,6 +142,7 @@ import {
   History,
   ChevronLeft,
   ChevronRight,
+  MessageSquarePlus,
   Copy,
   Paperclip,
   Bold,
@@ -2221,55 +2222,64 @@ function customerChannelAddress(row: CustomerListRecord, channel: ChannelType): 
     : { label: "Select Phone", value: row.firstPhone };
 }
 
-/** The launch popover behind one channel icon in a Customers row — same
- *  "Select Channel / Select Phone (or Email) / Outbound Skill / Start
- *  Interaction" shape as lyra-ui's own `OutboundAddButton` (create-new.tsx),
- *  composed here from the same primitives (`Popover`/`RadioButtonGroup`/
- *  `Select`/`Button`) rather than imported directly: `OutboundAddButton`'s
- *  own trigger is a fixed "+" icon it can't swap out, but this needs one
- *  popover per visible channel icon, anchored to whichever icon was
- *  actually clicked and defaulted to that channel, not a single generic
- *  add-channel trigger per row. Reuses `OUTBOUND_CONFIG.skillOptions` so
+/** Shared "Select Channel / Select Phone (or Email) / Outbound Skill /
+ *  Start Interaction" popover body — same shape as lyra-ui's own
+ *  `OutboundAddButton` (create-new.tsx), composed here from the same
+ *  primitives (`Popover`/`RadioButtonGroup`/`Select`/`Button`) rather than
+ *  imported directly, since `OutboundAddButton`'s own trigger is a fixed
+ *  "+" icon it can't swap out. Extracted into its own component (rather
+ *  than living inline in `CustomerChannelPopoverButton`) so both that
+ *  per-channel-icon trigger AND `CustomerAddChannelButton`'s single
+ *  generic header trigger can share one copy of this form instead of
+ *  each hand-rolling their own. Reuses `OUTBOUND_CONFIG.skillOptions` so
  *  the skill list can't drift from the real Outbound picker's own list.
  *  `placement="bottom"` is only a preferred side — `Popover`'s underlying
  *  Radix collision detection (`avoidCollisions`, see popover.tsx) flips it
- *  above the icon automatically when there isn't room below, same as every
- *  other popover in this app, so it always renders on whichever side of
- *  the clicked icon actually has room. */
-function CustomerChannelPopoverButton({
+ *  above the trigger automatically when there isn't room below. */
+function CustomerChannelPicker({
   row,
-  channel,
+  defaultChannel,
   available,
   onStartInteraction,
+  trigger,
+  open,
+  onOpenChange,
 }: {
   row: CustomerListRecord;
-  channel: ChannelType;
+  /** Which channel the form starts on when opened — the clicked icon's own
+   *  channel for `CustomerChannelPopoverButton`, or simply `available[0]`
+   *  for `CustomerAddChannelButton`'s single generic trigger. */
+  defaultChannel: ChannelType;
   available: ChannelType[];
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
+  trigger: React.ReactNode;
+  /** Open state lives in whichever wrapper renders `trigger` (not in here),
+   *  so that wrapper's own `aria-expanded`/hover-fade styling reads the
+   *  exact same real open state `Popover` itself uses, instead of each
+   *  keeping its own disconnected copy. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [selectedChannel, setSelectedChannel] = useState<ChannelType>(channel);
+  const [selectedChannel, setSelectedChannel] = useState<ChannelType>(defaultChannel);
   const [address, setAddress] = useState("");
   const [skillId, setSkillId] = useState("");
 
-  // Re-derive from whichever icon was actually clicked every time this
-  // popover opens (not just on first mount) — same "only once actually
-  // open" timing `OutboundAddButton` uses (see its own effect comments),
-  // and for the same reason: this popover instance is reused across every
-  // open of this one icon, so a stale channel/skill from a previous open
-  // needs to be overwritten before the fields render again.
+  // Re-derive every time this popover opens (not just on first mount) —
+  // same "only once actually open" timing `OutboundAddButton` uses (see its
+  // own effect comments), and for the same reason: this popover instance is
+  // reused across every open of its trigger, so a stale channel/skill from
+  // a previous open needs to be overwritten before the fields render again.
   useEffect(() => {
     if (!open) return;
-    setSelectedChannel(channel);
+    setSelectedChannel(defaultChannel);
     setSkillId("");
-  }, [open, channel]);
+  }, [open, defaultChannel]);
 
   useEffect(() => {
     if (!open) return;
     setAddress(customerChannelAddress(row, selectedChannel).value);
   }, [open, selectedChannel, row]);
 
-  const meta = CHANNEL_ICON_META[channel];
   const fieldMeta = customerChannelAddress(row, selectedChannel);
 
   const handleStartInteraction = () => {
@@ -2285,13 +2295,13 @@ function CustomerChannelPopoverButton({
     const contact = OUTBOUND_CUSTOMERS.find((c: CreateNewOutboundContact) => c.subtitle === row.contactNumber);
     if (!contact) return;
     onStartInteraction(contact, selectedChannel, address, skillId);
-    setOpen(false);
+    onOpenChange(false);
   };
 
   return (
     <Popover
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={onOpenChange}
       placement="bottom"
       sideOffset={4}
       showArrow={false}
@@ -2325,27 +2335,103 @@ function CustomerChannelPopoverButton({
         </div>
       }
     >
-      <ActionIconButton
-        size="sm"
-        title={meta.label}
-        aria-expanded={open}
-        onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.stopPropagation()}
-        className={cn(
-          "transition-opacity",
-          // Stays visible/interactive whenever ITS OWN popover is open —
-          // moving the pointer off the row and into the popover's content
-          // (portalled outside the row, so `group-hover` alone would end)
-          // shouldn't fade the trigger out from under an open popover, same
-          // "force visible while open" rule the message-bubble Copy/Add-tag
-          // toolbar and its TagPicker popover already use elsewhere in this
-          // file.
-          !open &&
-            "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
-        )}
-      >
-        {meta.icon}
-      </ActionIconButton>
+      {trigger}
     </Popover>
+  );
+}
+
+/** One hover-reveal channel icon in a Customers row — thin wrapper around
+ *  `CustomerChannelPicker`, anchored to whichever icon was actually
+ *  clicked and defaulted to that icon's own channel (unlike
+ *  `CustomerAddChannelButton`'s single generic trigger). */
+function CustomerChannelPopoverButton({
+  row,
+  channel,
+  available,
+  onStartInteraction,
+}: {
+  row: CustomerListRecord;
+  channel: ChannelType;
+  available: ChannelType[];
+  onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const meta = CHANNEL_ICON_META[channel];
+  return (
+    <CustomerChannelPicker
+      row={row}
+      defaultChannel={channel}
+      available={available}
+      onStartInteraction={onStartInteraction}
+      open={open}
+      onOpenChange={setOpen}
+      trigger={
+        <ActionIconButton
+          size="sm"
+          title={meta.label}
+          aria-expanded={open}
+          onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.stopPropagation()}
+          className={cn(
+            "transition-opacity",
+            // Stays visible/interactive whenever ITS OWN popover is open —
+            // moving the pointer off the row and into the popover's content
+            // (portalled outside the row, so `group-hover` alone would end)
+            // shouldn't fade the trigger out from under an open popover, same
+            // "force visible while open" rule the message-bubble Copy/Add-tag
+            // toolbar and its TagPicker popover already use elsewhere in this
+            // file.
+            !open &&
+              "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+          )}
+        >
+          {meta.icon}
+        </ActionIconButton>
+      }
+    />
+  );
+}
+
+/** Single, always-visible "Add channel" header action for
+ *  `CustomerRowInfoPanel` — opens the exact same channel-picker popover as
+ *  the table row's own per-channel hover icons (`CustomerChannelPopoverButton`),
+ *  just from one generic trigger instead of one icon per supported channel,
+ *  since the panel header has room for exactly one such button. Defaults to
+ *  the row's first supported channel (`CUSTOMER_CHANNEL_ORDER` order, same
+ *  as `CustomerChannelCell` below) — the agent can still switch channels via
+ *  the popover's own "Select Channel" field once it's open. */
+function CustomerAddChannelButton({
+  row,
+  onStartInteraction,
+}: {
+  /** `null` while `CustomerRowInfoPanel` is closed (its header still mounts
+   *  during the close animation — see that component's own render) — there's
+   *  no record to add a channel to yet, so this just renders disabled. */
+  row: CustomerListRecord | null;
+  onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const available = row ? CUSTOMER_CHANNEL_ORDER.filter((c) => row.channels.includes(c)) : [];
+  if (!row || available.length === 0) {
+    return (
+      <ActionIconButton title="Add channel" disabled>
+        <MessageSquarePlus className="h-4 w-4" />
+      </ActionIconButton>
+    );
+  }
+  return (
+    <CustomerChannelPicker
+      row={row}
+      defaultChannel={available[0]}
+      available={available}
+      onStartInteraction={onStartInteraction}
+      open={open}
+      onOpenChange={setOpen}
+      trigger={
+        <ActionIconButton title="Add channel" aria-expanded={open}>
+          <MessageSquarePlus className="h-4 w-4" />
+        </ActionIconButton>
+      }
+    />
   );
 }
 
@@ -5973,6 +6059,7 @@ function CustomerRowInfoPanel({
   onNext,
   hasPrevious,
   hasNext,
+  onStartInteraction,
 }: {
   /** The clicked customer row, or `null` when the panel is closed. Kept as
    *  the single source of both "is it open" (`open={row !== null}`) and
@@ -5990,8 +6077,37 @@ function CustomerRowInfoPanel({
   onNext: () => void;
   hasPrevious: boolean;
   hasNext: boolean;
+  onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState(0);
+
+  // `InteriorPanel` forwards its own outer wrapper's ref (see interior-
+  // panel.tsx — `ref={stableOuterRef}`, whose element's own inline `width`
+  // style IS the panel's true current rendered width: 0 while closed,
+  // otherwise its resized/default docked width — capped at `maxWidth`
+  // (425 here, the default) — or "100%" of the main container while full-
+  // screen). Observed here (rather than re-deriving `isFullScreen`/
+  // `currentWidth`, both internal/uncontrolled state this component has no
+  // access to) so the header's Add Channel/Refresh/Delete actions know
+  // whether there's room to stay inline or need to collapse into a kebab —
+  // same "measure the real box, don't guess" approach `TableToolbar` uses
+  // for its own action-button collapse (table.tsx's `isWide`).
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelWidth, setPanelWidth] = useState(9999);
+  useLayoutEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    setPanelWidth(el.getBoundingClientRect().width);
+    const ro = new ResizeObserver(([entry]) => setPanelWidth(entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // 480px sits comfortably above `InteriorPanel`'s own 425px `maxWidth` (the
+  // widest this panel can ever reach while normally docked/resized) and
+  // comfortably below any realistic full-screen width (the main content
+  // column, easily 800px+) — so this reliably reads "docked" as narrow and
+  // "full screen" as wide, with no in-between flapping.
+  const isNarrowActions = panelWidth < 480;
 
   // Back to the Overview tab every time a *different* row is opened — same
   // reasoning `CustomerChannelPopoverButton`'s own reset effects use
@@ -6010,8 +6126,19 @@ function CustomerRowInfoPanel({
   const latestInteraction = useMemo(() => buildLatestInteraction(customerName, recordId), [customerName, recordId]);
   const latestNote = useMemo(() => buildLatestNote(customerName, recordId), [customerName, recordId]);
 
+  // Refresh/Delete — no `onClick` (no-op stubs), matching this exact
+  // prototype's existing precedent for these two actions: the Customers
+  // table's own toolbar `actionDefs` ("Refresh"/"Delete", a few hundred
+  // lines up in `CustomersListView`) are the same bare label+icon with no
+  // handler wired up yet.
+  const recordActionItems: MenuEntry[] = [
+    { id: "refresh", label: "Refresh Record", icon: <RefreshCw className="h-4 w-4" strokeWidth={1.5} />, disabled: !row },
+    { id: "delete", label: "Delete Record", icon: <Trash2 className="h-4 w-4" strokeWidth={1.5} />, disabled: !row, destructive: true },
+  ];
+
   return (
     <InteriorPanel
+      ref={panelRef}
       side="right"
       open={row !== null}
       onClose={onClose}
@@ -6041,6 +6168,24 @@ function CustomerRowInfoPanel({
           <ActionIconButton title="Next customer" disabled={!hasNext} onClick={onNext}>
             <ChevronRight className="h-4 w-4" />
           </ActionIconButton>
+          {/* Add Channel stays its own always-visible button even once
+              narrow — it opens a whole "Select Channel/Address/Skill" form
+              (`CustomerChannelPicker`), which doesn't belong as a plain row
+              inside the Refresh/Delete kebab below; only true single-click
+              actions collapse there. */}
+          <CustomerAddChannelButton row={row} onStartInteraction={onStartInteraction} />
+          {isNarrowActions ? (
+            <KebabMenuButton items={recordActionItems} ariaLabel="Record actions" />
+          ) : (
+            <>
+              <ActionIconButton title="Refresh record" disabled={!row}>
+                <RefreshCw className="h-4 w-4" />
+              </ActionIconButton>
+              <ActionIconButton title="Delete record" disabled={!row}>
+                <Trash2 className="h-4 w-4" />
+              </ActionIconButton>
+            </>
+          )}
         </>
       }
       headerTabs={
@@ -9198,6 +9343,9 @@ export function AgentNextGenPage({
                 onNext={() => handleCustomerRowNav(1)}
                 hasPrevious={selectedCustomerIndex > 0}
                 hasNext={selectedCustomerIndex !== -1 && selectedCustomerIndex < customerSortedRows.length - 1}
+                onStartInteraction={(contact, channel, phone, skillId) =>
+                  handleStartCall({ contact, channel, phone, skillId })
+                }
               />
               {activeDeskTab !== "customers" && (activeDeskTab !== "home" ? (
                 // Accounts/Tickets/WEM — no content built yet; same
