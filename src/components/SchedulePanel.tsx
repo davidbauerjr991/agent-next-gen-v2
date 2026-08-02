@@ -137,7 +137,18 @@ function ScheduleGrid({ days }: { days: Date[] }) {
   const gridMinWidth = GUTTER_WIDTH + days.length * DAY_COLUMN_MIN_WIDTH;
 
   return (
-    <div ref={scrollRef} className="relative flex-1 min-h-0 overflow-auto">
+    // `isolate` contains every z-index below (the sticky header/gutter, the
+    // today-column tint, the now-indicator) inside its own stacking context
+    // — without it, those z-10/z-20 values were being compared against the
+    // shared `Draggable` panel's own left-edge resize handle (also z-10,
+    // draggable.tsx) at whatever ancestor stacking context they actually
+    // shared, occasionally winning the tie and swallowing the resize
+    // handle's mousedown over the body area (the handle stayed grabbable
+    // only next to the header, where this grid doesn't render underneath
+    // it). Isolating this subtree guarantees nothing in here can ever
+    // shadow chrome that lives outside it, regardless of the exact
+    // ancestor stacking layout.
+    <div ref={scrollRef} className="relative isolate flex-1 min-h-0 overflow-auto">
       <div style={{ minWidth: gridMinWidth }}>
         {/* Sticky header block: day-of-week row + "Shift" resource lane */}
         <div className="sticky top-0 z-20 bg-lyra-bg-surface-base">
@@ -240,9 +251,21 @@ function ScheduleToolbar({
   const goToNext = () => onAnchorDateChange(addDays(anchorDate, view === "day" ? 1 : 7));
   const goToToday = () => onAnchorDateChange(startOfDay(new Date()));
 
+  // Three fixed-content groups (nav, Today, Day/Week+Add), each `shrink-0`
+  // — none of them are allowed to compress below their natural content
+  // width. The outer `flex-wrap` then wraps a whole group down to its own
+  // line once the row genuinely runs out of room, rather than squeezing
+  // every group down to fit one line. An earlier version instead put
+  // `flex-1 min-w-0 truncate` on the date button so the row visually
+  // stayed on one line at any width — but `min-w-0` removes a flex item's
+  // natural min-content floor, which is also what `flex-wrap` needs to
+  // ever trigger a wrap in the first place, so that button just kept
+  // shrinking past legibility (down to a few clipped middle characters,
+  // e.g. "August 3, 2026" reading as "st 3,") instead of ever dropping to a
+  // second row.
   return (
-    <div className="flex w-full flex-wrap items-center justify-between gap-2">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+    <div className="flex w-full flex-wrap items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <Button variant="outline" size="icon" title="Previous" onClick={goToPrevious}>
           <ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
         </Button>
@@ -269,7 +292,7 @@ function ScheduleToolbar({
         >
           <button
             type="button"
-            className={cn(buttonVariants({ variant: "outline", size: "lg" }), "min-w-0 flex-1 justify-center truncate")}
+            className={cn(buttonVariants({ variant: "outline", size: "lg" }), "justify-center whitespace-nowrap")}
           >
             {formatNavDate(anchorDate)}
           </button>
@@ -278,14 +301,19 @@ function ScheduleToolbar({
         <Button variant="outline" size="icon" title="Next" onClick={goToNext}>
           <ChevronRight className="h-4 w-4" strokeWidth={1.5} />
         </Button>
-
-        <Button variant="ghost" size="lg" className="gap-1.5 shrink-0" onClick={goToToday}>
-          <LocateFixed className="h-4 w-4" strokeWidth={1.5} />
-          Today
-        </Button>
       </div>
 
-      <div className="flex shrink-0 items-center gap-2">
+      <Button variant="ghost" size="lg" className="shrink-0 gap-1.5" onClick={goToToday}>
+        <LocateFixed className="h-4 w-4" strokeWidth={1.5} />
+        Today
+      </Button>
+
+      {/* `ml-auto` right-aligns this group against the nav/Today groups
+          above when everything fits on one line (matching the reference
+          screenshots' full-width layout); once wrapped onto its own line,
+          it just sits flush left there instead — a reasonable fallback
+          that still keeps Day/Week and Add from ever being compressed. */}
+      <div className="ml-auto flex shrink-0 items-center gap-2">
         <ToggleGroup
           items={[
             { value: "day", label: "Day" },
