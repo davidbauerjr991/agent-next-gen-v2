@@ -69,6 +69,9 @@ import {
   RadioButtonGroup,
   DateRangePicker,
   filterChipVariants,
+  Toast,
+  ToastContainer,
+  useToast,
   Select,
   Checkbox,
   DatePicker,
@@ -6362,6 +6365,11 @@ export function AgentNextGenPage({
   // below, via `buildDismissedContactHistoryEntry`) — see `ContactHistoryCard`'s
   // own doc comment for the full picture.
   const [dismissedContactHistory, setDismissedContactHistory] = useState<ContactHistoryEntry[]>([]);
+  // Toast fired by `handleDismissInteraction` below (a whole assignment
+  // being unassigned/dismissed, not a single-channel `handleDismissChannel`)
+  // — `useToast` just tracks the list; `<ToastContainer>` actually renders
+  // it, near the end of this component's JSX.
+  const { toasts, addToast, dismissToast } = useToast();
   // "Outcome" popover (`ChannelRow`'s own `outcome` prop, channel-row.tsx) —
   // logs Resolution/Tags/Disposition code/Summary for whichever channel's
   // Outcome button was clicked. Only one can be open across the entire left
@@ -7433,6 +7441,17 @@ export function AgentNextGenPage({
     const dismissed = interactions.find((interaction) => interaction.id === id);
     if (dismissed) {
       setDismissedContactHistory((prev) => [buildDismissedContactHistoryEntry(dismissed, clockTick), ...prev]);
+      // `customerName` falls back to "Customer" the same way the main
+      // interaction header does (see `mainRegionTabLabel`) — an ad-hoc
+      // (typed number/email, no matched customer) interaction still has
+      // *some* value here (the raw address itself, see `customerIdentified`'s
+      // own doc comment in lyra-ui's interaction-nav-item.tsx), so this
+      // fallback is just defensive, not the common case.
+      addToast({
+        variant: "success",
+        title: `${dismissed.customerName ?? "Customer"} ${dismissed.recordId} Successfully Dismissed`,
+        duration: 4000,
+      });
     }
     // Dismissing the active assignment shouldn't strand the agent on an
     // empty dashboard when there's other open work waiting — hand "active"
@@ -9828,6 +9847,18 @@ export function AgentNextGenPage({
           </p>
         </AgentWelcomeMessage>
       </Modal>
+
+      {/* Fired by `handleDismissInteraction` (a whole assignment being
+          unassigned/dismissed) — kept at the very end of this tree, a
+          sibling of everything else, same as `Modal` above, so it's always
+          mounted regardless of which desk tab/panel is currently active. */}
+      <ToastContainer>
+        {toasts.map((t) => (
+          <Toast key={t.id} variant={t.variant} title={t.title} duration={t.duration} onDismiss={() => dismissToast(t.id)}>
+            {t.message}
+          </Toast>
+        ))}
+      </ToastContainer>
     </div>
   );
 }
