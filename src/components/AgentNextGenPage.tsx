@@ -5855,16 +5855,35 @@ function CustomerInformationPanelBody({
   );
 }
 
-/** Compact read-only summary shown in a `Popover` when the agent hovers the
- *  record header's Customer Information toggle icon while the real panel is
- *  closed (see the render site further down) — lets the agent glance at who
- *  they're talking to, the phone/email on file, and a one-line recap of the
- *  last time this customer reached out, without having to open the full
- *  panel first. Built from the exact same `buildCustomerInfoFields`/
- *  `buildLatestInteraction` synthesis the real panel's own Overview tab
- *  already uses (see those functions' own doc comments), so this preview
- *  can never drift out of sync with what actually opening the panel would
- *  show.
+/** Shows the exact same "Customer Information" content the real panel
+ *  displays — same `CustomerInformationPanelBody`, fed by the same
+ *  `buildCustomerInfoFields`/`buildLatestInteraction`/`buildLatestNote`
+ *  data and the same `CUSTOMER_PANEL_TABS` tab set, even the same
+ *  Overview-tab `AIInput` footer — inside a `Popover` when the agent
+ *  hovers the record header's toggle icon while the real panel is closed
+ *  (see the render site further down). A hover-preview flyout of the panel
+ *  itself, per explicit request, not a separate hand-built summary — this
+ *  can never show something different from what actually opening the panel
+ *  would. Same idea as `InteractionNavItem`'s own compact-rail hover
+ *  preview (interaction-nav-item.tsx: "think of how you display your left
+ *  nav when it's closed"), which shows that card's full real content
+ *  (`cardBody`) inside a bare, self-chromed `Popover` rather than a
+ *  simplified stand-in — this component supplies that same complete chrome
+ *  itself (border/background/shadow/rounded corners, matching `SidePanel`'s
+ *  own `bg-lyra-bg-surface-container-subtle` — side-panel.tsx) since the
+ *  render site strips the default `Popover` framing to a bare frame around
+ *  it, exactly like that same precedent.
+ *
+ *  Sized to actually fit as a flyout (fixed `w-[340px]`, matching this
+ *  panel's own default docked width, `max-h-[70vh]` with only the body
+ *  scrolling) rather than the real panel's full docked/full-screen height —
+ *  the header (title/subhead + tabs) stays pinned via `PanelHeader`'s own
+ *  `tabs` prop, same fixed-header/scrolling-body split `SidePanel` itself
+ *  uses, so a tall tab's content scrolls internally instead of pushing the
+ *  popover off-screen. Owns its own `activeTab` state (starts on Overview),
+ *  independent of the real panel's own — switching tabs in this preview
+ *  doesn't affect, and isn't affected by, whatever tab the agent last left
+ *  the real panel on.
  *
  *  `onMouseEnter`/`onMouseLeave` are wired by the caller to the exact same
  *  open-immediately/close-on-a-short-delay handlers as the trigger icon
@@ -5873,7 +5892,7 @@ function CustomerInformationPanelBody({
  *  too, moving the pointer from the icon into this (portaled) popover would
  *  fire the icon's own `onMouseLeave` and close the preview before the
  *  agent can actually read it — same fix already applied once for
- *  `InteractionNavItem`'s own hover-preview card (interaction-nav-item.tsx). */
+ *  `InteractionNavItem`'s own hover-preview card. */
 function CustomerInfoHoverPreview({
   customerName,
   recordId,
@@ -5887,29 +5906,57 @@ function CustomerInfoHoverPreview({
   onMouseEnter: () => void;
   onMouseLeave: () => void;
 }) {
-  const fields = buildCustomerInfoFields(customerName, recordId, channels);
-  const latestInteraction = buildLatestInteraction(customerName, recordId);
-  const phone = getFieldValue(fields, "Phone #");
-  const email = getFieldValue(fields, "Email");
+  const [activeTab, setActiveTab] = useState(0);
+  const fields = useMemo(
+    () => buildCustomerInfoFields(customerName, recordId, channels),
+    [customerName, recordId, channels]
+  );
+  const latestInteraction = useMemo(
+    () => buildLatestInteraction(customerName, recordId),
+    [customerName, recordId]
+  );
+  const latestNote = useMemo(() => buildLatestNote(customerName, recordId), [customerName, recordId]);
 
   return (
-    <div onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} className="w-72 py-3">
-      <p className="lyra-label-strong text-lyra-fg-default truncate">{customerName ?? "Customer"}</p>
-      <p className="lyra-body-sm text-lyra-fg-secondary">{recordId}</p>
-      <div className="mt-3 space-y-1.5 border-t border-lyra-border-subtle pt-3">
-        <div className="flex items-center justify-between gap-3">
-          <span className="lyra-body-sm text-lyra-fg-secondary shrink-0">Phone</span>
-          <span className="lyra-body-sm text-lyra-fg-default truncate">{phone}</span>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <span className="lyra-body-sm text-lyra-fg-secondary shrink-0">Email</span>
-          <span className="lyra-body-sm text-lyra-fg-default truncate">{email}</span>
-        </div>
+    <div
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      className="flex max-h-[70vh] w-[340px] flex-col overflow-hidden rounded-lyra-lg border border-lyra-border-default bg-lyra-bg-surface-container-subtle shadow-lg"
+    >
+      <PanelHeader
+        title={customerName ?? "Customer"}
+        subhead={recordId}
+        tabs={
+          <TabList className="px-4" overflowMenu>
+            {CUSTOMER_PANEL_TABS.map((label, i) => (
+              <Tab key={label} active={activeTab === i} onClick={() => setActiveTab(i)}>
+                {label}
+              </Tab>
+            ))}
+          </TabList>
+        }
+      />
+      <div className="flex-1 overflow-y-auto">
+        <CustomerInformationPanelBody
+          activeTab={activeTab}
+          customerName={customerName}
+          fields={fields}
+          latestInteraction={latestInteraction}
+          latestNote={latestNote}
+        />
       </div>
-      <div className="mt-3 border-t border-lyra-border-subtle pt-3">
-        <p className="lyra-label-strong text-lyra-fg-default">Latest Interaction</p>
-        <p className="lyra-body-sm text-lyra-fg-secondary mt-1 line-clamp-2">{latestInteraction.summary}</p>
-      </div>
+      {/* Same Overview-only `AIInput` footer as the real panel (see its own
+          `footer` prop above) — kept here too for exact content parity,
+          per this component's own doc comment. */}
+      {activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") && (
+        <PanelFooter className="relative shrink-0 justify-start">
+          <div
+            className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-transparent to-lyra-bg-surface-container-subtle"
+            aria-hidden="true"
+          />
+          <AIInput placeholder="Ask about this customer..." showAttach={false} className="w-full" />
+        </PanelFooter>
+      )}
     </div>
   );
 }
@@ -9393,14 +9440,26 @@ export function AgentNextGenPage({
                               `isIconVariant && title` branch — button.tsx).
                               `onFocus`/`onBlur` mirror the mouse handlers
                               for keyboard parity, same as every other
-                              hover-preview in this app. */}
+                              hover-preview in this app.
+
+                              `CustomerInfoHoverPreview` already supplies its
+                              own complete chrome (border/background/shadow/
+                              rounded corners, sized to fit — see its own
+                              doc comment), so this `Popover`'s own default
+                              framing is stripped down to a bare, invisible
+                              frame around it — same "let the real content
+                              supply its own chrome" convention
+                              `InteractionNavItem`'s compact-rail hover
+                              preview uses for the exact same reason
+                              (interaction-nav-item.tsx). */}
                           <Popover
                             open={customerInfoPreviewOpen}
                             onOpenChange={setCustomerInfoPreviewOpen}
                             placement="bottom"
                             align="start"
                             showArrow={false}
-                            className="w-72"
+                            bodyPadding={false}
+                            className="border-0 bg-transparent p-0 shadow-none"
                             content={
                               <CustomerInfoHoverPreview
                                 customerName={activeInteraction.customerName}
