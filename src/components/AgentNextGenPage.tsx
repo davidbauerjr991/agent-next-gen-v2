@@ -9451,7 +9451,21 @@ export function AgentNextGenPage({
                               supply its own chrome" convention
                               `InteractionNavItem`'s compact-rail hover
                               preview uses for the exact same reason
-                              (interaction-nav-item.tsx). */}
+                              (interaction-nav-item.tsx).
+
+                              `onOpenAutoFocus`/`onCloseAutoFocus` both
+                              guarded — hover-opened content shouldn't steal
+                              focus the instant the pointer happens to land
+                              here (`onOpenAutoFocus`), and Radix's default
+                              on close is to return focus to the trigger
+                              (this `Button`), which — left unguarded — fires
+                              its own `onFocus` right back (wired above for
+                              keyboard parity) and reopens the very popover
+                              that just closed, an infinite open/close flash
+                              confirmed live. Same fix already established
+                              for `InteractionNavItem`'s own hover-preview
+                              Popover (interaction-nav-item.tsx) for the
+                              exact same reason. */}
                           <Popover
                             open={customerInfoPreviewOpen}
                             onOpenChange={setCustomerInfoPreviewOpen}
@@ -9460,6 +9474,8 @@ export function AgentNextGenPage({
                             showArrow={false}
                             bodyPadding={false}
                             className="border-0 bg-transparent p-0 shadow-none"
+                            onOpenAutoFocus={(e) => e.preventDefault()}
+                            onCloseAutoFocus={(e) => e.preventDefault()}
                             content={
                               <CustomerInfoHoverPreview
                                 customerName={activeInteraction.customerName}
