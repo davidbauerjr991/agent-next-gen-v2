@@ -2368,11 +2368,21 @@ function CustomerChannelPopoverButton({
   channel,
   available,
   onStartInteraction,
+  alwaysVisible = false,
 }: {
   row: CustomerListRecord;
   channel: ChannelType;
   available: ChannelType[];
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
+  /** Skips the hover/focus-reveal fade below entirely — for a context with
+   *  no `.group` hover/focus-within ancestor to key off (e.g. always-
+   *  visible channel icons in a panel header, see
+   *  `ActiveInteractionAddChannelIcons`), where the default table-row
+   *  hover-reveal convention would otherwise leave these permanently
+   *  invisible (nothing ever sets `.group`'s hover/focus state there).
+   *  Default `false` — existing table-row usage (`CustomerChannelCell`)
+   *  unaffected. */
+  alwaysVisible?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const meta = CHANNEL_ICON_META[channel];
@@ -2399,7 +2409,7 @@ function CustomerChannelPopoverButton({
             // "force visible while open" rule the message-bubble Copy/Add-tag
             // toolbar and its TagPicker popover already use elsewhere in this
             // file.
-            !open &&
+            !alwaysVisible && !open &&
               "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
           )}
         >
@@ -2407,6 +2417,52 @@ function CustomerChannelPopoverButton({
         </ActionIconButton>
       }
     />
+  );
+}
+
+/** Multiple always-visible per-channel "add channel" icons for the Customer
+ *  Information panel of an ACTIVE interaction (`CustomerInformationSidePanel`)
+ *  — per explicit request, broken into one icon per available channel
+ *  (reusing `CustomerChannelPopoverButton`, `alwaysVisible`) rather than
+ *  `CustomerRowInfoPanel`'s single generic `CustomerAddChannelButton`, since
+ *  that request was specifically about the Customers-table row panel, not
+ *  this one. "Available" here means channels this customer record supports
+ *  (`CUSTOMER_LIST_RECORDS`, same source `CustomerChannelCell` reads) that
+ *  AREN'T already one of this interaction's own currently-open channels —
+ *  starting a channel that's already open belongs to the existing
+ *  `ChannelToggle` bar (switching between open channels), not this "start a
+ *  new one" affordance. Renders nothing at all whenever there's no matching
+ *  customer record (e.g. a quick-dialed number or a Contact History redial
+ *  with no known contact) or every supported channel is already open —
+ *  there's nothing meaningful to offer either way. */
+function ActiveInteractionAddChannelIcons({
+  recordId,
+  openChannelTypes,
+  onStartInteraction,
+}: {
+  recordId: string;
+  openChannelTypes: ChannelType[];
+  onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
+}) {
+  const row = CUSTOMER_LIST_RECORDS.find((r) => r.contactNumber === recordId);
+  if (!row) return null;
+  const available = CUSTOMER_CHANNEL_ORDER.filter(
+    (c) => row.channels.includes(c) && !openChannelTypes.includes(c)
+  );
+  if (available.length === 0) return null;
+  return (
+    <>
+      {available.map((c) => (
+        <CustomerChannelPopoverButton
+          key={c}
+          row={row}
+          channel={c}
+          available={available}
+          onStartInteraction={onStartInteraction}
+          alwaysVisible
+        />
+      ))}
+    </>
   );
 }
 
@@ -5842,6 +5898,7 @@ function CustomerInformationSidePanel({
   containerWidth,
   onWidthChange,
   onResizeStateChange,
+  onStartInteraction,
 }: {
   open: boolean;
   pinned: boolean;
@@ -5873,6 +5930,13 @@ function CustomerInformationSidePanel({
   containerWidth: number;
   onWidthChange: (width: number) => void;
   onResizeStateChange?: (isResizing: boolean) => void;
+  /** Starts a new channel for this interaction's customer — wired to the
+   *  same `handleStartCall` every other channel-launch affordance in this
+   *  file already uses (see `ActiveInteractionAddChannelIcons`'s own doc
+   *  comment for why reusing it needs no new merge logic). Optional/no-op
+   *  when omitted so this panel still renders standalone (e.g. Storybook)
+   *  without a real interaction-launch handler wired up. */
+  onStartInteraction?: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState(0);
   const fields = useMemo(
@@ -5916,6 +5980,23 @@ function CustomerInformationSidePanel({
       // a toggle with a persistent on/off state to reflect.
       headerActions={
         <>
+          {/* Per-channel "add channel" icons — one per channel this
+              customer supports that isn't already open in this
+              interaction, per explicit request to break the single
+              generic Add Channel affordance into multiple channel-specific
+              icons here (contrast `CustomerRowInfoPanel`'s
+              `CustomerAddChannelButton`, a different panel this request
+              didn't touch). Renders nothing when there's no matching
+              `CUSTOMER_LIST_RECORDS` entry or every supported channel is
+              already open — see `ActiveInteractionAddChannelIcons`'s own
+              doc comment. */}
+          {onStartInteraction && (
+            <ActiveInteractionAddChannelIcons
+              recordId={recordId}
+              openChannelTypes={channels.map((c) => c.type)}
+              onStartInteraction={onStartInteraction}
+            />
+          )}
           {/* Full-screen toggle — same `PanelPinButton` atom as the close
               button below (just another icon/label/handler over the shared
               "small icon button in a panel header" shape), per explicit
@@ -9054,6 +9135,9 @@ export function AgentNextGenPage({
                   containerWidth={sidePanelContainerWidth}
                   onWidthChange={setSidePanelWidth}
                   onResizeStateChange={setSidePanelResizing}
+                  onStartInteraction={(contact, channel, phone, skillId) =>
+                    handleStartCall({ contact, channel, phone, skillId })
+                  }
                 />
               )}
               <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
