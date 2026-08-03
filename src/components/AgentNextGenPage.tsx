@@ -4925,7 +4925,7 @@ function InteractionTranscript({
 }
 
 /* ── Quick replies ──
-   Canned-response data for `InteractionComposer`'s "#trigger" picker
+   Canned-response data for `InteractionComposer`'s "/trigger" picker
    (`QuickReplyMenu`/`QuickReplyVariableForm`, both lyra-ui exports) — app-
    local business content, same "reusable UI in lyra-ui, real data in the
    app" split as `CONTACT_HISTORY`/`CREATE_NEW_CUSTOMERS` and everything
@@ -4939,7 +4939,7 @@ function InteractionTranscript({
    exactly (see `fillQuickReplyTemplate` below). Plain (non-`rich`) items
    have no `fields` at all and insert `template` verbatim. */
 interface QuickReplyItem {
-  /** The `#id` typed to reach this item */
+  /** The id typed after `QUICK_REPLY_TRIGGER_CHAR` to reach this item */
   id: string;
   title: string;
   /** May contain `{key}` tokens matching `fields[].key`, for a `rich` item */
@@ -5062,7 +5062,7 @@ function fillQuickReplyTemplate(
 
    Composed from existing lyra-ui exports (`Textarea`, `Button`,
    `ActionIconButton`) plus the two new `QuickReplyMenu`/
-   `QuickReplyVariableForm` exports for the "#trigger" quick-reply picker
+   `QuickReplyVariableForm` exports for the "/trigger" quick-reply picker
    (see the "Quick replies" data block above this component). The "Send ▾"
    control is hand-built from two adjacent `Button`s (rounded-r-none /
    rounded-l-none, a hairline divider between) since lyra-ui has no
@@ -5070,27 +5070,30 @@ function fillQuickReplyTemplate(
    this file that composes existing atoms rather than waiting on a new
    lyra-ui primitive.
 
-   Quick-reply mechanics: typing `#` followed by any run of word
-   characters with the caret still immediately after them (`QUICK_REPLY_
-   TRIGGER_PATTERN` below, re-tested against the text up to the caret on
-   every keystroke) opens the menu, filtered to items whose `id`/`title`
-   contains what's typed so far; the (existing, previously unwired)
-   "Quick replies" toolbar button opens the same menu at the current caret
-   with no filter instead, for agents who'd rather browse than type a
-   hashtag from memory. `quickReplyTriggerStart` records where the
-   inserted/replaced range begins — either the `#`'s own position (typed
-   trigger) or the bare caret (toolbar button, nothing to replace, pure
-   insert). The menu itself owns no keyboard state (see `QuickReplyMenu`'s
-   own doc comment) — arrow keys/Enter/Escape are all handled by this
-   component's `onKeyDown` on the `Textarea` itself, so the textarea never
-   loses focus/caret position while browsing. Selecting a plain item
-   inserts `template` immediately; selecting a `rich` one swaps the same
-   on-screen spot to `QuickReplyVariableForm` instead of closing, so the
-   agent can fill in its field(s) — see `fillQuickReplyTemplate`'s own doc
-   comment for the bracketed-preview-vs-final-insert distinction — before
-   either inserting or cancelling back out (Cancel closes the whole picker
-   rather than returning to the list, same "start over from `#`" flow
-   either way).
+   Quick-reply mechanics: typing `/` (`QUICK_REPLY_TRIGGER_CHAR` below —
+   `/` rather than `#`, per explicit request: it's the near-universal
+   chat-command convention, e.g. Slack/Discord/Front/Intercom/Zendesk,
+   where `#` almost always means a hashtag/channel instead) followed by
+   any run of word characters with the caret still immediately after them
+   (`QUICK_REPLY_TRIGGER_PATTERN` below, re-tested against the text up to
+   the caret on every keystroke) opens the menu, filtered to items whose
+   `id`/`title` contains what's typed so far; the (existing, previously
+   unwired) "Quick replies" toolbar button opens the same menu at the
+   current caret with no filter instead, for agents who'd rather browse
+   than type a shortcut from memory. `quickReplyTriggerStart` records
+   where the inserted/replaced range begins — either the `/`'s own
+   position (typed trigger) or the bare caret (toolbar button, nothing to
+   replace, pure insert). The menu itself owns no keyboard state (see
+   `QuickReplyMenu`'s own doc comment) — arrow keys/Enter/Escape are all
+   handled by this component's `onKeyDown` on the `Textarea` itself, so
+   the textarea never loses focus/caret position while browsing. Selecting
+   a plain item inserts `template` immediately; selecting a `rich` one
+   swaps the same on-screen spot to `QuickReplyVariableForm` instead of
+   closing, so the agent can fill in its field(s) — see
+   `fillQuickReplyTemplate`'s own doc comment for the bracketed-preview-
+   vs-final-insert distinction — before either inserting or cancelling
+   back out (Cancel closes the whole picker rather than returning to the
+   list, same "start over from `/`" flow either way).
 
    `onSend` hands the typed text up to `handleSendMessage` (the main
    component, where `interactions`/`setInteractions` actually live — this
@@ -5099,7 +5102,8 @@ function fillQuickReplyTemplate(
    simulated customer reply. This component still owns nothing but the
    input's own text (and now the quick-reply picker's transient state);
    it doesn't know or care what happens to a message once sent. */
-const QUICK_REPLY_TRIGGER_PATTERN = /#(\w*)$/;
+const QUICK_REPLY_TRIGGER_CHAR = "/";
+const QUICK_REPLY_TRIGGER_PATTERN = /\/(\w*)$/;
 function InteractionComposer({ onSend }: { onSend: (text: string) => void }) {
   const [message, setMessage] = useState("");
   const canSend = message.trim().length > 0;
@@ -5108,7 +5112,8 @@ function InteractionComposer({ onSend }: { onSend: (text: string) => void }) {
   // ── Quick-reply picker state ──
   // `quickReplyTriggerStart` is the message-text index the eventually-
   // inserted text replaces through to the caret at insert time — either
-  // where the typed `#` itself sits (so "#time" gets replaced outright),
+  // where the typed trigger character itself sits (so "/time" gets
+  // replaced outright),
   // or the bare caret position when opened via the toolbar button instead
   // (nothing typed to replace, a pure insert at that point). `null` means
   // closed. See this component's own doc comment above for the full flow.
@@ -5156,7 +5161,7 @@ function InteractionComposer({ onSend }: { onSend: (text: string) => void }) {
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [quickReplyOpen]);
 
-  // Replaces `[quickReplyTriggerStart, caret)` — the typed "#query" (or,
+  // Replaces `[quickReplyTriggerStart, caret)` — the typed "/query" (or,
   // for the toolbar-button path, a zero-length range right at the caret)
   // — with `text`, then restores focus with the caret placed right after
   // the newly-inserted text. `requestAnimationFrame` — the caret can only
@@ -5283,6 +5288,7 @@ function InteractionComposer({ onSend }: { onSend: (text: string) => void }) {
               <QuickReplyVariableForm
                 title={quickReplyConfiguring.title}
                 hashtagId={quickReplyConfiguring.id}
+                triggerChar={QUICK_REPLY_TRIGGER_CHAR}
                 fields={quickReplyConfiguring.fields ?? []}
                 values={quickReplyFieldValues}
                 onValueChange={(key, value) => setQuickReplyFieldValues((prev) => ({ ...prev, [key]: value }))}
@@ -5294,6 +5300,7 @@ function InteractionComposer({ onSend }: { onSend: (text: string) => void }) {
             ) : (
               <QuickReplyMenu
                 query={quickReplyQuery}
+                triggerChar={QUICK_REPLY_TRIGGER_CHAR}
                 items={quickReplyMatches.map((item): QuickReplyMenuItem => ({
                   id: item.id,
                   title: item.title,
@@ -5314,7 +5321,7 @@ function InteractionComposer({ onSend }: { onSend: (text: string) => void }) {
         <Textarea
           ref={textareaRef}
           label="Chat with Customer"
-          placeholder="Type a message... or # for quick replies"
+          placeholder="Type a message... or / for quick replies"
           rows={3}
           value={message}
           onChange={handleMessageChange}
