@@ -8449,7 +8449,18 @@ export function AgentNextGenPage({
         // mirrors InteractionNavItem's own auto-select-newest rule, now
         // mirrored up here too since this state is what drives both the
         // card (via currentChannelKey) and the new ChannelToggle bar.
-        return { ...interaction, channels, currentChannelId: newChannel.id };
+        // `currentStatus: undefined` — clears whatever status the PREVIOUS
+        // current session was left on (an interaction closed via its own
+        // status dropdown still has `currentStatus: "Closed"` sitting on
+        // it). Without this, a channel opened fresh right after would
+        // immediately inherit that stale "Closed" reading (`getSessionStatus`
+        // reads `currentStatus ?? session.status` for whichever session is
+        // current) — hiding its composer and locking its Session Details
+        // toggle before the agent has said a word on it. `undefined` falls
+        // through to this new session's own built-in default `status`
+        // (e.g. "Resolved" for `TRANSCRIPT_SESSIONS_VOICE`'s canned demo
+        // session), same as any other freshly-opened channel.
+        return { ...interaction, channels, currentChannelId: newChannel.id, currentStatus: undefined };
       });
     });
     setActiveInteractionId(selection.contact.id);
@@ -8535,7 +8546,10 @@ export function AgentNextGenPage({
     setInteractions((prev) => {
       const idx = prev.findIndex((i) => i.id === id);
       if (idx === -1) return [...prev, { id, recordId: generateCaseId(), channels: [newChannel], currentChannelId: newChannel.id, startedFresh: true }];
-      return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id } : interaction));
+      // `currentStatus: undefined` — see `handleStartCall`'s own merge
+      // branch for why: without this, redialing a number whose card was
+      // last left "Closed" would restart it already reading as closed.
+      return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, currentStatus: undefined } : interaction));
     });
     setActiveInteractionId(id);
     if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
@@ -8583,7 +8597,10 @@ export function AgentNextGenPage({
     setInteractions((prev) => {
       const idx = prev.findIndex((i) => i.id === id);
       if (idx === -1) return [...prev, { id, customerName: entry.name, recordId: entry.caseId, channels: [newChannel], currentChannelId: newChannel.id, startedFresh: true }];
-      return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id } : interaction));
+      // `currentStatus: undefined` — see `handleStartCall`'s own merge
+      // branch for why: without this, redialing a contact whose card was
+      // last left "Closed" would restart it already reading as closed.
+      return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, currentStatus: undefined } : interaction));
     });
     setActiveInteractionId(id);
     if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
@@ -10657,6 +10674,28 @@ export function AgentNextGenPage({
                             </InlineNotification>
                           </div>
                         )}
+                        {/* Distinct from the notice above — this is the
+                            CURRENT session's own status (`currentStatus`,
+                            same field `TranscriptSessionSeparator`'s
+                            `isClosed` check reads for the identical session
+                            elsewhere) reaching "Closed" while the
+                            interaction itself is still a live, non-reopened
+                            one. An agent can close the current session via
+                            its status dropdown without ever going through
+                            `handleReopenContactHistoryEntry`, so
+                            `activeInteraction.closed` alone doesn't catch
+                            this case — checked separately here rather than
+                            folded into that flag, since the two really are
+                            different things (one's "this whole interaction
+                            is historical/read-only", the other's "this one
+                            session just got closed"). */}
+                        {!activeInteraction.closed && activeInteraction.currentStatus === "Closed" && (
+                          <div className="shrink-0 px-6 pt-4">
+                            <InlineNotification variant="info">
+                              This session is closed.
+                            </InlineNotification>
+                          </div>
+                        )}
                         <InteractionTranscript
                           channelType={activeChannelType}
                           customerName={activeInteraction.customerName}
@@ -10684,7 +10723,7 @@ export function AgentNextGenPage({
                           onOutcomeSave={handleOutcomeSave}
                           onOutcomeCancel={handleOutcomeCancel}
                         />
-                        {!activeInteraction.closed && (
+                        {!activeInteraction.closed && activeInteraction.currentStatus !== "Closed" && (
                           <InteractionComposer onSend={(text) => handleSendMessage(activeInteraction.id, text)} />
                         )}
                       </div>
