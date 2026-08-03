@@ -99,6 +99,10 @@ import {
   type DraggableVariant,
   type EmbeddablePanelContent,
   type MenuEntry,
+  QuickReplyMenu,
+  type QuickReplyMenuItem,
+  QuickReplyVariableForm,
+  type QuickReplyField,
 } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_AGENTS } from "@nicecxone/lyra-ui/agents-data";
 import { CREATE_NEW_CUSTOMERS, type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
@@ -4920,6 +4924,135 @@ function InteractionTranscript({
   );
 }
 
+/* ── Quick replies ──
+   Canned-response data for `InteractionComposer`'s "#trigger" picker
+   (`QuickReplyMenu`/`QuickReplyVariableForm`, both lyra-ui exports) — app-
+   local business content, same "reusable UI in lyra-ui, real data in the
+   app" split as `CONTACT_HISTORY`/`CREATE_NEW_CUSTOMERS` and everything
+   else in this file that isn't generic across every lyra-ui consumer.
+
+   `rich`/`fields` items need a value chosen for each `{token}` in their
+   `template` before they make sense to send (a business-day range, a
+   department, a date/time) — `InteractionComposer` swaps the matching
+   list for `QuickReplyVariableForm` to collect those, keyed by each
+   field's own `key`, which must match a `{key}` token in `template`
+   exactly (see `fillQuickReplyTemplate` below). Plain (non-`rich`) items
+   have no `fields` at all and insert `template` verbatim. */
+interface QuickReplyItem {
+  /** The `#id` typed to reach this item */
+  id: string;
+  title: string;
+  /** May contain `{key}` tokens matching `fields[].key`, for a `rich` item */
+  template: string;
+  rich?: boolean;
+  fields?: QuickReplyField[];
+}
+
+const QUICK_REPLIES: QuickReplyItem[] = [
+  { id: "greeting", title: "Greeting", template: "Thank you for contacting us. How can I assist you today?" },
+  { id: "acknowledge", title: "Acknowledge", template: "I understand your concern. Let me look into that for you." },
+  { id: "account", title: "Request Account #", template: "Could you please provide me with your account number?" },
+  { id: "reviewed", title: "Account Reviewed", template: "I've reviewed your account and I can see the issue." },
+  { id: "escalate", title: "Escalate", template: "I'm escalating this to our specialist team right away." },
+  {
+    id: "timeline",
+    title: "Processing Time",
+    template: "Please allow {days} business days for this to take effect.",
+    rich: true,
+    fields: [
+      {
+        key: "days",
+        label: "Business Days",
+        type: "select",
+        options: [
+          { value: "1–2", label: "1–2" },
+          { value: "3–5", label: "3–5" },
+          { value: "5–7", label: "5–7" },
+          { value: "7–10", label: "7–10" },
+        ],
+      },
+    ],
+  },
+  { id: "closing", title: "Closing", template: "Is there anything else I can help you with today?" },
+  {
+    id: "success",
+    title: "Request Success",
+    template: "Your {requestType} has been processed successfully.",
+    rich: true,
+    fields: [{ key: "requestType", label: "Request Type", type: "text", placeholder: "e.g. refund request" }],
+  },
+  {
+    id: "callback",
+    title: "Schedule Callback",
+    template: "I'll arrange a callback on {date} at {time} for you.",
+    rich: true,
+    fields: [
+      { key: "date", label: "Date", type: "date" },
+      { key: "time", label: "Time", type: "time" },
+    ],
+  },
+  {
+    id: "transfer",
+    title: "Transfer Notice",
+    template: "I'm transferring you to {department}. Please hold for a moment.",
+    rich: true,
+    fields: [
+      {
+        key: "department",
+        label: "Department",
+        type: "select",
+        options: [
+          { value: "Billing", label: "Billing" },
+          { value: "Technical Support", label: "Technical Support" },
+          { value: "Retention", label: "Retention" },
+          { value: "Escalations", label: "Escalations" },
+          { value: "Account Management", label: "Account Management" },
+        ],
+      },
+    ],
+  },
+  { id: "thankyou", title: "Thank You", template: "Thank you so much for your patience. We really appreciate it!" },
+  { id: "sorry", title: "Apology", template: "I sincerely apologize for the inconvenience this has caused you." },
+];
+
+/** One field's current raw value → its display text — a `Date` (from
+ *  `DatePicker`/`TimePicker`) formats per `field.type` ("date" vs "time"
+ *  need different `Date` formatting, which is why this needs the field's
+ *  own type rather than just stringifying); an unset field falls back to
+ *  its own `{key}` token so a still-incomplete preview reads as an
+ *  obviously-unfilled blank rather than the literal word "undefined". */
+function quickReplyFieldDisplayValue(field: QuickReplyField, raw: string | Date | undefined): string {
+  if (raw instanceof Date) {
+    return field.type === "time"
+      ? raw.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      : raw.toLocaleDateString();
+  }
+  if (typeof raw === "string" && raw.trim()) return raw;
+  return `{${field.key}}`;
+}
+
+/** Fills a `rich` item's `template` from its current field values —
+ *  `bracket` wraps each filled-in value in `[...]` (matching the reference
+ *  mockup's own preview treatment, e.g. "Please allow [1–2] business
+ *  days...") for the live preview shown while still editing; the final
+ *  text actually inserted into the composer (`bracket: false`) has no
+ *  brackets, since those were only ever a preview affordance marking which
+ *  parts of the sentence came from a field. Plain (non-`rich`) items never
+ *  reach this — their `template` has no `fields`/tokens to fill and is
+ *  used as-is. */
+function fillQuickReplyTemplate(
+  item: QuickReplyItem,
+  values: Record<string, string | Date | undefined>,
+  bracket: boolean
+): string {
+  if (!item.fields) return item.template;
+  return item.fields.reduce((text, field) => {
+    const display = quickReplyFieldDisplayValue(field, values[field.key]);
+    const shown = bracket && display !== `{${field.key}}` ? `[${display}]` : display;
+    return text.split(`{${field.key}}`).join(shown);
+  }, item.template);
+}
+
 /* ── InteractionComposer ──
    The message-input bar fixed to the bottom of an active interaction's
    detail page — a sibling rendered right after `InteractionTranscript`
@@ -4927,23 +5060,190 @@ function InteractionTranscript({
    column instead of scrolling away with the transcript above it (which is
    the `flex-1 overflow-y-auto` element doing all the scrolling).
 
-   Composed entirely from existing lyra-ui exports (`Textarea`, `Button`,
-   `ActionIconButton`) — no lyra-ui changes. The "Send ▾" control is hand-
-   built from two adjacent `Button`s (rounded-r-none / rounded-l-none, a
-   hairline divider between) since lyra-ui has no dedicated split-button
-   component; same reasoning as everywhere else in this file that composes
-   existing atoms rather than waiting on a new lyra-ui primitive.
+   Composed from existing lyra-ui exports (`Textarea`, `Button`,
+   `ActionIconButton`) plus the two new `QuickReplyMenu`/
+   `QuickReplyVariableForm` exports for the "#trigger" quick-reply picker
+   (see the "Quick replies" data block above this component). The "Send ▾"
+   control is hand-built from two adjacent `Button`s (rounded-r-none /
+   rounded-l-none, a hairline divider between) since lyra-ui has no
+   dedicated split-button component; same reasoning as everywhere else in
+   this file that composes existing atoms rather than waiting on a new
+   lyra-ui primitive.
 
-   `onSend` (new) hands the typed text up to `handleSendMessage` (the main
+   Quick-reply mechanics: typing `#` followed by any run of word
+   characters with the caret still immediately after them (`QUICK_REPLY_
+   TRIGGER_PATTERN` below, re-tested against the text up to the caret on
+   every keystroke) opens the menu, filtered to items whose `id`/`title`
+   contains what's typed so far; the (existing, previously unwired)
+   "Quick replies" toolbar button opens the same menu at the current caret
+   with no filter instead, for agents who'd rather browse than type a
+   hashtag from memory. `quickReplyTriggerStart` records where the
+   inserted/replaced range begins — either the `#`'s own position (typed
+   trigger) or the bare caret (toolbar button, nothing to replace, pure
+   insert). The menu itself owns no keyboard state (see `QuickReplyMenu`'s
+   own doc comment) — arrow keys/Enter/Escape are all handled by this
+   component's `onKeyDown` on the `Textarea` itself, so the textarea never
+   loses focus/caret position while browsing. Selecting a plain item
+   inserts `template` immediately; selecting a `rich` one swaps the same
+   on-screen spot to `QuickReplyVariableForm` instead of closing, so the
+   agent can fill in its field(s) — see `fillQuickReplyTemplate`'s own doc
+   comment for the bracketed-preview-vs-final-insert distinction — before
+   either inserting or cancelling back out (Cancel closes the whole picker
+   rather than returning to the list, same "start over from `#`" flow
+   either way).
+
+   `onSend` hands the typed text up to `handleSendMessage` (the main
    component, where `interactions`/`setInteractions` actually live — this
    component has no access to that state itself) — that's what pushes the
    message into the active interaction's `liveMessages` and schedules the
    simulated customer reply. This component still owns nothing but the
-   input's own text; it doesn't know or care what happens to a message once
-   sent. */
+   input's own text (and now the quick-reply picker's transient state);
+   it doesn't know or care what happens to a message once sent. */
+const QUICK_REPLY_TRIGGER_PATTERN = /#(\w*)$/;
 function InteractionComposer({ onSend }: { onSend: (text: string) => void }) {
   const [message, setMessage] = useState("");
   const canSend = message.trim().length > 0;
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // ── Quick-reply picker state ──
+  // `quickReplyTriggerStart` is the message-text index the eventually-
+  // inserted text replaces through to the caret at insert time — either
+  // where the typed `#` itself sits (so "#time" gets replaced outright),
+  // or the bare caret position when opened via the toolbar button instead
+  // (nothing typed to replace, a pure insert at that point). `null` means
+  // closed. See this component's own doc comment above for the full flow.
+  const [quickReplyTriggerStart, setQuickReplyTriggerStart] = useState<number | null>(null);
+  const [quickReplyQuery, setQuickReplyQuery] = useState("");
+  const [quickReplyActiveIndex, setQuickReplyActiveIndex] = useState(0);
+  // Non-null while showing `QuickReplyVariableForm` for a `rich` item
+  // instead of the plain matching list — same overlay slot, different
+  // content (see the render below).
+  const [quickReplyConfiguring, setQuickReplyConfiguring] = useState<QuickReplyItem | null>(null);
+  const [quickReplyFieldValues, setQuickReplyFieldValues] = useState<Record<string, string | Date | undefined>>({});
+  const quickReplyOpen = quickReplyTriggerStart !== null;
+  const quickReplyContainerRef = useRef<HTMLDivElement>(null);
+
+  const quickReplyMatches = useMemo(() => {
+    const q = quickReplyQuery.trim().toLowerCase();
+    if (!q) return QUICK_REPLIES;
+    return QUICK_REPLIES.filter(
+      (item) => item.id.toLowerCase().includes(q) || item.title.toLowerCase().includes(q)
+    );
+  }, [quickReplyQuery]);
+
+  const closeQuickReplyMenu = () => {
+    setQuickReplyTriggerStart(null);
+    setQuickReplyQuery("");
+    setQuickReplyActiveIndex(0);
+    setQuickReplyConfiguring(null);
+    setQuickReplyFieldValues({});
+  };
+
+  // Dismiss on outside click — this menu is a plain absolutely-positioned
+  // overlay, not a `Popover` (see this component's own doc comment for
+  // why: the `Textarea` itself must keep focus/caret while browsing, which
+  // rules out a focus-trapping Radix popover). `mousedown` (not `click`)
+  // so this fires before a menu-row's own `onClick` — the row's click
+  // handler still runs normally afterward since it's inside
+  // `quickReplyContainerRef` and skipped here.
+  useEffect(() => {
+    if (!quickReplyOpen) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (quickReplyContainerRef.current?.contains(e.target as Node)) return;
+      closeQuickReplyMenu();
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [quickReplyOpen]);
+
+  // Replaces `[quickReplyTriggerStart, caret)` — the typed "#query" (or,
+  // for the toolbar-button path, a zero-length range right at the caret)
+  // — with `text`, then restores focus with the caret placed right after
+  // the newly-inserted text. `requestAnimationFrame` — the caret can only
+  // be repositioned after React actually commits the new `value` to the
+  // DOM `<textarea>`, which hasn't happened yet inside this same handler.
+  const insertQuickReplyText = (text: string) => {
+    const el = textareaRef.current;
+    const start = quickReplyTriggerStart ?? el?.selectionStart ?? message.length;
+    const end = el?.selectionStart ?? message.length;
+    const next = message.slice(0, start) + text + message.slice(end);
+    setMessage(next);
+    const caret = start + text.length;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(caret, caret);
+    });
+  };
+
+  const handleSelectQuickReply = (item: QuickReplyItem) => {
+    if (item.rich) {
+      setQuickReplyConfiguring(item);
+      setQuickReplyFieldValues({});
+      return;
+    }
+    insertQuickReplyText(item.template);
+    closeQuickReplyMenu();
+  };
+
+  const handleInsertRichQuickReply = () => {
+    if (!quickReplyConfiguring) return;
+    insertQuickReplyText(fillQuickReplyTemplate(quickReplyConfiguring, quickReplyFieldValues, false));
+    closeQuickReplyMenu();
+  };
+
+  const openQuickReplyMenuAtCaret = () => {
+    const el = textareaRef.current;
+    setQuickReplyTriggerStart(el?.selectionStart ?? message.length);
+    setQuickReplyQuery("");
+    setQuickReplyActiveIndex(0);
+    el?.focus();
+  };
+
+  const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setMessage(value);
+    const caret = e.target.selectionStart ?? value.length;
+    const match = QUICK_REPLY_TRIGGER_PATTERN.exec(value.slice(0, caret));
+    if (match) {
+      setQuickReplyTriggerStart(caret - match[0].length);
+      setQuickReplyQuery(match[1]);
+      setQuickReplyActiveIndex(0);
+    } else if (quickReplyOpen && !quickReplyConfiguring) {
+      // Only auto-closes the plain matching list on a non-matching edit —
+      // once `quickReplyConfiguring` is set the agent's focus has moved
+      // into the variable form's own fields, so further edits (there
+      // shouldn't be any — the textarea isn't part of that flow anymore)
+      // shouldn't tear down the form out from under them.
+      closeQuickReplyMenu();
+    }
+  };
+
+  // Arrow keys/Enter/Escape all handled here, not inside `QuickReplyMenu`
+  // itself — see this component's own doc comment for why the textarea
+  // must keep owning focus/caret the whole time the menu is open.
+  const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!quickReplyOpen || quickReplyConfiguring) return;
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        setQuickReplyActiveIndex((i) => Math.min(i + 1, Math.max(quickReplyMatches.length - 1, 0)));
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        setQuickReplyActiveIndex((i) => Math.max(i - 1, 0));
+        break;
+      case "Enter":
+        if (quickReplyMatches[quickReplyActiveIndex]) {
+          e.preventDefault();
+          handleSelectQuickReply(quickReplyMatches[quickReplyActiveIndex]);
+        }
+        break;
+      case "Escape":
+        e.preventDefault();
+        closeQuickReplyMenu();
+        break;
+    }
+  };
 
   const handleSend = () => {
     if (!canSend) return;
@@ -4965,13 +5265,49 @@ function InteractionComposer({ onSend }: { onSend: (text: string) => void }) {
         className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-transparent to-lyra-bg-surface-base"
         aria-hidden="true"
       />
-      <div className="w-full max-w-[1200px] mx-auto">
+      <div className="relative w-full max-w-[1200px] mx-auto">
+        {quickReplyOpen && (
+          <div ref={quickReplyContainerRef} className="absolute inset-x-0 bottom-full z-20 mb-2">
+            {quickReplyConfiguring ? (
+              <QuickReplyVariableForm
+                title={quickReplyConfiguring.title}
+                hashtagId={quickReplyConfiguring.id}
+                fields={quickReplyConfiguring.fields ?? []}
+                values={quickReplyFieldValues}
+                onValueChange={(key, value) => setQuickReplyFieldValues((prev) => ({ ...prev, [key]: value }))}
+                preview={fillQuickReplyTemplate(quickReplyConfiguring, quickReplyFieldValues, true)}
+                onCancel={closeQuickReplyMenu}
+                onClose={closeQuickReplyMenu}
+                onInsert={handleInsertRichQuickReply}
+              />
+            ) : (
+              <QuickReplyMenu
+                query={quickReplyQuery}
+                items={quickReplyMatches.map((item): QuickReplyMenuItem => ({
+                  id: item.id,
+                  title: item.title,
+                  preview: item.template,
+                  rich: item.rich,
+                }))}
+                activeIndex={quickReplyActiveIndex}
+                onHoverItem={setQuickReplyActiveIndex}
+                onSelect={(menuItem) => {
+                  const item = QUICK_REPLIES.find((r) => r.id === menuItem.id);
+                  if (item) handleSelectQuickReply(item);
+                }}
+                onClose={closeQuickReplyMenu}
+              />
+            )}
+          </div>
+        )}
         <Textarea
+          ref={textareaRef}
           label="Chat with Customer"
           placeholder="Type a message... or # for quick replies"
           rows={3}
           value={message}
-          onChange={(e) => setMessage(e.target.value)}
+          onChange={handleMessageChange}
+          onKeyDown={handleComposerKeyDown}
         />
         <div className="mt-2 flex items-center justify-between">
           <div className="flex items-center gap-0.5">
@@ -4987,7 +5323,7 @@ function InteractionComposer({ onSend }: { onSend: (text: string) => void }) {
             <ActionIconButton size="sm" title="Emoji">
               <Smile className="h-4 w-4" strokeWidth={1.5} />
             </ActionIconButton>
-            <ActionIconButton size="sm" title="Quick replies">
+            <ActionIconButton size="sm" title="Quick replies" onClick={openQuickReplyMenuAtCaret}>
               <Zap className="h-4 w-4" strokeWidth={1.5} />
             </ActionIconButton>
             <ActionIconButton size="sm" title="Templates">
