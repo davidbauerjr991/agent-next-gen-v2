@@ -6763,6 +6763,112 @@ function CustomerInformationPanelBody({
   );
 }
 
+/** Shows the exact same "Customer Information" content the real panel
+ *  displays — same `CustomerInformationPanelBody`, fed by the same
+ *  `buildCustomerInfoFields`/`buildLatestInteraction`/`buildLatestNote`
+ *  data and the same `CUSTOMER_PANEL_TABS` tab set, even the same
+ *  Overview-tab `AIInput` footer — inside a `Popover` when the agent
+ *  hovers the record header's toggle icon while the real panel is closed
+ *  (see the render site further down). A hover-preview flyout of the panel
+ *  itself, per explicit request, not a separate hand-built summary — this
+ *  can never show something different from what actually opening the panel
+ *  would. Same idea as `InteractionNavItem`'s own compact-rail hover
+ *  preview (interaction-nav-item.tsx: "think of how you display your left
+ *  nav when it's closed"), which shows that card's full real content
+ *  (`cardBody`) inside a bare, self-chromed `Popover` rather than a
+ *  simplified stand-in — this component supplies that same complete chrome
+ *  itself (border/background/shadow/rounded corners, matching `SidePanel`'s
+ *  own `bg-lyra-bg-surface-container-subtle` — side-panel.tsx) since the
+ *  render site strips the default `Popover` framing to a bare frame around
+ *  it, exactly like that same precedent.
+ *
+ *  Sized to actually fit as a flyout (fixed `w-[340px]`, matching this
+ *  panel's own default docked width, `max-h-[70vh]` with only the body
+ *  scrolling) rather than the real panel's full docked/full-screen height —
+ *  the header (title/subhead + tabs) stays pinned via `PanelHeader`'s own
+ *  `tabs` prop, same fixed-header/scrolling-body split `SidePanel` itself
+ *  uses, so a tall tab's content scrolls internally instead of pushing the
+ *  popover off-screen. Owns its own `activeTab` state (starts on Overview),
+ *  independent of the real panel's own — switching tabs in this preview
+ *  doesn't affect, and isn't affected by, whatever tab the agent last left
+ *  the real panel on.
+ *
+ *  `onMouseEnter`/`onMouseLeave` are wired by the caller to the exact same
+ *  open-immediately/close-on-a-short-delay handlers as the trigger icon
+ *  itself — Radix `Popover.Content` portals straight to `document.body`,
+ *  outside the trigger icon's own DOM subtree, so without re-arming here
+ *  too, moving the pointer from the icon into this (portaled) popover would
+ *  fire the icon's own `onMouseLeave` and close the preview before the
+ *  agent can actually read it — same fix already applied once for
+ *  `InteractionNavItem`'s own hover-preview card. */
+function CustomerInfoHoverPreview({
+  customerName,
+  recordId,
+  channels,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  customerName?: string;
+  recordId: string;
+  channels: TrackedChannel[];
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState(0);
+  const fields = useMemo(
+    () => buildCustomerInfoFields(customerName, recordId, channels),
+    [customerName, recordId, channels]
+  );
+  const latestInteraction = useMemo(
+    () => buildLatestInteraction(customerName, recordId),
+    [customerName, recordId]
+  );
+  const latestNote = useMemo(() => buildLatestNote(customerName, recordId), [customerName, recordId]);
+
+  return (
+    <div
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      className="flex max-h-[70vh] w-[340px] flex-col overflow-hidden rounded-lyra-lg border border-lyra-border-default bg-lyra-bg-surface-container-subtle shadow-lg"
+    >
+      <PanelHeader
+        title={customerName ?? "Customer"}
+        subhead={recordId}
+        tabs={
+          <TabList className="px-4" overflowMenu>
+            {CUSTOMER_PANEL_TABS.map((label, i) => (
+              <Tab key={label} active={activeTab === i} onClick={() => setActiveTab(i)}>
+                {label}
+              </Tab>
+            ))}
+          </TabList>
+        }
+      />
+      <div className="flex-1 overflow-y-auto">
+        <CustomerInformationPanelBody
+          activeTab={activeTab}
+          customerName={customerName}
+          fields={fields}
+          latestInteraction={latestInteraction}
+          latestNote={latestNote}
+        />
+      </div>
+      {/* Same Overview-only `AIInput` footer as the real panel (see its own
+          `footer` prop above) — kept here too for exact content parity,
+          per this component's own doc comment. */}
+      {activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") && (
+        <PanelFooter className="relative shrink-0 justify-start">
+          <div
+            className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-transparent to-lyra-bg-surface-container-subtle"
+            aria-hidden="true"
+          />
+          <AIInput placeholder="Ask about this customer..." showAttach={false} className="w-full" />
+        </PanelFooter>
+      )}
+    </div>
+  );
+}
+
 /* ── CustomerInformationSidePanel ──
    Owns `activeTab` — the one piece of state both the header's `TabList`
    (via `SidePanel`'s `headerTabs`) and the scrolling body below it
@@ -6817,9 +6923,10 @@ function CustomerInformationSidePanel({
   open,
   pinned,
   onClose,
-  onTogglePinned,
   fullScreen,
   onToggleFullScreen,
+  onMouseEnter,
+  onMouseLeave,
   customerName,
   recordId,
   channels,
@@ -6836,28 +6943,16 @@ function CustomerInformationSidePanel({
    *  override its default `Pin` icon, and this is a real close action now,
    *  not a pin/unpin toggle — see `handleSidePanelClose`'s own doc
    *  comment). `SidePanel`'s `onPinToggle` prop is deliberately left unset
-   *  below so its internal default button doesn't also render — the real
-   *  dock/undock toggle is hand-rolled into `headerActions` instead (see
-   *  `onTogglePinned` immediately below), so it lands in the same order as
-   *  the full-screen/close buttons rather than always trailing them the
-   *  way `SidePanel`'s own auto-appended pin button would. */
+   *  below so its internal default button doesn't also render. */
   onClose?: () => void;
-  /** Docks/undocks the panel — flips the real `sidePanelPinned` state one
-   *  level up (`handleToggleSidePanelPinned`), rendered as a plain default-
-   *  icon `PanelPinButton` (the `Pin` glyph, rotating 45° once `pinned` is
-   *  true — see that component's own doc comment) so the rotation itself
-   *  communicates docked/floating, unlike the full-screen/close buttons
-   *  above (which hardcode `pinned={false}` since neither is a real
-   *  persistent toggle). Per explicit request: floating/"popover" mode is
-   *  the default for a fresh interaction, with this button as the
-   *  agent's way to dock it to the side instead. */
-  onTogglePinned?: () => void;
   /** Whether the panel is currently overlaying the whole parent Container
    *  edge to edge — purely a rendering choice the caller makes (see this
    *  component's own doc comment above); only used here to pick the
    *  Maximize2/Minimize2 icon and label on the toggle button below. */
   fullScreen?: boolean;
   onToggleFullScreen?: () => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
   customerName?: string;
   recordId: string;
   channels: TrackedChannel[];
@@ -6898,6 +6993,8 @@ function CustomerInformationSidePanel({
       side="left"
       open={open}
       pinned={pinned}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       headerTitle={customerName ?? "Customer"}
       headerSubhead={recordId}
       // `PanelLeftClose`-iconed `PanelPinButton`, standing in for
@@ -6911,24 +7008,6 @@ function CustomerInformationSidePanel({
       // a toggle with a persistent on/off state to reflect.
       headerActions={
         <>
-          {/* Dock/undock toggle — first in the row (mode toggle before the
-              momentary full-screen/close actions), per `onTogglePinned`'s
-              own doc comment above. Uses the DEFAULT `Pin` glyph (no `icon`
-              override), the one case in this header where that matters:
-              `pinned` is the panel's REAL prop here, not hardcoded `false`,
-              so the glyph's own 45°-rotate-when-pinned animation is what
-              communicates "docked" vs "floating" — no selected-background
-              highlight kicks in either (that branch only fires for a custom
-              `icon`), which is exactly right since the rotated pin itself
-              already shows the state. */}
-          {onTogglePinned && (
-            <PanelPinButton
-              pinned={pinned}
-              onToggle={onTogglePinned}
-              pinnedLabel="Undock Customer Information"
-              unpinnedLabel="Dock Customer Information"
-            />
-          )}
           {/* Full-screen toggle — same `PanelPinButton` atom as the close
               button below (just another icon/label/handler over the shared
               "small icon button in a panel header" shape), per explicit
@@ -8059,13 +8138,23 @@ export function AgentNextGenPage({
   // explicitly closed (`handleSidePanelClose` below) — a freshly reopened
   // panel shouldn't silently reopen full-screen from a previous session.
   const [sidePanelFullScreen, setSidePanelFullScreen] = useState(false);
+  const sidePanelHoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Header icon's hover preview (`CustomerInfoHoverPreview`, only rendered
+  // while the real panel is closed — see the render site) — same
+  // open-now/close-on-a-short-delay shape as `sidePanelHoverTimer` above,
+  // just its own independent state/timer since this is a lightweight
+  // `Popover` preview of the panel, not the panel itself.
+  const [customerInfoPreviewOpen, setCustomerInfoPreviewOpen] = useState(false);
+  const customerInfoPreviewTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // The agent's own last explicit open/closed choice (the header's
   // "Customer History" toggle icon while pinned, or the panel's own close
   // button) — per explicit request, a freshly started/quick-dialed/
   // redialed/reopened interaction's panel now starts in WHICHEVER state the
   // agent last picked, not hardcoded open every time. A ref, not state: it
   // only needs to be read at the moment a new interaction launches, never
-  // drives a render itself.
+  // drives a render itself. Hover-preview opens/closes (only relevant while
+  // unpinned) are deliberately NOT recorded here — those are transient,
+  // not a real choice the agent made.
   const lastSidePanelOpenChoice = useRef(true);
 
   // Container-width pin guard — `SidePanel` has no built-in "too narrow,
@@ -8141,13 +8230,26 @@ export function AgentNextGenPage({
   // panel's own close button, or the header icon toggle while pinned)
   // changes it now.
 
+  // Hover-preview handlers — guarded on `sidePanelPinned` (not the
+  // narrow-adjusted `effectiveSidePanelPinned`): once pinned, hover does
+  // nothing at all in either direction, open/closed is controlled solely by
+  // the click toggle while pinned, same as every other `SidePanel` consumer.
+  const onSidePanelHoverStart = () => {
+    if (sidePanelPinned) return;
+    clearTimeout(sidePanelHoverTimer.current);
+    setSidePanelOpen(true);
+  };
+  const onSidePanelHoverEnd = () => {
+    if (sidePanelPinned) return;
+    sidePanelHoverTimer.current = setTimeout(() => setSidePanelOpen(false), 300);
+  };
   // Fired by the panel's own header button (a `PanelPinButton` wearing a
   // `PanelLeftClose` icon instead of the default `Pin` glyph, per explicit
   // request) — just hides the panel, per explicit follow-up request;
-  // leaves `sidePanelPinned` untouched (still pinned/unpinned exactly as it
-  // was), so the person-icon toggle in the record header
-  // (`handleSidePanelIconToggle`) still reopens it in the same docked/
-  // floating mode rather than this having quietly changed that first.
+  // leaves `sidePanelPinned` untouched (still pinned if it was), so the
+  // person-icon toggle in the record header (`handleSidePanelIconToggle`)
+  // still reopens it in the same pinned state rather than this having
+  // quietly unpinned it first.
   const handleSidePanelClose = () => {
     setSidePanelOpen(false);
     setSidePanelFullScreen(false);
@@ -8155,32 +8257,49 @@ export function AgentNextGenPage({
   };
   // Click on the header's toggle icon — always opens/closes the panel, in
   // whatever mode `effectiveSidePanelPinned` currently puts it in: docked
-  // inline while pinned, or as a floating popover while unpinned (either
-  // because the agent explicitly undocked it via the panel's own dock
-  // button, or because the container narrowed enough to force
-  // `effectiveSidePanelPinned` false). Per explicit request this button is
-  // now a persistent, always-visible open/closed toggle (see the render
-  // site's own comment for why it no longer hides itself while open) — its
-  // "toggled open" state is reflected there via `PANEL_BUTTON_SELECTED_CLASS`
-  // rather than by disappearing.
+  // inline while pinned (the normal case, since `sidePanelPinned` itself
+  // never actually goes false anymore — nothing unpins it), or as a
+  // floating overlay once the container gets narrow enough to force
+  // `effectiveSidePanelPinned` false. Used to no-op below 768px (the old
+  // "hover handles opening while unpinned instead" reasoning) — per
+  // explicit request, an agent whose container narrowed enough to
+  // auto-close the panel still needs a working click target to bring it
+  // back, and hovering a plain click button isn't a real affordance there.
   const handleSidePanelIconToggle = () => {
     setSidePanelOpen((v) => {
       const next = !v;
       lastSidePanelOpenChoice.current = next;
       return next;
     });
+    // Clicking always opens the real panel from here (this icon only
+    // renders while it's closed — see the render site's own comment), which
+    // unmounts the hover-preview `Popover` right along with it. Explicitly
+    // closing the preview's own state too so it doesn't reopen instantly
+    // (no real hover) the next time this icon happens to render again.
+    clearTimeout(customerInfoPreviewTimer.current);
+    setCustomerInfoPreviewOpen(false);
   };
-  // Docks/undocks the panel — the panel's own header button (a plain
-  // default-icon `PanelPinButton`, see `CustomerInformationSidePanel`'s
-  // `onTogglePinned` doc comment) calls this. Kept as a real, standalone
-  // toggle rather than folded into `handleSidePanelIconToggle` above: opening
-  // vs. closing the panel and docking vs. floating it are two independent
-  // choices now (a fresh interaction opens floating per explicit request —
-  // see the `startedFresh` branches below — and the agent can dock it
-  // without that action also closing/reopening anything).
-  const handleToggleSidePanelPinned = () => {
-    setSidePanelPinned((v) => !v);
+  // Open immediately on hover-in, close on a short delay on hover-out —
+  // same hover-intent shape as `onSidePanelHoverStart`/`onSidePanelHoverEnd`
+  // above, just for the lightweight preview `Popover` instead of the real
+  // panel. Both the trigger icon and the preview's own content
+  // (`CustomerInfoHoverPreview`) call these, so moving the pointer from one
+  // to the other keeps it open — see that component's own doc comment for
+  // why the preview needs to re-arm this itself too.
+  const openCustomerInfoPreview = () => {
+    clearTimeout(customerInfoPreviewTimer.current);
+    setCustomerInfoPreviewOpen(true);
   };
+  const scheduleCloseCustomerInfoPreview = () => {
+    clearTimeout(customerInfoPreviewTimer.current);
+    customerInfoPreviewTimer.current = setTimeout(() => setCustomerInfoPreviewOpen(false), 150);
+  };
+  // Guards against a stale `true` leaking into the next interaction this
+  // icon renders for (e.g. switching interactions mid-hover, without ever
+  // moving the pointer far enough away to fire the close timer above).
+  useEffect(() => {
+    setCustomerInfoPreviewOpen(false);
+  }, [activeInteraction?.id]);
 
   // Track window width — still drives `isCompactHeader` below.
   useEffect(() => {
@@ -8330,18 +8449,7 @@ export function AgentNextGenPage({
         // mirrors InteractionNavItem's own auto-select-newest rule, now
         // mirrored up here too since this state is what drives both the
         // card (via currentChannelKey) and the new ChannelToggle bar.
-        // `currentStatus: undefined` — clears whatever status the PREVIOUS
-        // current session was left on (an interaction closed via its own
-        // status dropdown still has `currentStatus: "Closed"` sitting on
-        // it). Without this, a channel opened fresh right after would
-        // immediately inherit that stale "Closed" reading (`getSessionStatus`
-        // reads `currentStatus ?? session.status` for whichever session is
-        // current) — hiding its composer and locking its Session Details
-        // toggle before the agent has said a word on it. `undefined` falls
-        // through to this new session's own built-in default `status`
-        // (e.g. "Resolved" for `TRANSCRIPT_SESSIONS_VOICE`'s canned demo
-        // session), same as any other freshly-opened channel.
-        return { ...interaction, channels, currentChannelId: newChannel.id, currentStatus: undefined };
+        return { ...interaction, channels, currentChannelId: newChannel.id };
       });
     });
     setActiveInteractionId(selection.contact.id);
@@ -8349,13 +8457,10 @@ export function AgentNextGenPage({
     // open/closed state at all — starting a second interaction with a
     // customer who already has one open leaves the panel exactly as the
     // agent last left it for THAT card, rather than re-applying anything
-    // here. A brand new one always starts CLOSED (not
-    // `lastSidePanelOpenChoice`, the agent's remembered choice from before)
-    // — per explicit request, every fresh interaction gets the same
-    // "closed by default" treatment regardless of whatever was open/pinned
-    // on a previous one; the agent opens it with the header toggle icon
-    // (always visible now) same as any other interaction.
-    if (isNewInteraction) setSidePanelOpen(false);
+    // here. A new one opens/stays closed per `lastSidePanelOpenChoice` —
+    // the agent's own last explicit choice (not hardcoded open) — per
+    // explicit follow-up request.
+    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
   };
 
   // App-local only (per "changes to components should only happen locally
@@ -8430,15 +8535,10 @@ export function AgentNextGenPage({
     setInteractions((prev) => {
       const idx = prev.findIndex((i) => i.id === id);
       if (idx === -1) return [...prev, { id, recordId: generateCaseId(), channels: [newChannel], currentChannelId: newChannel.id, startedFresh: true }];
-      // `currentStatus: undefined` — see `handleStartCall`'s own merge
-      // branch for why: without this, redialing a number whose card was
-      // last left "Closed" would restart it already reading as closed.
-      return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, currentStatus: undefined } : interaction));
+      return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id } : interaction));
     });
     setActiveInteractionId(id);
-    // See `handleStartCall`'s own doc comment on its identical line — a
-    // brand new card always starts closed.
-    if (isNewInteraction) setSidePanelOpen(false);
+    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
   };
 
   /* "Redial" from the home tab's Contact History card — same merge-by-id
@@ -8483,15 +8583,10 @@ export function AgentNextGenPage({
     setInteractions((prev) => {
       const idx = prev.findIndex((i) => i.id === id);
       if (idx === -1) return [...prev, { id, customerName: entry.name, recordId: entry.caseId, channels: [newChannel], currentChannelId: newChannel.id, startedFresh: true }];
-      // `currentStatus: undefined` — see `handleStartCall`'s own merge
-      // branch for why: without this, redialing a contact whose card was
-      // last left "Closed" would restart it already reading as closed.
-      return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, currentStatus: undefined } : interaction));
+      return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id } : interaction));
     });
     setActiveInteractionId(id);
-    // See `handleStartCall`'s own doc comment on its identical line — a
-    // brand new card always starts closed.
-    if (isNewInteraction) setSidePanelOpen(false);
+    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
   };
 
   /** Fired by clicking a Contact History row itself (`ContactHistoryCard`'s
@@ -10202,8 +10297,8 @@ export function AgentNextGenPage({
                   // Always shown, even in the narrow-container overlay mode
                   // — per explicit request, an agent who's opened it as a
                   // floating overlay still needs a way to close it again
-                  // from inside the panel itself, not just the header
-                  // toggle icon (which stays visible while open too now).
+                  // from inside the panel itself, not just the (now-hidden
+                  // while open) header toggle icon.
                   onClose={handleSidePanelClose}
                   fullScreen={sidePanelFullScreen}
                   // Hidden below 350px of container width — see
@@ -10211,10 +10306,8 @@ export function AgentNextGenPage({
                   onToggleFullScreen={
                     isSidePanelAtMinimalThreshold ? undefined : () => setSidePanelFullScreen((v) => !v)
                   }
-                  // Hidden while full-screen (dock/undock isn't meaningful
-                  // for a panel intentionally overlaying edge to edge) —
-                  // see `onTogglePinned`'s own doc comment.
-                  onTogglePinned={sidePanelFullScreen ? undefined : handleToggleSidePanelPinned}
+                  onMouseEnter={onSidePanelHoverStart}
+                  onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
                   customerName={activeInteraction.customerName}
                   recordId={activeInteraction.recordId}
                   channels={activeInteraction.channels}
@@ -10332,40 +10425,105 @@ export function AgentNextGenPage({
                     // `border-b` below, without needing to sacrifice the
                     // icon button/divider's normal centered look to get it.
                     <div className="flex items-center gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6 pt-2">
-                      {/* Always visible now, open or closed — per explicit
-                          request this is a persistent toggle, not a control
-                          that disappears once the panel it opens is showing.
-                          "Open" is reflected the same way every other shared
-                          panel's own header icon shows its active state
-                          (`PANEL_BUTTON_SELECTED_CLASS`, defined above)
-                          rather than by hiding itself; `aria-pressed` mirrors
-                          that state for assistive tech. No hover-preview
-                          `Popover` anymore (that whole mechanism — and
-                          `CustomerInfoHoverPreview` — was scrapped per
-                          explicit follow-up request in favor of the real
-                          panel itself opening as a floating popover, see
-                          `CustomerInformationSidePanel`'s `onTogglePinned`
-                          doc comment): clicking this now just opens/closes
-                          that real panel directly, same as it always
-                          eventually did once clicked. Its own divider goes
-                          with it — a lone divider with nothing to its left
-                          would just look like a stray line at the start of
-                          the row. */}
-                      {showPanelToggle && (
+                      {/* Only shown while the panel itself is closed — once
+                          it's open, this same icon would just sit there
+                          doing nothing useful next to a panel that's
+                          already visible (the panel's own close button, and
+                          the "Customer History" tab, are the ways to act on
+                          it once open); per explicit request. Its own
+                          divider goes with it — a lone divider with nothing
+                          to its left would just look like a stray line at
+                          the start of the row. */}
+                      {showPanelToggle && !sidePanelOpen && (
                         <>
-                          <Button
-                            variant="outline"
-                            size="icon-md"
-                            className={cn("shrink-0", sidePanelOpen && PANEL_BUTTON_SELECTED_CLASS)}
-                            onClick={handleSidePanelIconToggle}
-                            aria-pressed={sidePanelOpen}
-                            aria-label={
-                              sidePanelToggleLabel ??
-                              (sidePanelOpen ? "Close Customer Information" : "Open Customer Information")
+                          {/* Plain outlined icon `Button`, not a
+                              `PanelPinButton` — per explicit request, this
+                              needs a bordered "outline" look with no
+                              persistent active/selected background at all
+                              (`PanelPinButton` has no outline variant, and
+                              always paints a selected bg once `pinned` and a
+                              custom `icon` are both set — see its own doc
+                              comment). Plain `onClick`, unchanged.
+
+                              Wrapped in a `Popover` showing
+                              `CustomerInfoHoverPreview` on hover (per
+                              explicit request) — replaces the plain
+                              text `Tooltip` `Button` auto-wraps a `title`
+                              prop in (see button.tsx) with a richer
+                              preview of the very panel this icon opens,
+                              since hover-to-preview only matters while
+                              the panel might already be showing... except
+                              it's exactly the opposite here: this button
+                              only renders while the panel is CLOSED (see
+                              the gate above), which is precisely when a
+                              quick glance at the customer without a full
+                              click is most useful. `title` is dropped in
+                              favor of a plain `aria-label` so `Button`
+                              doesn't also auto-wrap its own competing
+                              `Tooltip` around the same trigger (its
+                              `isIconVariant && title` branch — button.tsx).
+                              `onFocus`/`onBlur` mirror the mouse handlers
+                              for keyboard parity, same as every other
+                              hover-preview in this app.
+
+                              `CustomerInfoHoverPreview` already supplies its
+                              own complete chrome (border/background/shadow/
+                              rounded corners, sized to fit — see its own
+                              doc comment), so this `Popover`'s own default
+                              framing is stripped down to a bare, invisible
+                              frame around it — same "let the real content
+                              supply its own chrome" convention
+                              `InteractionNavItem`'s compact-rail hover
+                              preview uses for the exact same reason
+                              (interaction-nav-item.tsx).
+
+                              `onOpenAutoFocus`/`onCloseAutoFocus` both
+                              guarded — hover-opened content shouldn't steal
+                              focus the instant the pointer happens to land
+                              here (`onOpenAutoFocus`), and Radix's default
+                              on close is to return focus to the trigger
+                              (this `Button`), which — left unguarded — fires
+                              its own `onFocus` right back (wired above for
+                              keyboard parity) and reopens the very popover
+                              that just closed, an infinite open/close flash
+                              confirmed live. Same fix already established
+                              for `InteractionNavItem`'s own hover-preview
+                              Popover (interaction-nav-item.tsx) for the
+                              exact same reason. */}
+                          <Popover
+                            open={customerInfoPreviewOpen}
+                            onOpenChange={setCustomerInfoPreviewOpen}
+                            placement="bottom"
+                            align="start"
+                            showArrow={false}
+                            bodyPadding={false}
+                            className="border-0 bg-transparent p-0 shadow-none"
+                            onOpenAutoFocus={(e) => e.preventDefault()}
+                            onCloseAutoFocus={(e) => e.preventDefault()}
+                            content={
+                              <CustomerInfoHoverPreview
+                                customerName={activeInteraction.customerName}
+                                recordId={activeInteraction.recordId}
+                                channels={activeInteraction.channels}
+                                onMouseEnter={openCustomerInfoPreview}
+                                onMouseLeave={scheduleCloseCustomerInfoPreview}
+                              />
                             }
                           >
-                            <User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-                          </Button>
+                            <Button
+                              variant="outline"
+                              size="icon-md"
+                              className="shrink-0"
+                              onClick={handleSidePanelIconToggle}
+                              onMouseEnter={openCustomerInfoPreview}
+                              onMouseLeave={scheduleCloseCustomerInfoPreview}
+                              onFocus={openCustomerInfoPreview}
+                              onBlur={scheduleCloseCustomerInfoPreview}
+                              aria-label={sidePanelToggleLabel ?? "Open Customer Information"}
+                            >
+                              <User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                            </Button>
+                          </Popover>
                           <div className="h-8 w-px bg-lyra-border-subtle shrink-0" aria-hidden="true" />
                         </>
                       )}
@@ -10499,28 +10657,6 @@ export function AgentNextGenPage({
                             </InlineNotification>
                           </div>
                         )}
-                        {/* Distinct from the notice above — this is the
-                            CURRENT session's own status (`currentStatus`,
-                            same field `TranscriptSessionSeparator`'s
-                            `isClosed` check reads for the identical session
-                            elsewhere) reaching "Closed" while the
-                            interaction itself is still a live, non-reopened
-                            one. An agent can close the current session via
-                            its status dropdown without ever going through
-                            `handleReopenContactHistoryEntry`, so
-                            `activeInteraction.closed` alone doesn't catch
-                            this case — checked separately here rather than
-                            folded into that flag, since the two really are
-                            different things (one's "this whole interaction
-                            is historical/read-only", the other's "this one
-                            session just got closed"). */}
-                        {!activeInteraction.closed && activeInteraction.currentStatus === "Closed" && (
-                          <div className="shrink-0 px-6 pt-4">
-                            <InlineNotification variant="info">
-                              This session is closed.
-                            </InlineNotification>
-                          </div>
-                        )}
                         <InteractionTranscript
                           channelType={activeChannelType}
                           customerName={activeInteraction.customerName}
@@ -10548,7 +10684,7 @@ export function AgentNextGenPage({
                           onOutcomeSave={handleOutcomeSave}
                           onOutcomeCancel={handleOutcomeCancel}
                         />
-                        {!activeInteraction.closed && activeInteraction.currentStatus !== "Closed" && (
+                        {!activeInteraction.closed && (
                           <InteractionComposer onSend={(text) => handleSendMessage(activeInteraction.id, text)} />
                         )}
                       </div>
