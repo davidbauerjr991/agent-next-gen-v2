@@ -625,7 +625,7 @@ function formatWaitTime(totalSeconds: number): string {
  *  channel is genuinely awaiting a reply it already needs attention, so it
  *  starts at amber immediately rather than sitting on the plain blue/gray
  *  look until some warm-up period has passed. */
-const AWAITING_CRITICAL_SECONDS = 180;
+const AWAITING_CRITICAL_SECONDS = 60;
 
 /** Maps a channel's own "how long has it been awaiting a reply" duration
  *  (seconds since `lastCustomerMessageTick`, NOT since the channel opened —
