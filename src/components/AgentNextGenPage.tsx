@@ -5282,6 +5282,15 @@ function buildLatestNote(customerName: string | undefined, recordId: string): Cu
 // looking up a specific tab's index.
 const CUSTOMER_PANEL_TABS = ["Overview", "Detail", "Directory", "Tasks", "Notes", "Accounts", "Tickets"];
 
+// Temporarily hides the Overview tab's "Ask about this customer..."
+// `AIInput` footer during an active interaction, per explicit request —
+// flip back to `true` to restore it. Gates both the real panel's own
+// `footer` (`CustomerInformationSidePanel`) and the hover-preview's
+// content-parity copy of the same footer (`CustomerInfoHoverPreview`),
+// so the two stay in sync rather than one showing an input the other
+// doesn't.
+const SHOW_CUSTOMER_INFO_AI_INPUT = false;
+
 /** Shared neutral bordered-container treatment for every collapsible
  *  `Accordion` in the Customer Information panel (Overview tab's "Customer
  *  Overview"/"Latest Interaction", Detail tab's "General"/"Address",
@@ -6855,8 +6864,9 @@ function CustomerInfoHoverPreview({
       </div>
       {/* Same Overview-only `AIInput` footer as the real panel (see its own
           `footer` prop above) — kept here too for exact content parity,
-          per this component's own doc comment. */}
-      {activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") && (
+          per this component's own doc comment. `SHOW_CUSTOMER_INFO_AI_INPUT`
+          — see that flag's own doc comment — temporarily hides it here too. */}
+      {SHOW_CUSTOMER_INFO_AI_INPUT && activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") && (
         <PanelFooter className="relative shrink-0 justify-start">
           <div
             className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-transparent to-lyra-bg-surface-container-subtle"
@@ -7076,8 +7086,10 @@ function CustomerInformationSidePanel({
       // renders as a `shrink-0` sibling AFTER `PanelContent` (see
       // side-panel.tsx), so it's already outside the scroll region and
       // naturally stays fixed to the bottom without any extra CSS.
+      // Temporarily hidden — see `SHOW_CUSTOMER_INFO_AI_INPUT`'s own doc
+      // comment.
       footer={
-        activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") ? (
+        SHOW_CUSTOMER_INFO_AI_INPUT && activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") ? (
           <PanelFooter className="relative justify-start">
             {/* Soft fade instead of a hard border-top — same treatment as
                 `InteractionComposer`'s transcript-to-composer transition
