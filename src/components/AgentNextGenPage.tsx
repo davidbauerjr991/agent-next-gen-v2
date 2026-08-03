@@ -550,13 +550,28 @@ interface ActiveInteraction {
   /**
    * The status ("Open"/"Pending"/"Escalated"/"Resolved"/"Closed") last
    * explicitly assigned via the session-status popover
-   * (`TranscriptSessionSeparator`) on THIS interaction's current/most-recent
-   * session — i.e. whichever session is last in `InteractionTranscript`'s
-   * own `sessionsToRender` (the freshly-launched synthetic session, the
-   * shared mock log's second/follow-up session, or Voice/Email's single
-   * session). Undefined until the agent actually changes it, at which point
-   * that session's own hardcoded default status (`TranscriptSession.status`)
-   * still applies.
+   * (`TranscriptSessionSeparator`) or the LeftNav `ChannelRow`'s own
+   * Outcome button (same underlying value, see `ChannelOutcomeConfig`'s
+   * `resolution`) — keyed by `TrackedChannel.id`, ONE entry per open
+   * channel, not a single interaction-wide value. This used to be a lone
+   * `currentStatus?: string` applying to whichever channel happened to be
+   * "current" — a real, confirmed bug: closing one channel (say, a chat
+   * thread) set that one shared field, which then leaked onto every OTHER
+   * channel on the same card the moment the agent switched tabs to it (its
+   * own separate voice/email/SMS conversation would suddenly read
+   * "Closed" too, and the composer would stay hidden for it), since
+   * nothing distinguished which channel a status change actually applied
+   * to. Per-channel keys fix that: each channel's own entry is independent,
+   * so closing one never touches any sibling channel's own status.
+   *
+   * Undefined for a channel until the agent actually changes its status,
+   * at which point that channel's own current session's hardcoded default
+   * status (`TranscriptSession.status`) still applies. A channel that's
+   * restarted at the same id (e.g. redialing the same number, reusing
+   * `TrackedChannel.id`) has its entry explicitly cleared first (see
+   * `withoutChannelStatus`) rather than silently inheriting whatever it
+   * was left at before — a reopened channel should read as freshly open,
+   * not still "Closed" under its own reused id.
    *
    * Kept here, on `ActiveInteraction` itself, for the same reason
    * `liveMessages`/`closed` are — `InteractionTranscript` isn't remounted
@@ -575,11 +590,11 @@ interface ActiveInteraction {
    * last assigned, not always "Resolved". Written back onto a freshly
    * reopened interaction by `handleReopenContactHistoryEntry` (from
    * `entry.statusLabel`), so reopening a dismissed (or hand-authored)
-   * Contact History row picks the current session back up in that same
-   * status instead of resetting to whatever hardcoded default status
-   * `TRANSCRIPT_SESSIONS`/`_VOICE`/`_EMAIL` otherwise assigns it.
+   * Contact History row picks its (single, freshly-built) channel back up
+   * in that same status instead of resetting to whatever hardcoded default
+   * status `TRANSCRIPT_SESSIONS`/`_VOICE`/`_EMAIL` otherwise assigns it.
    */
-  currentStatus?: string;
+  channelStatuses?: Record<string, string>;
 }
 
 /** Fallback case id for interactions with no real customer/agent/team/skill
@@ -1641,7 +1656,7 @@ type ContactHistoryStatusVariant = "critical" | "info" | "warning" | "success" |
  *  Open/Pending/Escalated/Resolved/Closed) onto this card's own
  *  `ContactHistoryStatusVariant`, so `buildDismissedContactHistoryEntry`
  *  can log whatever status was actually last assigned to a dismissed
- *  interaction (`ActiveInteraction.currentStatus`) with a matching dot
+ *  interaction's primary channel (`ActiveInteraction.channelStatuses`) with a matching dot
  *  color, instead of a hardcoded "Resolved"/"success" regardless. "Closed"
  *  maps to "neutral" (gray) rather than reusing "critical" — a closed
  *  contact isn't a negative outcome the way "Escalated" is, and reusing red
@@ -1833,21 +1848,22 @@ function buildContactHistoryFromCustomers(
  *  nothing to log.
  *
  *  This row's status reflects whatever was actually last assigned to this
- *  interaction, NOT a hardcoded default: `statusLabel: interaction.
- *  currentStatus ?? "Resolved"` (falls back to "Resolved" — the same
- *  neutral default every hand-authored `CONTACT_HISTORY` row's own "closed
- *  the loop" case uses — only if the agent never actually touched the
- *  status popover this visit), `statusVariant` resolved from that label via
+ *  interaction's primary channel, NOT a hardcoded default: `statusLabel:
+ *  interaction.channelStatuses?.[primaryChannel?.id] ?? "Resolved"` (falls
+ *  back to "Resolved" — the same neutral default every hand-authored
+ *  `CONTACT_HISTORY` row's own "closed the loop" case uses — only if the
+ *  agent never actually touched the status popover this visit for that
+ *  channel), `statusVariant` resolved from that label via
  *  `SESSION_STATUS_TO_CONTACT_HISTORY_VARIANT`. Per explicit request: an
  *  assignment that was left at, say, "Escalated" or "Pending" when
  *  dismissed should log — and later reopen — AT that status, not silently
  *  reset to "Resolved". This is still a different thing from the OLDER
- *  "force `closed: true`" mistake documented below: `currentStatus` can
- *  legitimately BE "Closed" (the agent closed the contact themselves before
- *  dismissing), but that's what they actually chose, not something this
- *  function invents on their behalf — `closed`/`ActiveInteraction.closed`
- *  (the read-only-reopen flag) is still left unset entirely regardless of
- *  what `currentStatus` says, so reopening this row later
+ *  "force `closed: true`" mistake documented below: the primary channel's
+ *  status can legitimately BE "Closed" (the agent closed the contact
+ *  themselves before dismissing), but that's what they actually chose, not
+ *  something this function invents on their behalf — `closed`/
+ *  `ActiveInteraction.closed` (the read-only-reopen flag) is still left
+ *  unset entirely regardless of what that status says, so reopening this row later
  *  (`handleReopenContactHistoryEntry`) behaves like any other normal,
  *  reply-able row (able to change status again, composer available) — no
  *  forced read-only banner, even for a "Closed"-status row. An earlier pass
@@ -1861,12 +1877,31 @@ function buildContactHistoryFromCustomers(
  *  started from an agent/team/skill/quick-dial/redial contact has no real
  *  customer record behind it, and `ContactHistoryEntry.customerId`'s own doc
  *  comment is specific about what this field means. */
+/** Drops a single channel id's entry out of a `channelStatuses` map, leaving
+ *  every other channel's own status untouched — used by `handleStartCall`
+ *  when a channel is restarted at the SAME address (so it reuses
+ *  `TrackedChannel.id`, per that field's own doc comment): without this, a
+ *  channel that was previously set to "Closed" and then redialed at the same
+ *  number would silently reopen still reading "Closed" under its reused id,
+ *  since nothing would otherwise clear the stale entry. Returns `undefined`
+ *  (rather than an empty object) when the map is empty afterward, matching
+ *  `ActiveInteraction.channelStatuses`'s own optional-when-nothing-set
+ *  convention. */
+function withoutChannelStatus(
+  statuses: Record<string, string> | undefined,
+  channelId: string
+): Record<string, string> | undefined {
+  if (!statuses || !(channelId in statuses)) return statuses;
+  const { [channelId]: _omit, ...rest } = statuses;
+  return Object.keys(rest).length > 0 ? rest : undefined;
+}
+
 function buildDismissedContactHistoryEntry(interaction: ActiveInteraction, clockTick: number): ContactHistoryEntry {
   const channelType = contactHistoryChannelType(interaction.channels.map((c) => c.type));
   const primaryChannel = interaction.channels.find((c) => c.type === channelType) ?? interaction.channels[0];
   const earliestStart =
     interaction.channels.length > 0 ? Math.min(...interaction.channels.map((c) => c.startTick)) : clockTick;
-  const statusLabel = interaction.currentStatus ?? "Resolved";
+  const statusLabel = interaction.channelStatuses?.[primaryChannel?.id ?? ""] ?? "Resolved";
   return {
     id: `dismissed-${interaction.id}-${Date.now()}`,
     name: interaction.customerName ?? "Customer",
@@ -3249,8 +3284,9 @@ const TRANSCRIPT_SESSION_STATUS_OPTIONS: { label: string; dotColor: string }[] =
  * `TRANSCRIPT_SESSION_STATUS_OPTIONS` directly (wired below, in `channels`)
  * so it shows the exact same Open/Pending/Escalated/Resolved/Closed
  * colored-dot rows as the session-status pill's own dropdown, and both
- * read/write the same `interaction.currentStatus` — changing status in
- * either place changes it in both, per explicit request. */
+ * read/write the same `interaction.channelStatuses` entry for that specific
+ * channel — changing status in either place changes it in both, per
+ * explicit request. */
 const OUTCOME_TAG_OPTIONS: TagPickerOption[] = [
   { label: "Technical", variant: "info" },
   { label: "Account", variant: "purple" },
@@ -4376,24 +4412,25 @@ function InteractionTranscript({
    */
   liveMessages: TranscriptMessage[];
   /**
-   * The status last explicitly assigned (via the status popover) to this
-   * interaction's current/most-recent session — `ActiveInteraction.
-   * currentStatus`, passed straight through. Only ever applies to the LAST
-   * entry in `sessionsToRender` below (the "current" session — the
-   * freshly-launched synthetic one, the shared mock log's follow-up
-   * session, or Voice/Email's single session); every earlier/historical
-   * session still uses its own local `sessionStatusOverrides` state. See
-   * `ActiveInteraction.currentStatus`'s own doc comment for why this one
-   * piece of status specifically has to live up on `ActiveInteraction`
-   * rather than purely in this component's own state.
+   * The status last explicitly assigned (via the status popover) to the
+   * ACTIVE channel's current/most-recent session — the caller resolves this
+   * from `ActiveInteraction.channelStatuses[activeChannel.id]` (see that
+   * field's own doc comment for why status has to be tracked per-channel,
+   * up on `ActiveInteraction`, rather than purely in this component's own
+   * state) and passes the single resolved value straight through. Only ever
+   * applies to the LAST entry in `sessionsToRender` below (the "current"
+   * session — the freshly-launched synthetic one, the shared mock log's
+   * follow-up session, or Voice/Email's single session); every earlier/
+   * historical session still uses its own local `sessionStatusOverrides`
+   * state.
    */
   currentStatus?: string;
   /** Fires whenever the agent changes the CURRENT session's status via the
-   *  popover (a plain pick, or confirming "Close") — writes back onto
-   *  `ActiveInteraction.currentStatus` (`handleInteractionStatusChange`,
-   *  main component). Never fires for a status change on any earlier/
-   *  historical session — those stay local to this component (see
-   *  `currentStatus` above). */
+   *  popover (a plain pick, or confirming "Close") — the caller writes this
+   *  back onto the active channel's own entry in `ActiveInteraction.
+   *  channelStatuses` (`handleInteractionStatusChange`, main component).
+   *  Never fires for a status change on any earlier/historical session —
+   *  those stay local to this component (see `currentStatus` above). */
   onCurrentStatusChange: (status: string) => void;
   /**
    * Real Consult/Transfer + Outcome buttons on the CURRENT session's own
@@ -4807,8 +4844,8 @@ function InteractionTranscript({
                   // this prop's own doc comment) — reuses `currentStatus`/
                   // `onCurrentStatusChange` (this component's own props)
                   // for the "Status" field, same as the LeftNav's
-                  // `ChannelRow` Outcome button does for
-                  // `interaction.currentStatus`/`handleInteractionStatusChange`.
+                  // `ChannelRow` Outcome button does for this same channel's
+                  // own `interaction.channelStatuses` entry/`handleInteractionStatusChange`.
                   outcome={
                     session.id === lastSessionId && outcomeOpen !== undefined
                       ? {
@@ -7882,10 +7919,11 @@ export function AgentNextGenPage({
   // isn't unique across DIFFERENT interactions, only within one card.
   // Note: no `resolution` field here — unlike Tags/Disposition/Summary
   // (which really are per-draft scratch state with no backend to persist
-  // to), Resolution now reads/writes `interaction.currentStatus` directly
-  // (see `channels` below), the same already-lifted piece of state the
-  // session-status pill itself reads/writes via `handleInteractionStatusChange`
-  // — so there's nothing left for a local draft to own for that field.
+  // to), Resolution now reads/writes that specific channel's own entry in
+  // `interaction.channelStatuses` directly (see `channels` below), the same
+  // already-lifted piece of state the session-status pill itself reads/
+  // writes via `handleInteractionStatusChange` — so there's nothing left
+  // for a local draft to own for that field.
   const [outcomeDraftKey, setOutcomeDraftKey] = useState<string | null>(null);
   // Which of the two triggers actually opened the popover currently named by
   // `outcomeDraftKey` — the LeftNav `ChannelRow` Outcome button and the
@@ -8136,6 +8174,14 @@ export function AgentNextGenPage({
   const activeChannelOutcomeKey = activeInteraction
     ? `${activeInteraction.id}:${activeChannel?.id ?? activeChannel?.type ?? "channel"}`
     : undefined;
+  // This active channel's own status (see `ActiveInteraction.channelStatuses`'s
+  // doc comment for why status has to be tracked per-channel rather than as
+  // one flat interaction-wide value) — undefined until the agent actually
+  // assigns one for THIS channel specifically. Drives both the transcript's
+  // status pill/Outcome "Resolution" field and whether the composer shows
+  // (hidden once this specific channel reads "Closed" — see the render call
+  // site below) without touching any sibling channel's own status.
+  const activeChannelStatus = activeChannel ? activeInteraction?.channelStatuses?.[activeChannel.id] : undefined;
   // Shared clock powering every open channel's live "MM:SS since it
   // started" elapsed display — independent of `elapsedSeconds` below, which
   // is the agent's own status timer and resets on status change.
@@ -8829,7 +8875,18 @@ export function AgentNextGenPage({
         // mirrors InteractionNavItem's own auto-select-newest rule, now
         // mirrored up here too since this state is what drives both the
         // card (via currentChannelKey) and the new ChannelToggle bar.
-        return { ...interaction, channels, currentChannelId: newChannel.id };
+        return {
+          ...interaction,
+          channels,
+          currentChannelId: newChannel.id,
+          // Only matters when `chIdx !== -1` (same-address restart, reused
+          // `newChannel.id`) — clears that one channel's possibly-stale
+          // "Closed" entry so a redialed/reopened channel reads as freshly
+          // open again, without disturbing any sibling channel's own
+          // status. A genuinely new channel (`chIdx === -1`) has no entry
+          // to clear in the first place, so this is a no-op there.
+          channelStatuses: withoutChannelStatus(interaction.channelStatuses, newChannel.id),
+        };
       });
     });
     setActiveInteractionId(selection.contact.id);
@@ -8915,7 +8972,14 @@ export function AgentNextGenPage({
     setInteractions((prev) => {
       const idx = prev.findIndex((i) => i.id === id);
       if (idx === -1) return [...prev, { id, recordId: generateCaseId(), channels: [newChannel], currentChannelId: newChannel.id, startedFresh: true }];
-      return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id } : interaction));
+      // `channels: [newChannel]` wholesale-replaces every previous channel
+      // with this one fresh "voice" channel, so `channelStatuses` is reset
+      // entirely too (rather than selectively cleared like
+      // `handleStartCall`'s reused-id case) — no other channel survives
+      // this merge for a stale entry to belong to.
+      return prev.map((interaction, i) =>
+        i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, channelStatuses: undefined } : interaction
+      );
     });
     setActiveInteractionId(id);
     if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
@@ -8963,7 +9027,12 @@ export function AgentNextGenPage({
     setInteractions((prev) => {
       const idx = prev.findIndex((i) => i.id === id);
       if (idx === -1) return [...prev, { id, customerName: entry.name, recordId: entry.caseId, channels: [newChannel], currentChannelId: newChannel.id, startedFresh: true }];
-      return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id } : interaction));
+      // Same reasoning as `handleQuickDial` above — `channels: [newChannel]`
+      // wholesale-replaces every previous channel, so `channelStatuses`
+      // resets entirely rather than being selectively cleared.
+      return prev.map((interaction, i) =>
+        i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, channelStatuses: undefined } : interaction
+      );
     });
     setActiveInteractionId(id);
     if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
@@ -8991,8 +9060,9 @@ export function AgentNextGenPage({
    *  a normal, reply-able assignment.
    *
    *  `entry.statusLabel` is carried straight onto `ActiveInteraction.
-   *  currentStatus` too — per explicit request, reopening a row should pick
-   *  its current session back up AT the status it was last logged with
+   *  channelStatuses` (keyed by the freshly-built channel's own id) too —
+   *  per explicit request, reopening a row should pick its current session
+   *  back up AT the status it was last logged with
    *  (whatever `buildDismissedContactHistoryEntry` captured, or whatever a
    *  hand-authored `CONTACT_HISTORY`/`EXTENDED_CONTACT_HISTORY` row already
    *  says), not reset to `TRANSCRIPT_SESSIONS`/`_VOICE`/`_EMAIL`'s own
@@ -9022,7 +9092,7 @@ export function AgentNextGenPage({
             channels: [newChannel],
             currentChannelId: newChannel.id,
             closed: entry.closed,
-            currentStatus: entry.statusLabel,
+            channelStatuses: { [newChannel.id]: entry.statusLabel },
           },
         ];
       }
@@ -9033,7 +9103,7 @@ export function AgentNextGenPage({
               channels: [newChannel],
               currentChannelId: newChannel.id,
               closed: entry.closed,
-              currentStatus: entry.statusLabel,
+              channelStatuses: { [newChannel.id]: entry.statusLabel },
             }
           : interaction
       );
@@ -9223,19 +9293,24 @@ export function AgentNextGenPage({
     }, 2500);
   };
 
-  /** Fired by `InteractionTranscript`'s `onCurrentStatusChange` — the agent
-   *  changed the CURRENT session's status via the status popover (a plain
-   *  pick, or confirming "Close"). Writes it onto `ActiveInteraction.
-   *  currentStatus` (see that field's own doc comment for why it has to
-   *  live here rather than purely in `InteractionTranscript`'s own state) —
-   *  read back by `buildDismissedContactHistoryEntry` when this interaction
-   *  is later dismissed, so the logged Contact History row reflects
-   *  whatever status was actually last assigned instead of always
-   *  "Resolved". */
-  const handleInteractionStatusChange = (interactionId: string, status: string) => {
+  /** Fired by `InteractionTranscript`'s `onCurrentStatusChange` (for the
+   *  active channel) and the LeftNav `ChannelRow` Outcome popover's own
+   *  Resolution field (for any channel) — the agent changed a specific
+   *  channel's status via the status popover (a plain pick, or confirming
+   *  "Close"). Writes it onto that one channel's own entry in
+   *  `ActiveInteraction.channelStatuses` (see that field's own doc comment
+   *  for why status has to be tracked per-channel, and why it has to live
+   *  here rather than purely in `InteractionTranscript`'s own state) —
+   *  leaving every sibling channel's own status untouched. Read back by
+   *  `buildDismissedContactHistoryEntry` when this interaction is later
+   *  dismissed, so the logged Contact History row reflects whatever status
+   *  was actually last assigned instead of always "Resolved". */
+  const handleInteractionStatusChange = (interactionId: string, channelId: string, status: string) => {
     setInteractions((prev) =>
       prev.map((interaction) =>
-        interaction.id === interactionId ? { ...interaction, currentStatus: status } : interaction
+        interaction.id === interactionId
+          ? { ...interaction, channelStatuses: { ...interaction.channelStatuses, [channelId]: status } }
+          : interaction
       )
     );
   };
@@ -10559,17 +10634,21 @@ export function AgentNextGenPage({
                       onOpenChange: (open: boolean) => handleOutcomeOpenChange(outcomeKey, open, "leftnav"),
                       // Same options list AND same underlying value as the
                       // session-status pill's own dropdown
-                      // (`TranscriptSessionSeparator`, fed by
-                      // `interaction.currentStatus`/`handleInteractionStatusChange`
-                      // — rule #29) — not a separate `outcomeDraft` field
-                      // like Tags/Disposition/Summary, so changing status
-                      // from either surface changes it in both, per explicit
-                      // request. Same `?? "Resolved"` fallback
+                      // (`TranscriptSessionSeparator`, fed by THIS channel's
+                      // own `interaction.channelStatuses[c.id]`/
+                      // `handleInteractionStatusChange` — rule #29) — not a
+                      // separate `outcomeDraft` field like Tags/Disposition/
+                      // Summary, so changing status from either surface
+                      // changes it in both, per explicit request, WITHOUT
+                      // touching any sibling channel's own status (see
+                      // `ActiveInteraction.channelStatuses`'s own doc
+                      // comment). Same `?? "Resolved"` fallback
                       // `buildDismissedContactHistoryEntry` already uses for
                       // this same field.
                       resolutionOptions: TRANSCRIPT_SESSION_STATUS_OPTIONS,
-                      resolution: interaction.currentStatus ?? "Resolved",
-                      onResolutionChange: (value: string) => handleInteractionStatusChange(interaction.id, value),
+                      resolution: interaction.channelStatuses?.[c.id] ?? "Resolved",
+                      onResolutionChange: (value: string) =>
+                        handleInteractionStatusChange(interaction.id, c.id, value),
                       tagOptions: OUTCOME_TAG_OPTIONS,
                       selectedTags: outcomeDraft.tags,
                       onTagsChange: (tags: string[]) => setOutcomeDraft((d) => ({ ...d, tags })),
@@ -11037,6 +11116,21 @@ export function AgentNextGenPage({
                             </InlineNotification>
                           </div>
                         )}
+                        {/* Distinct from the read-only "closed interaction" notice
+                            above — this is for a still-open assignment where just
+                            THIS ONE channel has been set to "Closed" via the status
+                            popover (see `ActiveInteraction.channelStatuses`'s own
+                            doc comment). The agent can still switch to any other
+                            (open, or not-yet-opened) channel on this same card
+                            normally; only this specific channel's own composer
+                            hides, per explicit request. */}
+                        {!activeInteraction.closed && activeChannelStatus === "Closed" && (
+                          <div className="shrink-0 px-6 pt-4">
+                            <InlineNotification variant="info">
+                              This channel is closed. Reopen it to continue the conversation.
+                            </InlineNotification>
+                          </div>
+                        )}
                         <InteractionTranscript
                           channelType={activeChannelType}
                           customerName={activeInteraction.customerName}
@@ -11045,8 +11139,10 @@ export function AgentNextGenPage({
                           skillLabel={activeChannel?.preview}
                           isFreshLaunch={!!activeInteraction.startedFresh}
                           liveMessages={activeInteraction.liveMessages ?? []}
-                          currentStatus={activeInteraction.currentStatus}
-                          onCurrentStatusChange={(status) => handleInteractionStatusChange(activeInteraction.id, status)}
+                          currentStatus={activeChannelStatus}
+                          onCurrentStatusChange={(status) =>
+                            activeChannel && handleInteractionStatusChange(activeInteraction.id, activeChannel.id, status)
+                          }
                           // Same shared `outcomeDraftKey`/`outcomeDraft` state
                           // the LeftNav's own `ChannelRow` Outcome button uses
                           // for this exact channel (`outcomeKey` — same
@@ -11064,7 +11160,7 @@ export function AgentNextGenPage({
                           onOutcomeSave={handleOutcomeSave}
                           onOutcomeCancel={handleOutcomeCancel}
                         />
-                        {!activeInteraction.closed && (
+                        {!activeInteraction.closed && activeChannelStatus !== "Closed" && (
                           <InteractionComposer onSend={(text) => handleSendMessage(activeInteraction.id, text)} />
                         )}
                       </div>
