@@ -8346,19 +8346,16 @@ export function AgentNextGenPage({
     });
     setActiveInteractionId(selection.contact.id);
     // Only a genuinely NEW interaction touches Customer Information's
-    // open/closed/docked state at all — starting a second interaction with
-    // a customer who already has one open leaves the panel exactly as the
+    // open/closed state at all — starting a second interaction with a
+    // customer who already has one open leaves the panel exactly as the
     // agent last left it for THAT card, rather than re-applying anything
-    // here. A brand new one now always starts OPEN as a floating popover
-    // (not docked, and not `lastSidePanelOpenChoice`, the agent's
-    // remembered choice from before) — per explicit request, a fresh
-    // interaction should show Customer Information right away without
-    // pushing the transcript column over; the agent can dock it to the
-    // side via the panel's own dock button if they want it pinned instead.
-    if (isNewInteraction) {
-      setSidePanelOpen(true);
-      setSidePanelPinned(false);
-    }
+    // here. A brand new one always starts CLOSED (not
+    // `lastSidePanelOpenChoice`, the agent's remembered choice from before)
+    // — per explicit request, every fresh interaction gets the same
+    // "closed by default" treatment regardless of whatever was open/pinned
+    // on a previous one; the agent opens it with the header toggle icon
+    // (always visible now) same as any other interaction.
+    if (isNewInteraction) setSidePanelOpen(false);
   };
 
   // App-local only (per "changes to components should only happen locally
@@ -8439,12 +8436,9 @@ export function AgentNextGenPage({
       return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, currentStatus: undefined } : interaction));
     });
     setActiveInteractionId(id);
-    // See `handleStartCall`'s own doc comment on its identical lines — a
-    // brand new card always starts open, as a floating (undocked) popover.
-    if (isNewInteraction) {
-      setSidePanelOpen(true);
-      setSidePanelPinned(false);
-    }
+    // See `handleStartCall`'s own doc comment on its identical line — a
+    // brand new card always starts closed.
+    if (isNewInteraction) setSidePanelOpen(false);
   };
 
   /* "Redial" from the home tab's Contact History card — same merge-by-id
@@ -8495,12 +8489,9 @@ export function AgentNextGenPage({
       return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, currentStatus: undefined } : interaction));
     });
     setActiveInteractionId(id);
-    // See `handleStartCall`'s own doc comment on its identical lines — a
-    // brand new card always starts open, as a floating (undocked) popover.
-    if (isNewInteraction) {
-      setSidePanelOpen(true);
-      setSidePanelPinned(false);
-    }
+    // See `handleStartCall`'s own doc comment on its identical line — a
+    // brand new card always starts closed.
+    if (isNewInteraction) setSidePanelOpen(false);
   };
 
   /** Fired by clicking a Contact History row itself (`ContactHistoryCard`'s
