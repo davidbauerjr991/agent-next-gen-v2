@@ -5265,9 +5265,20 @@ function InteractionComposer({ onSend }: { onSend: (text: string) => void }) {
         className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-transparent to-lyra-bg-surface-base"
         aria-hidden="true"
       />
-      <div className="relative w-full max-w-[1200px] mx-auto">
+      <div className="w-full max-w-[1200px] mx-auto">
         {quickReplyOpen && (
-          <div ref={quickReplyContainerRef} className="absolute inset-x-0 bottom-full z-20 mb-2">
+          // Normal flow, NOT `absolute` — this used to float over the
+          // transcript above (a sibling `flex-1 overflow-y-auto` box, not
+          // a descendant this composer can resize directly), which
+          // visually buried the last few messages behind an opaque panel
+          // the agent couldn't scroll past. Sitting in-flow instead grows
+          // this composer's own (`shrink-0`) height, which — same flexbox
+          // math that already keeps the composer pinned to the bottom at
+          // its natural size — shrinks the transcript's available height
+          // to make room rather than covering any of it, so its own
+          // scrolling keeps working exactly as before, just over a
+          // shorter viewport while this is open.
+          <div ref={quickReplyContainerRef} className="mb-2">
             {quickReplyConfiguring ? (
               <QuickReplyVariableForm
                 title={quickReplyConfiguring.title}
