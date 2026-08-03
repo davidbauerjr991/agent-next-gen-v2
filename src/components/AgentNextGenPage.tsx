@@ -164,6 +164,7 @@ import {
   Plus,
   Trash2,
   RefreshCw,
+  Timer,
   type LucideIcon,
 } from "lucide-react";
 
@@ -432,6 +433,19 @@ interface TrackedChannel {
    *  plug in without re-introducing the "every non-voice channel is
    *  permanently red" bug this replaced. */
   awaitingResponse?: boolean;
+  /** Tick (same counter as `clockTick`/`startTick` below — an incrementing
+   *  seconds count, not a wall-clock epoch) at which the customer's most
+   *  recent message actually landed — set by `handleSendMessage`'s
+   *  simulated reply, the one place in this demo that ever flips
+   *  `awaitingResponse` on. Drives the "how long has this channel actually
+   *  been awaiting" display (time since the customer last wrote) as
+   *  distinct from `startTick`'s "time since this channel was opened" —
+   *  those read the same the first time a channel opens, but diverge for
+   *  any conversation that's had more than one exchange, which is exactly
+   *  the case a real digital-SLA timer needs to measure correctly. Falls
+   *  back to `startTick` wherever read (a channel that's never yet had a
+   *  customer message has nothing better to measure from). */
+  lastCustomerMessageTick?: number;
   /** Total message count for this channel's conversation, shown only on this
    *  channel's `ChannelToggle` tooltip (see the `activeInteraction` block
    *  below), never on the toggle face itself. There's no real message store in
@@ -604,6 +618,25 @@ function formatWaitTime(totalSeconds: number): string {
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
 }
 
+/** Wait threshold (seconds) past which an awaiting channel escalates from
+ *  amber ("warning") to red ("critical") — see `getAwaitingSeverity` below.
+ *  Placeholder value; tune to whatever the real digital-channel SLA calls
+ *  for. There's no separate "not urgent yet" tier below this: the moment a
+ *  channel is genuinely awaiting a reply it already needs attention, so it
+ *  starts at amber immediately rather than sitting on the plain blue/gray
+ *  look until some warm-up period has passed. */
+const AWAITING_CRITICAL_SECONDS = 180;
+
+/** Maps a channel's own "how long has it been awaiting a reply" duration
+ *  (seconds since `lastCustomerMessageTick`, NOT since the channel opened —
+ *  see that field's own doc comment) to the severity tier
+ *  `InteractionNavItem`/`ChannelRow` (lyra-ui) render. Only ever called for
+ *  a channel that IS awaiting — there's no "none" tier here, that's
+ *  represented by `awaitingSeverity` being omitted entirely. */
+function getAwaitingSeverity(waitSeconds: number): "warning" | "critical" {
+  return waitSeconds >= AWAITING_CRITICAL_SECONDS ? "critical" : "warning";
+}
+
 /* ── Left nav items ──
    Built from whether an interaction is currently active (see
    `activeInteraction` below) rather than a static array, so "Home" (the
@@ -650,20 +683,66 @@ function buildNavItems(
    grained events (a new message, a status change, etc.), so "most recently
    added a channel" is the closest real proxy available for "most recently
    updated." Both orders sort newest-first (descending), the conventional
-   default for either reading. */
-type AssignmentSortValue = "lastUpdated" | "startDate";
+   default for either reading.
+
+   "Awaiting Longest" is the third option — the actual response-urgency
+   queue: ranks by the OLDEST `lastCustomerMessageTick` among each card's
+   awaiting channels (the smallest tick = the longest anyone's been
+   waiting), ascending, so the single longest-waiting card sorts first.
+   Cards with nothing currently awaiting sort to `Infinity` — they sink to
+   the very bottom regardless of how "Last Updated"/"Start Date" would have
+   placed them, since this view's whole point is surfacing what needs a
+   reply, not everything open. Note this ranks by the CUSTOMER's own last-
+   message tick, not `clockTick` — ordering only needs to compare two fixed
+   points in time against each other, not against "now", so no live clock
+   value has to be threaded into this otherwise-pure sort. */
+type AssignmentSortValue = "lastUpdated" | "startDate" | "awaitingLongest";
 
 const ASSIGNMENT_SORT_OPTIONS: { value: AssignmentSortValue; label: string }[] = [
   { value: "lastUpdated", label: "Last Updated" },
   { value: "startDate", label: "Start Date" },
+  { value: "awaitingLongest", label: "Awaiting Longest" },
 ];
 
 function sortAssignments(interactions: ActiveInteraction[], sort: AssignmentSortValue): ActiveInteraction[] {
+  if (sort === "awaitingLongest") {
+    const key = (i: ActiveInteraction) => {
+      const awaitingTicks = i.channels
+        .filter((c) => c.awaitingResponse)
+        .map((c) => c.lastCustomerMessageTick ?? c.startTick);
+      return awaitingTicks.length > 0 ? Math.min(...awaitingTicks) : Infinity;
+    };
+    // Ascending, not descending like the other two — the OLDEST tick (the
+    // longest wait) needs to sort first here.
+    return [...interactions].sort((a, b) => key(a) - key(b));
+  }
   const key = (i: ActiveInteraction) => {
     const ticks = i.channels.map((c) => c.startTick);
     return sort === "startDate" ? Math.min(...ticks) : Math.max(...ticks);
   };
   return [...interactions].sort((a, b) => key(b) - key(a));
+}
+
+/** The single interaction id to jump to for `JumpToLongestWaitingButton` —
+ *  whichever card has the channel with the OLDEST `lastCustomerMessageTick`
+ *  (the longest-waiting customer) across the whole list, not just within
+ *  one card. `null` when nothing is awaiting at all. Same underlying
+ *  ranking as `sortAssignments`'s own `"awaitingLongest"` key, but doesn't
+ *  need to sort the whole list just to find its single first element. */
+function findLongestWaitingInteractionId(interactions: ActiveInteraction[]): string | null {
+  let bestId: string | null = null;
+  let bestTick = Infinity;
+  for (const interaction of interactions) {
+    for (const channel of interaction.channels) {
+      if (!channel.awaitingResponse) continue;
+      const tick = channel.lastCustomerMessageTick ?? channel.startTick;
+      if (tick < bestTick) {
+        bestTick = tick;
+        bestId = interaction.id;
+      }
+    }
+  }
+  return bestId;
 }
 
 /* Sort trigger — same `Popover` + `RadioGroup` composition `DateFilterChip`
@@ -726,6 +805,59 @@ function AssignmentsSortButton({
   );
 }
 
+/* One-action "jump to whoever's waited longest" affordance (see this
+   session's own product-critique thread: a visual scan across every
+   flagged card isn't how a digital SLA should be worked — the single most-
+   overdue customer should be one click away). Deliberately NOT a prev/
+   next chevron pair like `CustomerHistorySessionDetailPanel`'s or the
+   customer-row nav's own — those step through a FIXED list; this always
+   jumps straight to whichever single card is currently worst, and that
+   target itself keeps changing as the agent works through them (answering
+   the current worst removes it from `awaitingResponse` entirely, so the
+   very next click already lands on whatever's now worst), so there's
+   nothing meaningful for a "back" arrow to return to.
+
+   Count badge styled after `InteractionNavItem`'s own compact-tile
+   channel-count pill (interaction-nav-item.tsx) — same 1px-short-of-square
+   rounded-full numeral, just one size step down (16px vs. that one's 18px)
+   to fit this rail's tighter icon-only column — tinted by `severity`
+   (worst tier across every currently-awaiting card) using the same
+   warning/critical tokens `getAwaitingSeverity` already drives everywhere
+   else, rather than a fourth ad hoc color for the same signal. */
+function JumpToLongestWaitingButton({
+  count,
+  severity,
+  onClick,
+}: {
+  count: number;
+  severity: "warning" | "critical" | null;
+  onClick: () => void;
+}) {
+  if (count === 0) return null;
+  return (
+    <Tooltip content={`Jump to longest-waiting (${count} awaiting)`} placement="right">
+      <span className="relative inline-flex">
+        <ActionIconButton
+          size="sm"
+          aria-label={`Jump to longest-waiting response — ${count} awaiting`}
+          onClick={onClick}
+        >
+          <Timer className="h-3.5 w-3.5" strokeWidth={1.5} />
+        </ActionIconButton>
+        <span
+          className={cn(
+            "absolute -right-1 -top-1 flex h-[16px] min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-bold text-lyra-fg-on-primary",
+            severity === "critical" ? "bg-lyra-bg-destructive" : "bg-lyra-status-warning-strong"
+          )}
+          aria-hidden="true"
+        >
+          {count}
+        </span>
+      </span>
+    </Tooltip>
+  );
+}
+
 /* "Assignments (N active)" section caption — sits directly below the
    Home/Settings rail (LeftNav's `itemsFirst`, left-nav.tsx) and above the
    list of InteractionNavItem cards, both passed together as `header` at the
@@ -741,24 +873,40 @@ function AssignmentsSortButton({
    zero or one assignment there's only one possible order either way, so
    the control would just be a dead click. Collapsed rail: with the button
    hidden, there's nothing left in that state to show at all, so the whole
-   caption returns null instead of an empty centered row. */
+   caption returns null instead of an empty centered row.
+
+   `JumpToLongestWaitingButton` (see its own doc comment) sits alongside
+   the sort button in both layouts, gated on its own `awaitingCount` rather
+   than `showSort`'s `count > 1` — a single awaiting assignment still
+   deserves a one-click jump to it, even though there'd be nothing to sort
+   with only one card open. */
 function AssignmentsSectionCaption({
   expanded,
   count,
   sort,
   onSortChange,
+  awaitingCount,
+  awaitingSeverity,
+  onJumpToLongestWaiting,
 }: {
   expanded?: boolean;
   count: number;
   sort: AssignmentSortValue;
   onSortChange: (value: AssignmentSortValue) => void;
+  awaitingCount: number;
+  awaitingSeverity: "warning" | "critical" | null;
+  onJumpToLongestWaiting: () => void;
 }) {
   const showSort = count > 1;
+  const jumpButton = (
+    <JumpToLongestWaitingButton count={awaitingCount} severity={awaitingSeverity} onClick={onJumpToLongestWaiting} />
+  );
   if (!expanded) {
-    if (!showSort) return null;
+    if (!showSort && awaitingCount === 0) return null;
     return (
-      <div className="flex justify-center pb-2">
-        <AssignmentsSortButton value={sort} onValueChange={onSortChange} />
+      <div className="flex flex-col items-center gap-2 pb-2">
+        {showSort && <AssignmentsSortButton value={sort} onValueChange={onSortChange} />}
+        {jumpButton}
       </div>
     );
   }
@@ -770,7 +918,10 @@ function AssignmentsSectionCaption({
           <span className="lyra-body-md-emphasis text-lyra-fg-default">Assignments</span>
           <span className="lyra-body-md text-lyra-fg-secondary">({count} active)</span>
         </div>
-        {showSort && <AssignmentsSortButton value={sort} onValueChange={onSortChange} />}
+        <div className="flex items-center gap-1">
+          {jumpButton}
+          {showSort && <AssignmentsSortButton value={sort} onValueChange={onSortChange} />}
+        </div>
       </div>
     </div>
   );
@@ -7698,10 +7849,46 @@ export function AgentNextGenPage({
   // started" elapsed display — independent of `elapsedSeconds` below, which
   // is the agent's own status timer and resets on status change.
   const [clockTick, setClockTick] = useState(0);
+  // Mirrors `clockTick` for code that needs the CURRENT tick inside a
+  // callback that itself fires later (`handleSendMessage`'s simulated
+  // customer-reply `setTimeout`, 2.5s after the call that scheduled it) —
+  // reading the `clockTick` state variable there would close over its
+  // stale value from scheduling time, not whatever it's actually
+  // incremented to by the time that timeout fires. Updated in the same
+  // place `clockTick` itself is, so the two can't drift apart.
+  const clockTickRef = useRef(0);
   useEffect(() => {
-    const id = setInterval(() => setClockTick((t) => t + 1), 1000);
+    const id = setInterval(() => {
+      setClockTick((t) => {
+        clockTickRef.current = t + 1;
+        return t + 1;
+      });
+    }, 1000);
     return () => clearInterval(id);
   }, []);
+  // Response-urgency metrics for `AssignmentsSectionCaption`'s
+  // `JumpToLongestWaitingButton` (see that component's own doc comment) —
+  // derived fresh every render from `interactions`, not lifted into their
+  // own state, since there's nothing here that needs to survive beyond
+  // whatever the current render already has in scope.
+  const awaitingInteractions = interactions.filter((i) => i.channels.some((c) => c.awaitingResponse));
+  const awaitingCount = awaitingInteractions.length;
+  const worstAwaitingSeverity =
+    awaitingCount > 0
+      ? getAwaitingSeverity(
+          Math.max(
+            ...awaitingInteractions.flatMap((i) =>
+              i.channels.filter((c) => c.awaitingResponse).map((c) => clockTick - (c.lastCustomerMessageTick ?? c.startTick))
+            )
+          )
+        )
+      : null;
+  const handleJumpToLongestWaiting = () => {
+    const targetId = findLongestWaitingInteractionId(interactions);
+    if (!targetId) return;
+    setActiveInteractionId(targetId);
+    setPanelFullScreen(false);
+  };
   const [activeDeskTab, setActiveDeskTab] = useState<"home" | "customers" | "accounts" | "tickets" | "wem">("home");
   // Desk-tab display order — separate from `activeDeskTab` above (which
   // one is selected), so the user can click-and-drag reorder the Home/
@@ -8708,7 +8895,13 @@ export function AgentNextGenPage({
     const applyToCurrentChannel = (
       interaction: ActiveInteraction,
       message: TranscriptMessage,
-      awaitingResponse: boolean
+      awaitingResponse: boolean,
+      // Only ever passed on the customer-reply branch below — the moment
+      // that reply actually lands is exactly what `lastCustomerMessageTick`
+      // needs to record (see that field's own doc comment). Omitted (not
+      // just `undefined`-valued) on the agent-send branch so it doesn't
+      // overwrite the channel's existing value with `undefined` there.
+      lastCustomerMessageTick?: number
     ): ActiveInteraction => {
       const currentKey =
         interaction.currentChannelId ??
@@ -8719,7 +8912,9 @@ export function AgentNextGenPage({
         ...interaction,
         liveMessages: [...(interaction.liveMessages ?? []), message],
         channels: interaction.channels.map((c) =>
-          (c.id ?? c.type) === currentKey ? { ...c, awaitingResponse } : c
+          (c.id ?? c.type) === currentKey
+            ? { ...c, awaitingResponse, ...(lastCustomerMessageTick !== undefined ? { lastCustomerMessageTick } : {}) }
+            : c
         ),
       };
     };
@@ -8747,7 +8942,14 @@ export function AgentNextGenPage({
       };
       setInteractions((prev) =>
         prev.map((interaction) =>
-          interaction.id === interactionId ? applyToCurrentChannel(interaction, customerMessage, true) : interaction
+          interaction.id === interactionId
+            // `clockTickRef.current`, not the `clockTick` state variable —
+            // this callback fires 2.5s after `handleSendMessage` was
+            // called, and a plain closure over `clockTick` would still
+            // read its value from THAT moment, not now. See the ref's own
+            // doc comment above.
+            ? applyToCurrentChannel(interaction, customerMessage, true, clockTickRef.current)
+            : interaction
         )
       );
     }, 2500);
@@ -10013,6 +10215,9 @@ export function AgentNextGenPage({
                 count={interactions.length}
                 sort={assignmentSort}
                 onSortChange={setAssignmentSort}
+                awaitingCount={awaitingCount}
+                awaitingSeverity={worstAwaitingSeverity}
+                onJumpToLongestWaiting={handleJumpToLongestWaiting}
               />
               {/* No cards until the agent actually starts one above — each
                   card is one contact (or quick-dialed number), with every
@@ -10027,6 +10232,13 @@ export function AgentNextGenPage({
               {sortAssignments(interactions, assignmentSort).map((interaction) => {
                 const mostRecentId = interaction.channels[interaction.channels.length - 1]?.id;
                 const currentId = interaction.currentChannelId ?? mostRecentId;
+                // Seconds since the CUSTOMER last wrote on this channel —
+                // only meaningful (and only ever read) for a channel that's
+                // actually awaiting; falls back to `startTick` per
+                // `TrackedChannel.lastCustomerMessageTick`'s own doc comment
+                // for a channel that's never had a customer message yet.
+                const channelAwaitingWaitSeconds = (c: TrackedChannel) =>
+                  clockTick - (c.lastCustomerMessageTick ?? c.startTick);
                 const channels: InteractionChannel[] = interaction.channels.map((c) => {
                   // Identifies this specific channel's own Outcome popover —
                   // `c.id ?? c.type` is the same fallback `InteractionChannel
@@ -10040,7 +10252,16 @@ export function AgentNextGenPage({
                   return {
                     id: c.id,
                     type: c.type,
-                    elapsed: formatElapsedTime(clockTick - c.startTick),
+                    // Awaiting: "how long since the CUSTOMER last wrote" —
+                    // the metric that actually matters for a digital SLA.
+                    // Not awaiting: "how long since this channel opened",
+                    // same as before — that's still the useful reading once
+                    // there's nothing pending. See `lastCustomerMessageTick`'s
+                    // own doc comment for why these two diverge after more
+                    // than one exchange.
+                    elapsed: c.awaitingResponse
+                      ? formatElapsedTime(channelAwaitingWaitSeconds(c))
+                      : formatElapsedTime(clockTick - c.startTick),
                     preview: c.preview,
                     current: c.id === currentId,
                     // Read straight off the tracked channel (see
@@ -10049,6 +10270,13 @@ export function AgentNextGenPage({
                     // channel never renders red just for being SMS/chat/
                     // email/WhatsApp instead of voice.
                     awaitingResponse: c.awaitingResponse ?? false,
+                    // Amber-vs-red escalation (see `getAwaitingSeverity`'s
+                    // own doc comment) — `undefined` (not computed at all)
+                    // when this channel isn't awaiting, so `ChannelRow`/
+                    // `InteractionNavItem` (lyra-ui) fall back to their own
+                    // "nothing pending" look rather than a stray severity
+                    // value with no `awaitingResponse` to go with it.
+                    awaitingSeverity: c.awaitingResponse ? getAwaitingSeverity(channelAwaitingWaitSeconds(c)) : undefined,
                     // A closed (reopened-from-history) interaction is
                     // read-only — no per-channel kebab, so there's no way to
                     // Unassign & Dismiss/Consult/Transfer/change Outcome on a
@@ -10091,6 +10319,19 @@ export function AgentNextGenPage({
                   };
                 });
                 const earliestStart = Math.min(...interaction.channels.map((c) => c.startTick));
+                // Card-level awaiting wait: the WORST (longest) of this
+                // card's own awaiting channels, not the earliest-opened
+                // channel's own elapsed time — a card with one fresh
+                // channel and one long-overdue one should read as overdue,
+                // not average out to something in between. `undefined` when
+                // nothing on this card is awaiting at all, so the card
+                // falls back to `earliestStart`'s plain "since it opened"
+                // reading below, same as before this feature existed.
+                const cardAwaitingChannels = interaction.channels.filter((c) => c.awaitingResponse);
+                const cardAwaitingWaitSeconds =
+                  cardAwaitingChannels.length > 0
+                    ? Math.max(...cardAwaitingChannels.map(channelAwaitingWaitSeconds))
+                    : undefined;
                 return (
                   <InteractionNavItem
                     key={interaction.id}
@@ -10121,7 +10362,8 @@ export function AgentNextGenPage({
                       setPanelFullScreen(false);
                     }}
                     awaitingResponse={channels.some((c) => c.awaitingResponse)}
-                    elapsed={formatElapsedTime(clockTick - earliestStart)}
+                    awaitingSeverity={cardAwaitingWaitSeconds !== undefined ? getAwaitingSeverity(cardAwaitingWaitSeconds) : undefined}
+                    elapsed={formatElapsedTime(cardAwaitingWaitSeconds ?? clockTick - earliestStart)}
                     expanded={navOpen}
                     channels={channels}
                     onDismiss={() => handleDismissInteraction(interaction.id)}
