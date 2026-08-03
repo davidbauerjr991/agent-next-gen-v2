@@ -8296,9 +8296,29 @@ export function AgentNextGenPage({
   };
   // Guards against a stale `true` leaking into the next interaction this
   // icon renders for (e.g. switching interactions mid-hover, without ever
-  // moving the pointer far enough away to fire the close timer above).
+  // moving the pointer far enough away to fire the close timer above) —
+  // that's still exactly what happens for any interaction becoming active
+  // that ISN'T a brand new one (switching to an existing card, a reopened
+  // historical one, one opened from a notification).
+  //
+  // A genuinely new one (`startedFresh` — set by `handleStartCall`/
+  // `handleQuickDial`/`handleRedial`'s own "no existing interaction"
+  // branch, never by the reopen/notification paths) is the one exception:
+  // per explicit request, it starts with the real panel closed (those same
+  // three handlers now force `setSidePanelOpen(false)` instead of restoring
+  // `lastSidePanelOpenChoice` — see their own doc comments) but its hover
+  // preview shown immediately, with no actual hover needed — a quick glance
+  // at customer info the agent can dismiss (click anywhere outside — the
+  // `Popover` below dismisses on outside click same as any other) or pin
+  // open (click the toggle icon, `handleSidePanelIconToggle`) same as
+  // always. `!sidePanelOpen` is a defensive belt-and-suspenders check, not
+  // load-bearing: it's already guaranteed false in the same render this
+  // effect fires for (both come from the same `setInteractions`/
+  // `setActiveInteractionId` batch), so there's never a real case where a
+  // `startedFresh` interaction's panel is open here — this just makes sure
+  // the auto-preview never fights a panel that's somehow already open.
   useEffect(() => {
-    setCustomerInfoPreviewOpen(false);
+    setCustomerInfoPreviewOpen(!!activeInteraction?.startedFresh && !sidePanelOpen);
   }, [activeInteraction?.id]);
 
   // Track window width — still drives `isCompactHeader` below.
@@ -8468,10 +8488,14 @@ export function AgentNextGenPage({
     // open/closed state at all — starting a second interaction with a
     // customer who already has one open leaves the panel exactly as the
     // agent last left it for THAT card, rather than re-applying anything
-    // here. A new one opens/stays closed per `lastSidePanelOpenChoice` —
-    // the agent's own last explicit choice (not hardcoded open) — per
-    // explicit follow-up request.
-    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
+    // here. A brand new one now always starts CLOSED (not
+    // `lastSidePanelOpenChoice`, the agent's remembered choice from
+    // before — per explicit follow-up request, every fresh interaction
+    // gets the same "closed, but glanceable" treatment regardless of
+    // whatever was pinned open on a previous one) — its hover preview
+    // auto-opens instead, handled by the `activeInteraction?.id` effect
+    // above keyed on `startedFresh` (see that effect's own doc comment).
+    if (isNewInteraction) setSidePanelOpen(false);
   };
 
   // App-local only (per "changes to components should only happen locally
@@ -8552,7 +8576,10 @@ export function AgentNextGenPage({
       return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, currentStatus: undefined } : interaction));
     });
     setActiveInteractionId(id);
-    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
+    // See `handleStartCall`'s own doc comment on its identical line — a
+    // brand new card always starts closed, with its hover preview
+    // auto-opening instead (the `activeInteraction?.id` effect above).
+    if (isNewInteraction) setSidePanelOpen(false);
   };
 
   /* "Redial" from the home tab's Contact History card — same merge-by-id
@@ -8603,7 +8630,10 @@ export function AgentNextGenPage({
       return prev.map((interaction, i) => (i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, currentStatus: undefined } : interaction));
     });
     setActiveInteractionId(id);
-    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
+    // See `handleStartCall`'s own doc comment on its identical line — a
+    // brand new card always starts closed, with its hover preview
+    // auto-opening instead (the `activeInteraction?.id` effect above).
+    if (isNewInteraction) setSidePanelOpen(false);
   };
 
   /** Fired by clicking a Contact History row itself (`ContactHistoryCard`'s
