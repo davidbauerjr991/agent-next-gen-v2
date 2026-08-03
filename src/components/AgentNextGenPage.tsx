@@ -164,7 +164,6 @@ import {
   Plus,
   Trash2,
   RefreshCw,
-  Timer,
   type LucideIcon,
 } from "lucide-react";
 
@@ -723,28 +722,6 @@ function sortAssignments(interactions: ActiveInteraction[], sort: AssignmentSort
   return [...interactions].sort((a, b) => key(b) - key(a));
 }
 
-/** The single interaction id to jump to for `JumpToLongestWaitingButton` —
- *  whichever card has the channel with the OLDEST `lastCustomerMessageTick`
- *  (the longest-waiting customer) across the whole list, not just within
- *  one card. `null` when nothing is awaiting at all. Same underlying
- *  ranking as `sortAssignments`'s own `"awaitingLongest"` key, but doesn't
- *  need to sort the whole list just to find its single first element. */
-function findLongestWaitingInteractionId(interactions: ActiveInteraction[]): string | null {
-  let bestId: string | null = null;
-  let bestTick = Infinity;
-  for (const interaction of interactions) {
-    for (const channel of interaction.channels) {
-      if (!channel.awaitingResponse) continue;
-      const tick = channel.lastCustomerMessageTick ?? channel.startTick;
-      if (tick < bestTick) {
-        bestTick = tick;
-        bestId = interaction.id;
-      }
-    }
-  }
-  return bestId;
-}
-
 /* Sort trigger — same `Popover` + `RadioGroup` composition `DateFilterChip`
    already uses for an identical "single choice from a short, mutually
    exclusive list" picker (see that component's own doc comment), just an
@@ -805,59 +782,6 @@ function AssignmentsSortButton({
   );
 }
 
-/* One-action "jump to whoever's waited longest" affordance (see this
-   session's own product-critique thread: a visual scan across every
-   flagged card isn't how a digital SLA should be worked — the single most-
-   overdue customer should be one click away). Deliberately NOT a prev/
-   next chevron pair like `CustomerHistorySessionDetailPanel`'s or the
-   customer-row nav's own — those step through a FIXED list; this always
-   jumps straight to whichever single card is currently worst, and that
-   target itself keeps changing as the agent works through them (answering
-   the current worst removes it from `awaitingResponse` entirely, so the
-   very next click already lands on whatever's now worst), so there's
-   nothing meaningful for a "back" arrow to return to.
-
-   Count badge styled after `InteractionNavItem`'s own compact-tile
-   channel-count pill (interaction-nav-item.tsx) — same 1px-short-of-square
-   rounded-full numeral, just one size step down (16px vs. that one's 18px)
-   to fit this rail's tighter icon-only column — tinted by `severity`
-   (worst tier across every currently-awaiting card) using the same
-   warning/critical tokens `getAwaitingSeverity` already drives everywhere
-   else, rather than a fourth ad hoc color for the same signal. */
-function JumpToLongestWaitingButton({
-  count,
-  severity,
-  onClick,
-}: {
-  count: number;
-  severity: "warning" | "critical" | null;
-  onClick: () => void;
-}) {
-  if (count === 0) return null;
-  return (
-    <Tooltip content={`Jump to longest-waiting (${count} awaiting)`} placement="right">
-      <span className="relative inline-flex">
-        <ActionIconButton
-          size="sm"
-          aria-label={`Jump to longest-waiting response — ${count} awaiting`}
-          onClick={onClick}
-        >
-          <Timer className="h-3.5 w-3.5" strokeWidth={1.5} />
-        </ActionIconButton>
-        <span
-          className={cn(
-            "absolute -right-1 -top-1 flex h-[16px] min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-bold text-lyra-fg-on-primary",
-            severity === "critical" ? "bg-lyra-bg-destructive" : "bg-lyra-status-warning-strong"
-          )}
-          aria-hidden="true"
-        >
-          {count}
-        </span>
-      </span>
-    </Tooltip>
-  );
-}
-
 /* "Assignments (N active)" section caption — sits directly below the
    Home/Settings rail (LeftNav's `itemsFirst`, left-nav.tsx) and above the
    list of InteractionNavItem cards, both passed together as `header` at the
@@ -875,38 +799,28 @@ function JumpToLongestWaitingButton({
    hidden, there's nothing left in that state to show at all, so the whole
    caption returns null instead of an empty centered row.
 
-   `JumpToLongestWaitingButton` (see its own doc comment) sits alongside
-   the sort button in both layouts, gated on its own `awaitingCount` rather
-   than `showSort`'s `count > 1` — a single awaiting assignment still
-   deserves a one-click jump to it, even though there'd be nothing to sort
-   with only one card open. */
+   Used to also render a `JumpToLongestWaitingButton` alongside the sort
+   button — removed per explicit follow-up: sorting by "Longest Wait"
+   (`assignmentSort`'s own third option) already surfaces the same card as
+   the very first one in the list, so a separate one-click jump to it was
+   redundant once that sort existed. */
 function AssignmentsSectionCaption({
   expanded,
   count,
   sort,
   onSortChange,
-  awaitingCount,
-  awaitingSeverity,
-  onJumpToLongestWaiting,
 }: {
   expanded?: boolean;
   count: number;
   sort: AssignmentSortValue;
   onSortChange: (value: AssignmentSortValue) => void;
-  awaitingCount: number;
-  awaitingSeverity: "warning" | "critical" | null;
-  onJumpToLongestWaiting: () => void;
 }) {
   const showSort = count > 1;
-  const jumpButton = (
-    <JumpToLongestWaitingButton count={awaitingCount} severity={awaitingSeverity} onClick={onJumpToLongestWaiting} />
-  );
   if (!expanded) {
-    if (!showSort && awaitingCount === 0) return null;
+    if (!showSort) return null;
     return (
-      <div className="flex flex-col items-center gap-2 pb-2">
-        {showSort && <AssignmentsSortButton value={sort} onValueChange={onSortChange} />}
-        {jumpButton}
+      <div className="flex justify-center pb-2">
+        <AssignmentsSortButton value={sort} onValueChange={onSortChange} />
       </div>
     );
   }
@@ -918,10 +832,7 @@ function AssignmentsSectionCaption({
           <span className="lyra-body-md-emphasis text-lyra-fg-default">Assignments</span>
           <span className="lyra-body-md text-lyra-fg-secondary">({count} active)</span>
         </div>
-        <div className="flex items-center gap-1">
-          {jumpButton}
-          {showSort && <AssignmentsSortButton value={sort} onValueChange={onSortChange} />}
-        </div>
+        {showSort && <AssignmentsSortButton value={sort} onValueChange={onSortChange} />}
       </div>
     </div>
   );
@@ -7866,29 +7777,6 @@ export function AgentNextGenPage({
     }, 1000);
     return () => clearInterval(id);
   }, []);
-  // Response-urgency metrics for `AssignmentsSectionCaption`'s
-  // `JumpToLongestWaitingButton` (see that component's own doc comment) —
-  // derived fresh every render from `interactions`, not lifted into their
-  // own state, since there's nothing here that needs to survive beyond
-  // whatever the current render already has in scope.
-  const awaitingInteractions = interactions.filter((i) => i.channels.some((c) => c.awaitingResponse));
-  const awaitingCount = awaitingInteractions.length;
-  const worstAwaitingSeverity =
-    awaitingCount > 0
-      ? getAwaitingSeverity(
-          Math.max(
-            ...awaitingInteractions.flatMap((i) =>
-              i.channels.filter((c) => c.awaitingResponse).map((c) => clockTick - (c.lastCustomerMessageTick ?? c.startTick))
-            )
-          )
-        )
-      : null;
-  const handleJumpToLongestWaiting = () => {
-    const targetId = findLongestWaitingInteractionId(interactions);
-    if (!targetId) return;
-    setActiveInteractionId(targetId);
-    setPanelFullScreen(false);
-  };
   const [activeDeskTab, setActiveDeskTab] = useState<"home" | "customers" | "accounts" | "tickets" | "wem">("home");
   // Desk-tab display order — separate from `activeDeskTab` above (which
   // one is selected), so the user can click-and-drag reorder the Home/
@@ -10215,9 +10103,6 @@ export function AgentNextGenPage({
                 count={interactions.length}
                 sort={assignmentSort}
                 onSortChange={setAssignmentSort}
-                awaitingCount={awaitingCount}
-                awaitingSeverity={worstAwaitingSeverity}
-                onJumpToLongestWaiting={handleJumpToLongestWaiting}
               />
               {/* No cards until the agent actually starts one above — each
                   card is one contact (or quick-dialed number), with every
