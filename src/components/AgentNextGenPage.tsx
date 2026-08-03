@@ -5151,10 +5151,24 @@ function InteractionComposer({ onSend }: { onSend: (text: string) => void }) {
   // so this fires before a menu-row's own `onClick` — the row's click
   // handler still runs normally afterward since it's inside
   // `quickReplyContainerRef` and skipped here.
+  //
+  // The `[data-radix-popper-content-wrapper]` check covers
+  // `QuickReplyVariableForm`'s own `Select`/`DatePicker`/`TimePicker`
+  // fields — Radix always portals THEIR dropdown/calendar content
+  // straight to `document.body`, outside `quickReplyContainerRef`'s own
+  // DOM subtree, no matter how deeply nested those fields are inside it.
+  // Without this, picking e.g. a Business Days option registered as an
+  // "outside" click and closed the whole rich form before the selection
+  // even landed — confirmed live. Every Radix popper-positioned surface
+  // (`Popover`/`Select`/`DropdownMenu`/etc., all built on
+  // `@radix-ui/react-popper`) tags its own wrapper with this attribute,
+  // so this isn't specific to any one field type.
   useEffect(() => {
     if (!quickReplyOpen) return;
     const handlePointerDown = (e: MouseEvent) => {
-      if (quickReplyContainerRef.current?.contains(e.target as Node)) return;
+      const target = e.target as Node;
+      if (quickReplyContainerRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest("[data-radix-popper-content-wrapper]")) return;
       closeQuickReplyMenu();
     };
     document.addEventListener("mousedown", handlePointerDown);
