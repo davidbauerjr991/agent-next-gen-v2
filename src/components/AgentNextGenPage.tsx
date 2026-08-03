@@ -685,7 +685,7 @@ function buildNavItems(
    updated." Both orders sort newest-first (descending), the conventional
    default for either reading.
 
-   "Awaiting Longest" is the third option — the actual response-urgency
+   "Longest Wait" is the third option — the actual response-urgency
    queue: ranks by the OLDEST `lastCustomerMessageTick` among each card's
    awaiting channels (the smallest tick = the longest anyone's been
    waiting), ascending, so the single longest-waiting card sorts first.
@@ -701,7 +701,7 @@ type AssignmentSortValue = "lastUpdated" | "startDate" | "awaitingLongest";
 const ASSIGNMENT_SORT_OPTIONS: { value: AssignmentSortValue; label: string }[] = [
   { value: "lastUpdated", label: "Last Updated" },
   { value: "startDate", label: "Start Date" },
-  { value: "awaitingLongest", label: "Awaiting Longest" },
+  { value: "awaitingLongest", label: "Longest Wait" },
 ];
 
 function sortAssignments(interactions: ActiveInteraction[], sort: AssignmentSortValue): ActiveInteraction[] {
