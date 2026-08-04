@@ -2496,7 +2496,20 @@ function CustomerChannelPicker({
       className="w-64"
       bodyPadding={false}
       content={
-        <div className="w-64 p-3 space-y-3">
+        // `onClick` stopPropagation below — this content renders through a
+        // Radix portal (outside the row's DOM subtree), but React bubbles
+        // portal events along the *React* tree, not the DOM tree, so a
+        // click anywhere in here (a radio option, a Select option — even
+        // though `Select`'s own listbox is a further-nested portal, it's
+        // still a React descendant of this div) would otherwise keep
+        // bubbling up through `CustomerChannelPopoverButton` into the
+        // `TableRow`'s own `onClick`, toggling the Customer Information
+        // panel open/closed on every field interaction. The trigger icon
+        // already stops propagation on itself (see
+        // `CustomerChannelPopoverButton`) for the same reason, but that
+        // only covers the click that opens the popover, not clicks made
+        // once it's open.
+        <div className="w-64 p-3 space-y-3" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
           <RadioButtonGroup
             label="Select Channel"
             // Disables (rather than hides) whichever channel options have
@@ -10973,7 +10986,15 @@ export function AgentNextGenPage({
                     // (suppressed) own border coincide with this row's own
                     // `border-b` below, without needing to sacrifice the
                     // icon button/divider's normal centered look to get it.
-                    <div className="flex items-center gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6 pt-2">
+                    //
+                    // `lyra-customer-info-toggle-wrap` — establishes the
+                    // container-query boundary the Customer Information
+                    // toggle button collapses against below 991px (see
+                    // index.css). Goes on this row (not the button's own
+                    // wrapper) since this row is what actually has real,
+                    // stretched width to measure — see that CSS rule's own
+                    // doc comment.
+                    <div className="flex items-center gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6 pt-2 lyra-customer-info-toggle-wrap">
                       {/* Only shown while the panel itself is closed — once
                           it's open, this same icon would just sit there
                           doing nothing useful next to a panel that's
@@ -11061,8 +11082,13 @@ export function AgentNextGenPage({
                           >
                             <Button
                               variant="outline"
-                              size="icon-md"
-                              className="shrink-0"
+                              size="md"
+                              // `lyra-customer-info-toggle-btn` — collapses
+                              // this button's own label/padding down to a
+                              // square icon-button footprint below 991px
+                              // of the row's width (see index.css); no
+                              // effect above that threshold.
+                              className="shrink-0 lyra-customer-info-toggle-btn"
                               onClick={handleSidePanelIconToggle}
                               onMouseEnter={openCustomerInfoPreview}
                               onMouseLeave={scheduleCloseCustomerInfoPreview}
@@ -11070,7 +11096,12 @@ export function AgentNextGenPage({
                               onBlur={scheduleCloseCustomerInfoPreview}
                               aria-label={sidePanelToggleLabel ?? "Open Customer Information"}
                             >
-                              <User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                              <User className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
+                              {/* `lyra-customer-info-toggle-label` — hidden
+                                  by the same container query once the row
+                                  drops below 991px, leaving just the icon
+                                  above. */}
+                              <span className="lyra-customer-info-toggle-label">Customer Information</span>
                             </Button>
                           </Popover>
                           <div className="h-8 w-px bg-lyra-border-subtle shrink-0" aria-hidden="true" />
