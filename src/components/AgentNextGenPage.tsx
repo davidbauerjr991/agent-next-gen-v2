@@ -107,6 +107,11 @@ import {
 import { CREATE_NEW_AGENTS } from "@nicecxone/lyra-ui/agents-data";
 import { CREATE_NEW_CUSTOMERS, type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
 import { useScheduleContent } from "@/components/SchedulePanel";
+// PROTOTYPE — local-only, not in lyra-ui yet. See CollapsedChannelBadge's
+// own doc comment for why, and CLAUDE.md's lyra-ui rules for the convention
+// this follows (build new things locally, promote to lyra-ui only once
+// explicitly asked).
+import { CollapsedChannelBadge } from "@/components/CollapsedChannelBadge";
 import appIcon from "@/assets/app-icon.svg";
 import {
   Home,
@@ -168,6 +173,7 @@ import {
   Plus,
   Trash2,
   RefreshCw,
+  TriangleAlert,
   type LucideIcon,
 } from "lucide-react";
 
@@ -766,6 +772,13 @@ function AssignmentsSortButton({
           open={open}
           onOpenChange={setOpen}
           placement="bottom"
+          // `Popover`'s own content defaults to `z-50` (popover.tsx) —
+          // lower than `InteractionNavItem`'s compact-tile hover-preview
+          // card (`z-[9999]`, interaction-nav-item.tsx), which sits right
+          // next to this button in the collapsed rail and can overlap it.
+          // Bumped above that so the sort menu isn't hidden behind an
+          // assignment card's hover preview.
+          className="z-[10000]"
           content={
             <div className="flex flex-col gap-1 p-3 w-[180px]">
               <RadioGroup
@@ -3841,6 +3854,7 @@ function TranscriptSessionSeparator({
   onCancelClose,
   messageCount,
   outcome,
+  onDismiss,
 }: {
   session: TranscriptSession;
   /** Shown at the far left of this row, ahead of the message/case info —
@@ -3895,6 +3909,15 @@ function TranscriptSessionSeparator({
    *  Outcome popover, since there's no real per-historical-session outcome
    *  state to back one. */
   outcome?: ChannelOutcomeConfig;
+  /** Real "Unassign & Dismiss" button, immediately right of the status tag
+   *  — per explicit request. Same "current session only" scoping as
+   *  `outcome` above (see `InteractionTranscript`'s own `onDismissChannel`
+   *  doc comment): a historical session has no live channel left to
+   *  dismiss, so this is `undefined` there and the button doesn't render
+   *  at all (no decorative/disabled version — unlike Transfer, this is a
+   *  real destructive action, not a static icon, so there's nothing
+   *  meaningful to show non-functionally). */
+  onDismiss?: () => void;
 }) {
   const isClosed = session.status === "Closed";
   // Local to the Outcome popover's own "Status" field — same "one popover
@@ -4019,8 +4042,10 @@ function TranscriptSessionSeparator({
               same popover UI `ChannelRow`'s Outcome button renders,
               reusing its shared `outcomeDraftKey`/`outcomeDraft` state one
               level up so opening it here or from the LeftNav card shows
-              the identical draft. */}
-          <div className="shrink-0 flex items-center gap-0">
+              the identical draft. `gap-1` (4px) between every item in this
+              cluster (Transfer, Outcome, status chip, Unassign & Dismiss)
+              — per explicit request, was `gap-0` (flush together). */}
+          <div className="shrink-0 flex items-center gap-1">
             <Button variant="icon" size="icon-sm" title="Consult / Transfer" className="text-lyra-fg-secondary">
               <TransferIcon />
             </Button>
@@ -4327,6 +4352,23 @@ function TranscriptSessionSeparator({
                 />
               </Button>
             </Popover>
+            {/* Unassign & Dismiss — immediately right of the status tag, per
+                explicit request. Same icon/action `ChannelTab`'s own kebab
+                entry uses for this channel (see `onDismiss`'s own doc
+                comment above for the exact scoping/wiring); only rendered
+                at all for the current session, so there's no dead button on
+                historical rows. */}
+            {onDismiss && (
+              <Button
+                variant="icon"
+                size="icon-sm"
+                title="Unassign & Dismiss"
+                className="text-lyra-fg-secondary"
+                onClick={onDismiss}
+              >
+                <TriangleAlert className="h-4 w-4" strokeWidth={1.5} />
+              </Button>
+            )}
           </div>
         </div>
         <AccordionPrimitive.Content className="overflow-hidden data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up">
@@ -4363,6 +4405,7 @@ function InteractionTranscript({
   onOutcomeSummaryChange,
   onOutcomeSave,
   onOutcomeCancel,
+  onDismissChannel,
 }: {
   /** Which channel's content to show — see this component's own doc
    *  comment above. Undefined (no active interaction/channel yet) renders
@@ -4458,6 +4501,19 @@ function InteractionTranscript({
   onOutcomeSummaryChange?: (value: string) => void;
   onOutcomeSave?: () => void;
   onOutcomeCancel?: () => void;
+  /**
+   * Real "Unassign & Dismiss" button on the CURRENT session's own separator
+   * bar, immediately right of the status tag — per explicit request. Same
+   * scoping as the `outcome*` props above: only meaningful for the CURRENT
+   * session (the caller only ever passes this alongside a defined
+   * `outcomeOpen`, mirroring that gate at the render-call site below),
+   * since a historical/closed session has no live channel left to dismiss.
+   * The caller wires this to the exact same `handleDismissChannel`/
+   * `handleDismissInteraction` pair the LeftNav's `ChannelTab` kebab's own
+   * "Unassign & Dismiss" entry already uses for this channel — same icon
+   * (`TriangleAlert`), same action, just a second real trigger for it.
+   */
+  onDismissChannel?: () => void;
 }) {
   // A freshly-launched Chat/SMS/WhatsApp interaction (see `isFreshLaunch`'s
   // own doc comment) shows just a single synthesized "Session Details"
@@ -4867,6 +4923,9 @@ function InteractionTranscript({
                         }
                       : undefined
                   }
+                  // Same "current session only" gate as `outcome` above —
+                  // see `onDismissChannel`'s own doc comment for why.
+                  onDismiss={session.id === lastSessionId ? onDismissChannel : undefined}
                 />
                 {messages.length > 0 && (
                   <div className="flex flex-col gap-5 py-4">
@@ -7925,24 +7984,26 @@ export function AgentNextGenPage({
   // writes via `handleInteractionStatusChange` — so there's nothing left
   // for a local draft to own for that field.
   const [outcomeDraftKey, setOutcomeDraftKey] = useState<string | null>(null);
-  // Which of the two triggers actually opened the popover currently named by
-  // `outcomeDraftKey` — the LeftNav `ChannelRow` Outcome button and the
-  // transcript's own `TranscriptSessionSeparator` Outcome button key off the
-  // exact same `${interactionId}:${channelKey}` value for the active channel
-  // (so both stay in sync on the same shared draft), but that meant clicking
-  // either one satisfied BOTH `outcomeDraftKey === key` checks and popped
-  // open two popovers at once (reported via screenshot). Each trigger's own
-  // `open` now additionally requires this to match its own source, so only
-  // the one actually clicked shows as open — the underlying draft (tags/
-  // disposition/summary) still stays the same shared state either way.
-  const [outcomeDraftSource, setOutcomeDraftSource] = useState<"leftnav" | "transcript" | null>(null);
+  // Which of the three triggers actually opened the popover currently named
+  // by `outcomeDraftKey` — the LeftNav `ChannelRow` Outcome button, the
+  // transcript's own `TranscriptSessionSeparator` Outcome button, and the
+  // record-header `ChannelTab`'s kebab "Outcome" entry all key off the exact
+  // same `${interactionId}:${channelKey}` value for a given channel (so all
+  // three stay in sync on the same shared draft), but that meant clicking
+  // any one satisfied every `outcomeDraftKey === key` check and popped open
+  // more than one popover at once (reported via screenshot, back when there
+  // were only two triggers). Each trigger's own `open` now additionally
+  // requires this to match its own source, so only the one actually clicked
+  // shows as open — the underlying draft (tags/disposition/summary) still
+  // stays the same shared state either way.
+  const [outcomeDraftSource, setOutcomeDraftSource] = useState<"leftnav" | "transcript" | "tab" | null>(null);
   const buildDefaultOutcomeDraft = () => ({
     tags: ["Technical", "Account"],
     dispositionCode: OUTCOME_DISPOSITION_OPTIONS[0].value,
     summary: OUTCOME_DEFAULT_SUMMARY,
   });
   const [outcomeDraft, setOutcomeDraft] = useState(buildDefaultOutcomeDraft);
-  const handleOutcomeOpenChange = (key: string, open: boolean, source: "leftnav" | "transcript") => {
+  const handleOutcomeOpenChange = (key: string, open: boolean, source: "leftnav" | "transcript" | "tab") => {
     if (open) {
       // Reset to a fresh draft every time a (possibly different) channel's
       // popover opens — no real backend here to load a previously-saved
@@ -10676,7 +10737,15 @@ export function AgentNextGenPage({
                   cardAwaitingChannels.length > 0
                     ? Math.max(...cardAwaitingChannels.map(channelAwaitingWaitSeconds))
                     : undefined;
-                return (
+                // PROTOTYPE (CollapsedChannelBadge, local-only): the same
+                // channel this card's `currentChannelKey` prop below already
+                // resolves to — falls back to the most-recent channel when
+                // nothing's explicitly current yet, same fallback `currentId`
+                // itself uses. Only actually rendered in the collapsed-rail
+                // branch further down.
+                const currentChannelType =
+                  channels.find((c) => c.id === currentId)?.type ?? channels[channels.length - 1]?.type;
+                const navItem = (
                   <InteractionNavItem
                     key={interaction.id}
                     customerName={interaction.customerName}
@@ -10719,6 +10788,27 @@ export function AgentNextGenPage({
                     currentChannelKey={currentId}
                     onCurrentChannelChange={(key) => handleChannelSelect(interaction.id, key)}
                   />
+                );
+                // Collapsed rail only (`!navOpen`) — the expanded card has
+                // its own per-channel chips already showing type, so the
+                // badge would be redundant there. `relative` wrapper is only
+                // needed in this branch since the badge is absolutely
+                // positioned against it. Also skipped once a card has more
+                // than one open channel: `InteractionNavItem` itself already
+                // renders its own count badge (the "2") in that exact same
+                // top-left corner (see its own `channelCount > 1` branch,
+                // interaction-nav-item.tsx) — showing a single channel's
+                // icon on top of/behind it would both collide visually and
+                // misrepresent a multi-channel card as single-channel.
+                return !navOpen ? (
+                  <div key={interaction.id} className="relative">
+                    {navItem}
+                    {currentChannelType && channels.length <= 1 && (
+                      <CollapsedChannelBadge type={currentChannelType} />
+                    )}
+                  </div>
+                ) : (
+                  navItem
                 );
               })}
             </>
@@ -11002,7 +11092,18 @@ export function AgentNextGenPage({
                           (tabs.tsx) keeps each tab's label/icon centered
                           within its now-taller box, so nothing looks
                           squished by this. */}
-                      <TabList overflowMenu className="flex-1 min-w-0 self-stretch border-b-0">
+                      {/* `growToFillRow` — this row sits alongside the
+                          "Customer History" tab + divider before it and the
+                          "+" button after it, so it needs to actually claim
+                          the rest of that horizontal row instead of sizing
+                          to its own near-content-less width (which was
+                          reading as narrow enough to collapse the
+                          `overflowMenu` breakpoint early even with plenty
+                          of real room available — see that prop's own doc
+                          comment in tabs.tsx). `className`'s own `flex-1
+                          min-w-0` still lands on the inner tab row itself
+                          (unrelated, unaffected by this prop). */}
+                      <TabList overflowMenu growToFillRow className="flex-1 min-w-0 self-stretch border-b-0">
                         {/* "Customer History" — a separate, independently
                             selectable tab, NOT another trigger for the
                             Customer Information side panel (that's the
@@ -11022,17 +11123,30 @@ export function AgentNextGenPage({
                         </Tab>
                         {activeInteraction.channels.map((c) => {
                           const key = c.id ?? c.type;
+                          // Same `${interactionId}:${channelKey}` scheme the
+                          // LeftNav's own `ChannelRow` and the transcript's
+                          // `TranscriptSessionSeparator` already key their
+                          // own Outcome popovers with — see
+                          // `outcomeDraftSource`'s own doc comment above for
+                          // why each trigger needs its own `source` tag
+                          // ("tab" here) alongside this shared key.
+                          const outcomeKey = `${activeInteraction.id}:${key}`;
                           return (
                             <ChannelTab
                               key={key}
                               type={c.type}
-                              // No `address` — per explicit request, the
-                              // channel tabs show just the type label
-                              // ("SMS"/"Email"/"Webchat"), not the phone
-                              // number/email/handle next to it. `ChannelTab`
-                              // folds its tab-face text and tooltip content
-                              // into this one prop, so omitting it drops the
-                              // address from both, not just the tab face.
+                              // `address` now feeds this tab's `Tooltip`
+                              // subhead (replacing the interaction id there
+                              // — per explicit request) alongside
+                              // `messageCount` for chat-like channels.
+                              // `showAddressOnFace={false}` keeps the tab
+                              // face itself exactly as before (just the
+                              // type label, "SMS"/"Email"/"Webchat", no
+                              // phone number/email/handle next to it — that
+                              // was its own earlier explicit request and is
+                              // unrelated to what the tooltip shows).
+                              address={c.addressLabel}
+                              showAddressOnFace={false}
                               messageCount={c.messageCount}
                               interactionId={c.interactionId}
                               active={!customerHistoryTabActive && (activeInteraction.currentChannelId ?? activeInteraction.channels[activeInteraction.channels.length - 1]?.id) === key}
@@ -11045,6 +11159,34 @@ export function AgentNextGenPage({
                               // read-only, no kebab here either. See
                               // `ActiveInteraction.closed`'s own doc comment.
                               showMenu={!activeInteraction.closed}
+                              // Wires the kebab's "Outcome" entry to the real
+                              // popover (`ChannelTabProps.outcome`, channel-
+                              // row.tsx) — same shared draft/resolution state
+                              // as the LeftNav's own Outcome button for this
+                              // exact channel (`outcomeKey`), so logging an
+                              // outcome from either surface reflects in both.
+                              // Harmless to always pass even when
+                              // `showMenu={false}` hides the kebab entirely —
+                              // same reasoning `ChannelRow`'s own `outcome`
+                              // doc comment already establishes.
+                              outcome={{
+                                open: outcomeDraftKey === outcomeKey && outcomeDraftSource === "tab",
+                                onOpenChange: (open) => handleOutcomeOpenChange(outcomeKey, open, "tab"),
+                                resolutionOptions: TRANSCRIPT_SESSION_STATUS_OPTIONS,
+                                resolution: activeInteraction.channelStatuses?.[c.id] ?? "Resolved",
+                                onResolutionChange: (value) =>
+                                  handleInteractionStatusChange(activeInteraction.id, c.id, value),
+                                tagOptions: OUTCOME_TAG_OPTIONS,
+                                selectedTags: outcomeDraft.tags,
+                                onTagsChange: (tags) => setOutcomeDraft((d) => ({ ...d, tags })),
+                                dispositionOptions: OUTCOME_DISPOSITION_OPTIONS,
+                                dispositionCode: outcomeDraft.dispositionCode,
+                                onDispositionChange: (value) => setOutcomeDraft((d) => ({ ...d, dispositionCode: value })),
+                                summary: outcomeDraft.summary,
+                                onSummaryChange: (value) => setOutcomeDraft((d) => ({ ...d, summary: value })),
+                                onSave: handleOutcomeSave,
+                                onCancel: handleOutcomeCancel,
+                              } satisfies ChannelOutcomeConfig}
                             />
                           );
                         })}
@@ -11159,6 +11301,22 @@ export function AgentNextGenPage({
                           onOutcomeSummaryChange={(value) => setOutcomeDraft((d) => ({ ...d, summary: value }))}
                           onOutcomeSave={handleOutcomeSave}
                           onOutcomeCancel={handleOutcomeCancel}
+                          // Same dismiss logic `ChannelTab`'s own kebab
+                          // "Unassign & Dismiss" entry uses for this exact
+                          // channel — dismiss just the channel while others
+                          // remain open, or the whole interaction once this
+                          // is the last one.
+                          onDismissChannel={
+                            activeChannel
+                              ? () => {
+                                  if (activeInteraction.channels.length > 1) {
+                                    handleDismissChannel(activeInteraction.id, activeChannel);
+                                  } else {
+                                    handleDismissInteraction(activeInteraction.id);
+                                  }
+                                }
+                              : undefined
+                          }
                         />
                         {!activeInteraction.closed && activeChannelStatus !== "Closed" && (
                           <InteractionComposer onSend={(text) => handleSendMessage(activeInteraction.id, text)} />
