@@ -174,6 +174,8 @@ import {
   Trash2,
   RefreshCw,
   TriangleAlert,
+  ChevronsDownUp,
+  ChevronsUpDown,
   type LucideIcon,
 } from "lucide-react";
 
@@ -814,15 +816,59 @@ function AssignmentsSortButton({
   );
 }
 
+/* Collapse-all/Expand-all trigger — sits directly left of
+   `AssignmentsSortButton` in the caption row, per explicit request, only
+   shown alongside it (same `count > 1` gate — with zero or one assignment
+   there's nothing meaningful to bulk-collapse/expand either). Same
+   `ActionIconButton size="sm"` + `Tooltip`/`aria-label` (not `title`, for
+   the identical double-tooltip reason `AssignmentsSortButton` documents on
+   its own trigger) shape as that button, so the two read as one matched
+   pair rather than two differently-styled icons side by side.
+
+   A single toggle, not two separate buttons — `allExpanded` (owned by the
+   `AgentNextGenPage` state further down, alongside the version counter
+   each click bumps) tracks which action the NEXT click performs, and the
+   icon swaps to match: showing `ChevronsDownUp` ("Collapse all") while
+   currently all-expanded, `ChevronsUpDown` ("Expand all") once collapsed.
+   This doesn't try to track each individual card's own true expanded/
+   collapsed state (an agent can still toggle any one card by hand after a
+   bulk action, same as before this existed) — it's just "which direction
+   does the NEXT click bulk-apply," the same single-toggle idiom the
+   per-card chevron itself uses. */
+function AssignmentsExpandCollapseAllButton({
+  allExpanded,
+  onToggle,
+}: {
+  allExpanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Tooltip content={allExpanded ? "Collapse all" : "Expand all"} placement="right">
+      <ActionIconButton
+        size="sm"
+        aria-label={allExpanded ? "Collapse all" : "Expand all"}
+        onClick={onToggle}
+      >
+        {allExpanded ? (
+          <ChevronsDownUp className="h-3.5 w-3.5" strokeWidth={1.5} />
+        ) : (
+          <ChevronsUpDown className="h-3.5 w-3.5" strokeWidth={1.5} />
+        )}
+      </ActionIconButton>
+    </Tooltip>
+  );
+}
+
 /* "Assignments (N active)" section caption — sits at the very top of
    LeftNav's scrollable `header` region (left-nav.tsx), directly under the
-   "New Outbound" `pinnedHeader`, with the list of InteractionNavItem cards
-   below it — both passed together as `header` at the LeftNav call site
-   below. The Home/Settings rail itself renders LAST now (LeftNav's
-   default, non-`itemsFirst` order — see that call site's own comment for
-   why), sticky to the BOTTOM of the scroll region instead of the top, so
-   this caption + the cards are what scrolls, not the rail. `count` is
-   `interactions.length`, the exact same
+   "New Outbound" `pinnedHeader` (fixed above it, exempt from scrolling —
+   see that call site's own comment for "New Outbound"'s own back-and-forth
+   on where it landed before settling back here), with the list of
+   InteractionNavItem cards below it — both this caption and the cards
+   passed together as `header`. The Home/Settings rail renders LAST
+   (LeftNav's default, non-`itemsFirst` order), sticky to the BOTTOM of the
+   scroll region instead of the top, so this caption + the cards are what
+   scrolls, not the rail. `count` is `interactions.length`, the exact same
    live list the cards render from, so the two numbers can't drift apart.
    Collapsed to icon-only rail (`expanded` false), the text has nowhere to
    go — but the sort button is a real standalone action, not just a label,
@@ -846,11 +892,16 @@ function AssignmentsSectionCaption({
   count,
   sort,
   onSortChange,
+  allExpanded,
+  onToggleAllExpanded,
 }: {
   expanded?: boolean;
   count: number;
   sort: AssignmentSortValue;
   onSortChange: (value: AssignmentSortValue) => void;
+  /** See `AssignmentsExpandCollapseAllButton`'s own doc comment above. */
+  allExpanded: boolean;
+  onToggleAllExpanded: () => void;
 }) {
   const showSort = count > 1;
   if (!expanded) {
@@ -866,13 +917,32 @@ function AssignmentsSectionCaption({
     // explicit request, it should read as "under the Assignments (N
     // active) caption," separating the heading from the card list below,
     // not separating the caption from "New Outbound" above it.
-    <div className="flex flex-col gap-3 pb-2">
-      <div className="flex items-center justify-between gap-2">
+    //
+    // No `gap` at all now (was `gap-0.5`/2px, before that `gap-3`/12px) —
+    // per explicit follow-up request, removed entirely: the heading row's
+    // own `py-2` below (8px top AND bottom, was just implicit/0) already
+    // pushes the separator down 8px from the text baseline on its own, so
+    // an additional gap on top of that padding was redundant.
+    //
+    // `pl-2` (8px) lives on the HEADING ROW itself now, not this outer
+    // wrapper — per explicit follow-up correction: putting it here
+    // originally also inset the `Separator` below (a block child of this
+    // same wrapper, so it inherited the same left edge), shortening it
+    // instead of leaving it flush edge-to-edge like every other separator
+    // in this rail. The heading row is the only thing that should actually
+    // shift right.
+    <div className="flex flex-col pb-2">
+      <div className="flex items-center justify-between gap-2 pl-2 py-2">
         <div className="flex items-baseline gap-1">
           <span className="lyra-body-md-emphasis text-lyra-fg-default">Assignments</span>
           <span className="lyra-body-md text-lyra-fg-secondary">({count} active)</span>
         </div>
-        {showSort && <AssignmentsSortButton value={sort} onValueChange={onSortChange} />}
+        {showSort && (
+          <div className="flex items-center gap-1">
+            <AssignmentsExpandCollapseAllButton allExpanded={allExpanded} onToggle={onToggleAllExpanded} />
+            <AssignmentsSortButton value={sort} onValueChange={onSortChange} />
+          </div>
+        )}
       </div>
       <Separator />
     </div>
@@ -7104,6 +7174,22 @@ function CustomerInformationPanelBody({
    *  comment below). */
   latestNote: CustomerLatestNote;
 }) {
+  // Controlled open/closed state for the Latest Interaction/Latest Note
+  // pair below (each defaults open, matching their old `defaultValue`s) —
+  // needed so the two cards' shared "match heights" className (see
+  // `bothCardsOpen` below) can be turned OFF the instant either one
+  // collapses. Forcing equal height unconditionally (the first pass at
+  // this) made collapsing pointless: a collapsed card was still stretched
+  // to match its still-open sibling, leaving a big dead gray gap where its
+  // content used to be — confirmed via screenshot, and explicitly not what
+  // was wanted. Equal height only actually makes sense while BOTH cards
+  // are showing real content to compare side by side; the moment either
+  // one closes, both fall back to their own natural content height so
+  // collapsing always visibly does something.
+  const [latestInteractionAccordionValue, setLatestInteractionAccordionValue] = useState("latest-interaction");
+  const [latestNoteAccordionValue, setLatestNoteAccordionValue] = useState("latest-note");
+  const bothCardsOpen = latestInteractionAccordionValue !== "" && latestNoteAccordionValue !== "";
+
   return (
     <div className="flex flex-col">
       {/* No avatar/name/presence block here — the InteriorPanel's own
@@ -7125,27 +7211,38 @@ function CustomerInformationPanelBody({
           `activeTab` state both this body and that header tab row need
           and passes this component just the number.
 
-          This field list and the Latest Interaction/Latest Note column
-          below it are now both explicitly gated to the Overview tab
-          (`activeTab === ...indexOf("Overview")`) — previously only the
-          accordions had that gate, so this list rendered on every tab,
-          including the new Detail tab added below, which shows its own
-          full editable version of the same fields
+          This field list and the Customer Overview/Latest Interaction/
+          Latest Note block below it are now both explicitly gated to the
+          Overview tab (`activeTab === ...indexOf("Overview")`) —
+          previously only the accordions had that gate, so this list
+          rendered on every tab, including the new Detail tab added below,
+          which shows its own full editable version of the same fields
           (`CustomerDetailTabContent`) and would otherwise show them twice.
 
-          The field list and the Latest Interaction/Latest Note column now
-          share one `.lyra-card-split-wrap`/`.lyra-card-split` row (see
-          lyra-tokens.css) instead of always stacking — reusing the same
-          family `DashboardCard` bodies already use for "a couple of
-          regions side by side, stacking once the container's own width
-          gets tight" rather than inventing a new one (its ≤480px threshold
-          already fits here on both ends: this panel's normal resizable
-          range, ~350–425px per `InteriorPanel`'s own min/max defaults,
-          stays comfortably under it — single column, unchanged from
-          before this existed — and `allowFullScreen`'d width is easily
-          past it — side by side). `align-items: stretch` (that family's
-          own default) is harmless here specifically because `Accordion`'s
-          own root has no `h-full`/`flex-1` of its own (accordion.tsx) — a
+          Layout (per explicit follow-up request): Customer Overview is now
+          its own full-width row on top; Latest Interaction and Latest Note
+          share one `.lyra-card-split-wrap`/`.lyra-card-split` row below it
+          (see lyra-tokens.css) — reusing the same family `DashboardCard`
+          bodies already use for "a couple of regions side by side,
+          stacking once the container's own width gets tight" rather than
+          inventing a new one (its ≤480px threshold already fits here on
+          both ends: this panel's normal resizable range, ~350–425px per
+          `InteriorPanel`'s own min/max defaults, stays comfortably under
+          it — single column, unchanged from before this existed — and
+          `allowFullScreen`'d width is easily past it — side by side).
+          (Earlier arrangement, superseded here: Latest Interaction paired
+          with Customer Overview in the split row, Latest Note full-width
+          below both — moved per this follow-up request so Latest
+          Interaction sits directly left of Latest Note instead.)
+
+          Top/bottom order (both row and stacked state) falls straight out
+          of plain DOM order — flexbox doesn't reverse either axis without
+          an explicit `row-reverse`/`column-reverse`, so whichever child
+          comes FIRST in the JSX is the TOP block regardless of state here
+          (Customer Overview, full width, has no row-state sibling to sit
+          left/right of). `align-items: stretch` (the split family's own
+          default) is harmless here specifically because `Accordion`'s own
+          root has no `h-full`/`flex-1` of its own (accordion.tsx) — a
           stretched flex item just leaves invisible empty space below its
           natural-height content, not a visibly over-tall bordered box.
 
@@ -7155,51 +7252,74 @@ function CustomerInformationPanelBody({
           fixed`, a deliberately fixed 12rem column; `.lyra-card-split-
           chart`, `flex: 1 1 0%` for the region beside it) exist precisely
           because its usual pairing is one fixed-width region next to one
-          flexible one, not two equal columns. Left as plain children here,
-          the two columns took their own natural content width instead —
-          the field list (narrow content) versus the Latest Interaction/
-          Latest Note column (padding + longer text) rendering visibly
-          unequal. The `.lyra-card-split-even` modifier (lyra-tokens.css)
+          flexible one, not two equal columns. Left as plain children, the
+          two `Accordion`s took their own natural content width instead,
+          rendering visibly unequal (each has its own different content
+          length). The `.lyra-card-split-even` modifier (lyra-tokens.css)
           on both fixes that, splitting the row evenly (and correctly
           resetting back to full-width at the stacked stage, same as
           `.lyra-container-grid`/`.lyra-form-grid`'s own children — see
           that modifier's own doc comment for why a bare `flex-1` utility
           class alone isn't enough here).
 
-          Left/right order (row state) and top/bottom order (stacked
-          state) both fall straight out of plain DOM order here — flexbox
-          doesn't reverse either axis without an explicit `row-reverse`/
-          `column-reverse`, so whichever child comes FIRST in the JSX is
-          both the LEFT column in the row state and the TOP block once
-          stacked. Per explicit request, the Latest Interaction/Latest
-          Note column renders first (left when full width, on top of
-          Customer Overview once collapsed) and Customer Overview second
-          (right when full width, below both cards once collapsed) — the
-          reverse of this pair's original order, when Customer Overview
-          used to render first. */}
+          Gap consistency (per explicit request — rows and columns both
+          16px): the outer `flex flex-col gap-4` below already puts 16px
+          between Customer Overview and the split row. `.lyra-card-split`'s
+          own shared rule (lyra-tokens.css) defaults to `gap: 1.5rem`
+          (24px) — correct for its other consumers, but inconsistent with
+          this 16px if left alone. Overridden here via an inline `style`
+          (not a Tailwind class) specifically because `.lyra-card-split`'s
+          `gap` comes from a plain CSS class, not a Tailwind utility —
+          `cn()`/`tailwind-merge` only dedupes genuine Tailwind utility
+          conflicts, so a `gap-4` class alongside `lyra-card-split` would
+          just tie in specificity with it and depend on stylesheet source
+          order to win, the exact fragility CONTRIBUTING.md already warns
+          about elsewhere in this file. An inline style has no such
+          ambiguity — it always wins. Applies identically whether the row
+          is side-by-side or (≤480px) stacked to a column, since inline
+          styles aren't scoped to a breakpoint the way the shared class's
+          own `@container` rule is — 16px either way, matching the 16px
+          above it. */}
       {activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") && (
-        <div className="px-4 py-3 lyra-card-split-wrap">
-          <div className="lyra-card-split">
-            {/* Latest Interaction + Latest Note column. Grouped under one
-                plain flex column (not its own Accordion — each card below
-                keeps its own independent collapsible Accordion) so the two
-                cards travel together as a single `.lyra-card-split-even`
-                child: one unit sitting left of Customer Overview at full
-                width, both cards stacking above it once collapsed (see the
-                left/right, top/bottom ordering comment above). `gap-4`
-                matches the vertical card-stack spacing already used for
-                the Directory tab's phone-slot list (`CustomerDirectoryTabContent`). */}
-            <div className="flex flex-col gap-4 lyra-card-split-even">
-              {/* Latest Interaction summary. Wrapped in a neutral container
-                  (`bg-lyra-bg-control-subtle`, rounded) per CONTRIBUTING.md's
-                  "Composing panel body content" convention, rather than
-                  sitting flush against the panel background — the
-                  convention to follow for any future card-like block added
-                  here, not a one-off choice for this block alone.
+        <div className="px-4 py-3 flex flex-col gap-4">
+          {/* Customer Overview field list. Wrapped in a neutral container
+              (`bg-lyra-bg-control-subtle`, rounded) per CONTRIBUTING.md's
+              "Composing panel body content" convention, rather than
+              sitting flush against the panel background — the convention
+              to follow for any future card-like block added here, not a
+              one-off choice for this block alone. Collapsible via lyra-
+              ui's `Accordion` (single item, open by default) rather than a
+              plain static block, so the panel can be collapsed once read. */}
+          <Accordion
+            className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
+            defaultValue="customer-overview"
+            items={[
+              {
+                id: "customer-overview",
+                title: "Customer Overview",
+                content: (
+                  <div className="flex flex-col gap-3">
+                    {fields.map((field, index) => (
+                      <div key={field.label} className="flex flex-col gap-3">
+                        <div className="flex items-center justify-between gap-4">
+                          <Label label={field.label} />
+                          <span className="lyra-body-md text-lyra-fg-secondary whitespace-nowrap">
+                            {field.value}
+                          </span>
+                        </div>
+                        {index < fields.length - 1 && <Separator />}
+                      </div>
+                    ))}
+                  </div>
+                ),
+              },
+            ]}
+          />
 
-                  Collapsible via lyra-ui's `Accordion` (single item, open by
-                  default) rather than a plain static block, so the panel can
-                  be collapsed once read. Its trigger renders the "Latest
+          <div className="lyra-card-split-wrap">
+            <div className="lyra-card-split" style={{ gap: "1rem" }}>
+              {/* Latest Interaction summary — directly left of Latest Note
+                  (per explicit request). Its trigger renders the "Latest
                   Interaction" title itself — no hand-styled label needed
                   here at all, which also fixes an earlier mistake: that
                   label used to be a hand-built `uppercase tracking-wide`
@@ -7231,8 +7351,64 @@ function CustomerInformationPanelBody({
                   "dot + label" idiom already established elsewhere in this
                   file. */}
               <Accordion
-                className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
-                defaultValue="latest-interaction"
+                // `h-auto` (was `h-full`, which didn't actually work — see
+                // below), and now applied CONDITIONALLY (was unconditional)
+                // — per explicit request, these two cards should match
+                // heights row-to-row instead of each sizing to its own
+                // (different-length) content, but ONLY while both are open.
+                // An earlier unconditional version made collapsing either
+                // card pointless: a collapsed card still stretched to match
+                // its still-open sibling, leaving a big dead gray gap where
+                // its content used to be (confirmed via screenshot) — the
+                // opposite of what collapsing should do. `bothCardsOpen`
+                // (derived from this Accordion's own controlled `value`,
+                // now wired below instead of `defaultValue`, plus Latest
+                // Note's matching state) gates `h-auto` off the instant
+                // either card closes, so both fall back to their own
+                // natural content height and collapsing always visibly
+                // does something. `CUSTOMER_INFO_ACCORDION_CLASSNAME`'s own
+                // `h-fit` is what was overriding the `.lyra-card-split`
+                // row's default `align-items: stretch` in the first place
+                // (see that constant's own doc comment — "harmless" there
+                // meant "leaves invisible empty space," which was true
+                // right up until unequal heights became visibly the wrong
+                // look here).
+                //
+                // `h-full` (100%) was the first attempt at matching heights
+                // and, confirmed live, doesn't work: a percentage height
+                // only resolves against a containing block with a DEFINITE
+                // height, and `.lyra-card-split` (the flex row) has no
+                // explicit height of its own — it's exactly as tall as its
+                // stretched children need it to be, which is indeterminate
+                // for percentage purposes. `100%` of an indefinite height
+                // computes as `auto` instead, i.e. it silently did nothing
+                // different from the `h-fit` it was supposed to override.
+                // `h-auto` fixes this by not fighting the flex algorithm at
+                // all — with no explicit height set, a flex item under the
+                // container's default `align-items: stretch` is stretched
+                // to the row's cross size natively by the flex layout
+                // algorithm itself (the same mechanism any other unequal-
+                // content card row relies on for matching heights,
+                // `DashboardCard` bodies included — none of them set an
+                // explicit height on the stretched item either).
+                //
+                // `cn()`/`tailwind-merge` resolves the conflicting height
+                // utility in favor of whichever comes last, so this
+                // reliably wins over the shared constant's `h-fit`
+                // regardless of source order (when present at all — see
+                // `bothCardsOpen &&` above) — unlike the row's own `gap`
+                // override above, `h-fit`/`h-auto` are both genuine
+                // Tailwind utilities for the same CSS property, which is
+                // exactly what `tailwind-merge` is built to dedupe
+                // correctly (verified directly against the installed
+                // `tailwind-merge` version, not assumed).
+                className={cn(
+                  CUSTOMER_INFO_ACCORDION_CLASSNAME,
+                  "lyra-card-split-even",
+                  bothCardsOpen && "h-auto"
+                )}
+                value={latestInteractionAccordionValue}
+                onValueChange={setLatestInteractionAccordionValue}
                 items={[
                   {
                     id: "latest-interaction",
@@ -7259,19 +7435,28 @@ function CustomerInformationPanelBody({
                 ]}
               />
 
-              {/* Latest Note. Same neutral-container + collapsible-
-                  Accordion treatment as Latest Interaction directly above
-                  it (see that block's own comment for the full
-                  container/collapsible rationale — applies identically
-                  here), synthesized by `buildLatestNote` the same
-                  deterministic-per-customer way. No status `Badge` here —
-                  notes don't carry a resolution status the way an
-                  interaction does — just the author + relative time, same
-                  placement `latestInteraction`'s case-id/handled-by line
-                  uses. */}
+              {/* Latest Note — directly right of Latest Interaction (per
+                  explicit request). Same neutral-container + collapsible-
+                  Accordion treatment as Latest Interaction beside it (see
+                  that block's own comments for the container/collapsible
+                  rationale — applies identically here), synthesized by
+                  `buildLatestNote` the same deterministic-per-customer way.
+                  No status `Badge` here — notes don't carry a resolution
+                  status the way an interaction does — just the author +
+                  relative time, same placement `latestInteraction`'s
+                  case-id/handled-by line uses. */}
               <Accordion
-                className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
-                defaultValue="latest-note"
+                // See the matching comment on the Latest Interaction
+                // `Accordion` just above for the full "h-auto, now
+                // conditional on `bothCardsOpen`" rationale — applies
+                // identically here, mirrored rather than repeated in full.
+                className={cn(
+                  CUSTOMER_INFO_ACCORDION_CLASSNAME,
+                  "lyra-card-split-even",
+                  bothCardsOpen && "h-auto"
+                )}
+                value={latestNoteAccordionValue}
+                onValueChange={setLatestNoteAccordionValue}
                 items={[
                   {
                     id: "latest-note",
@@ -7290,38 +7475,6 @@ function CustomerInformationPanelBody({
                 ]}
               />
             </div>
-
-            {/* Customer Overview field list. Wrapped in the same neutral
-                container + collapsible `Accordion` treatment as the Latest
-                Interaction/Latest Note column beside it (see that column's
-                own comments for the container/collapsible rationale —
-                applies identically here), rather than the field rows
-                sitting flush against the panel background. */}
-            <Accordion
-              className={cn(CUSTOMER_INFO_ACCORDION_CLASSNAME, "lyra-card-split-even")}
-              defaultValue="customer-overview"
-              items={[
-                {
-                  id: "customer-overview",
-                  title: "Customer Overview",
-                  content: (
-                    <div className="flex flex-col gap-3">
-                      {fields.map((field, index) => (
-                        <div key={field.label} className="flex flex-col gap-3">
-                          <div className="flex items-center justify-between gap-4">
-                            <Label label={field.label} />
-                            <span className="lyra-body-md text-lyra-fg-secondary whitespace-nowrap">
-                              {field.value}
-                            </span>
-                          </div>
-                          {index < fields.length - 1 && <Separator />}
-                        </div>
-                      ))}
-                    </div>
-                  ),
-                },
-              ]}
-            />
           </div>
         </div>
       )}
@@ -8143,6 +8296,21 @@ export function AgentNextGenPage({
   // `interactions` itself in insertion order for everything else that reads
   // it (`activeInteraction`, dismiss/redial handlers, etc.).
   const [assignmentSort, setAssignmentSort] = useState<AssignmentSortValue>("lastUpdated");
+  // Drives `AssignmentsExpandCollapseAllButton` — see that component's own
+  // doc comment for why this is a one-shot "which direction does the NEXT
+  // click bulk-apply" toggle (`channelsAllExpanded`) plus a version nonce
+  // (`channelsExpandedOverrideVersion`, bumped on every click) rather than
+  // a plain controlled boolean threaded straight into every card: each
+  // `InteractionNavItem`'s own channel list still needs to keep toggling
+  // independently after a bulk action, not stay permanently locked to this
+  // one shared value. Both passed down as one `channelsExpandedOverride`
+  // object (interaction-nav-item.tsx) at each card's own call site below.
+  const [channelsAllExpanded, setChannelsAllExpanded] = useState(true);
+  const [channelsExpandedOverrideVersion, setChannelsExpandedOverrideVersion] = useState(0);
+  const handleToggleAllChannelsExpanded = () => {
+    setChannelsAllExpanded((v) => !v);
+    setChannelsExpandedOverrideVersion((v) => v + 1);
+  };
   const [activeInteractionId, setActiveInteractionId] = useState<string | null>(
     () => initialInteraction?.id ?? null
   );
@@ -8846,6 +9014,95 @@ export function AgentNextGenPage({
     setSidePanelFullScreen(false);
     lastSidePanelOpenChoice.current = false;
   };
+
+  /* Per-assignment memory for the Customer Information panel's open/closed
+     and full-screen state — per explicit request: switching between two
+     already-active assignments (e.g. clicking a different LeftNav
+     assignment card) must not let one assignment's full-screen/closed
+     choice leak onto another. Closing the panel on assignment A and
+     leaving it full-screen on assignment B, then switching back to A,
+     should show A closed again — not full-screen just because that's
+     wherever the shared `sidePanelOpen`/`sidePanelFullScreen` state
+     happened to land last.
+
+     Deliberately a small helper called from every place `activeInteractionId`
+     changes, rather than a `useEffect` keyed on it (the "effect instead of
+     touching every call site" pattern this file otherwise prefers — see
+     `panelFullScreen`'s own reset effect above). An effect can't do this
+     correctly here: several of the switch call sites below also set
+     `sidePanelOpen` themselves (their own `isNewInteraction` branches) in
+     the SAME batch as `setActiveInteractionId`. React applies every
+     setState in that batch together in one render, so by the time any
+     effect watching `activeInteractionId` could run, `sidePanelOpen`
+     already reflects the NEW assignment's value — there's no render left
+     in which the OUTGOING assignment's actual value is still visible to
+     read. This helper instead reads `sidePanelOpen`/`sidePanelFullScreen`
+     synchronously, via plain closure, at the moment it's called — BEFORE
+     any state update from this switch has been applied — which is exactly
+     the outgoing assignment's real last value every time.
+
+     Only covers open/full-screen, per explicit request — `sidePanelPinned`/
+     `sidePanelWidth` stay shared across assignments (read more like a
+     general layout preference than something tied to one specific
+     assignment, and weren't asked for); extend the same way if that's ever
+     requested too.
+
+     A never-before-seen assignment id (no snapshot yet) always gets
+     `fullScreen: false` — a fresh assignment should never silently inherit
+     full-screen from whatever was active before — but `sidePanelOpen` is
+     deliberately left untouched here: each "new interaction" call site
+     below already decides that correctly via `lastSidePanelOpenChoice`
+     right after calling this, and re-deciding it here too would just be a
+     second, competing source of truth for the same value.
+
+     Restoring a different assignment's own open/full-screen values here
+     used to still visibly play `SidePanel`'s own width/opacity transitions
+     (side-panel.tsx — `transition: "width 250ms cubic-bezier(...)"` on
+     open/close, `"opacity 150ms ease 30ms"` on its inner content) exactly
+     as if the agent had just clicked the toggle themselves — switching TO
+     an assignment whose panel happens to be closed (or full-screen)
+     visibly slid the panel shut (or expanded it) on every single switch,
+     read as "disorienting" per explicit report, since none of that was an
+     actual open/close ACTION, just this assignment's panel already having
+     been left that way. A first attempt suppressed that transition
+     outright (a `!important` CSS class toggled on briefly via this
+     helper), which fixed the sliding but traded it for a different
+     problem, also reported live: the panel then just snapped into view
+     with no animation at all, while the content column beside it (see
+     `key={`interaction-${activeInteraction.id}`}` below) was still doing
+     its own soft `animate-in fade-in-0` — the panel read as "not fading,
+     just appearing," out of sync with everything else on the same switch.
+
+     Fixed properly at the render site instead (not here): the panel is
+     now wrapped in a `key`ed div using `activeInteraction.id`, the exact
+     same "force a full remount on every genuine switch" technique the
+     content column already uses for its own fade-in — see that div's own
+     doc comment further down for why this solves BOTH problems at once
+     without any transition-suppression trickery. This helper's own job
+     stays exactly what it says above: decide WHAT `sidePanelOpen`/
+     `sidePanelFullScreen` should be for the incoming assignment, not HOW
+     that change gets animated. */
+  const sidePanelStateByAssignmentId = useRef(new Map<string, { open: boolean; fullScreen: boolean }>());
+  const switchActiveInteraction = (nextId: string | null) => {
+    const outgoingId = activeInteractionId;
+    if (outgoingId && outgoingId !== nextId) {
+      sidePanelStateByAssignmentId.current.set(outgoingId, {
+        open: sidePanelOpen,
+        fullScreen: sidePanelFullScreen,
+      });
+    }
+    setActiveInteractionId(nextId);
+    if (nextId && nextId !== outgoingId) {
+      const saved = sidePanelStateByAssignmentId.current.get(nextId);
+      if (saved) {
+        setSidePanelOpen(saved.open);
+        setSidePanelFullScreen(saved.fullScreen);
+      } else {
+        setSidePanelFullScreen(false);
+      }
+    }
+  };
+
   // Click on the header's toggle icon — always opens/closes the panel, in
   // whatever mode `effectiveSidePanelPinned` currently puts it in: docked
   // inline while pinned (the normal case, since `sidePanelPinned` itself
@@ -9054,7 +9311,7 @@ export function AgentNextGenPage({
         };
       });
     });
-    setActiveInteractionId(selection.contact.id);
+    switchActiveInteraction(selection.contact.id);
     // Only a genuinely NEW interaction touches Customer Information's
     // open/closed state at all — starting a second interaction with a
     // customer who already has one open leaves the panel exactly as the
@@ -9146,7 +9403,7 @@ export function AgentNextGenPage({
         i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, channelStatuses: undefined } : interaction
       );
     });
-    setActiveInteractionId(id);
+    switchActiveInteraction(id);
     if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
   };
 
@@ -9199,7 +9456,7 @@ export function AgentNextGenPage({
         i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, channelStatuses: undefined } : interaction
       );
     });
-    setActiveInteractionId(id);
+    switchActiveInteraction(id);
     if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
   };
 
@@ -9273,7 +9530,7 @@ export function AgentNextGenPage({
           : interaction
       );
     });
-    setActiveInteractionId(id);
+    switchActiveInteraction(id);
     if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
   };
 
@@ -9320,7 +9577,19 @@ export function AgentNextGenPage({
     // updates can never disagree about what's actually left.
     const remaining = interactions.filter((interaction) => interaction.id !== id);
     setInteractions(remaining);
-    setActiveInteractionId((current) => (current === id ? remaining[0]?.id ?? null : current));
+    // The dismissed id no longer belongs to any real assignment — drop its
+    // Customer Information panel snapshot too (see `switchActiveInteraction`
+    // above), so it can't resurface stale open/full-screen values if some
+    // future assignment ever happened to reuse the same id.
+    sidePanelStateByAssignmentId.current.delete(id);
+    // Plain closure read (not a functional updater) — safe here since
+    // nothing else in this same handler changes `activeInteractionId`
+    // first, and `switchActiveInteraction` itself already needs a real,
+    // synchronous "outgoing id" read rather than a queued updater (see its
+    // own doc comment for why).
+    if (activeInteractionId === id) {
+      switchActiveInteraction(remaining[0]?.id ?? null);
+    }
   };
 
   const handleDismissChannel = (id: string, channel: Pick<InteractionChannel, "id" | "type">) => {
@@ -9850,7 +10119,7 @@ export function AgentNextGenPage({
         i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id } : interaction
       );
     });
-    setActiveInteractionId(id);
+    switchActiveInteraction(id);
     if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
     setNotifications((prev) => prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n)));
   };
@@ -10692,9 +10961,9 @@ export function AgentNextGenPage({
         <LeftNav
           items={buildNavItems(
             Boolean(activeInteraction),
-            () => { setActiveInteractionId(null); setShowSettings(false); },
+            () => { switchActiveInteraction(null); setShowSettings(false); },
             showSettings,
-            () => { setShowSettings(true); setActiveInteractionId(null); }
+            () => { setShowSettings(true); switchActiveInteraction(null); }
           )}
           open={navOpen}
           onToggle={() => setNavOpen((v) => !v)}
@@ -10711,6 +10980,19 @@ export function AgentNextGenPage({
           // (This app used to opt into `itemsFirst` — rail above the
           // caption/cards instead — per an earlier explicit request; that
           // request was superseded by this one.)
+          //
+          // "New Outbound" itself has moved several times now: started as
+          // this exact `pinnedHeader` (fixed at the very TOP of the whole
+          // rail, above the "Assignments" caption); moved to a `beforeItems`
+          // slot (left-nav.tsx) pinning it to the STICKY BOTTOM rail
+          // alongside Home/Settings (reverted — reported "problematic");
+          // moved again to a plain child of `header`, scrolling directly
+          // below the caption (reverted per THIS request — "move new
+          // outbound back above assignments header"). Landed back here,
+          // exactly where it started. `beforeItems` (added to left-nav.tsx
+          // for the middle arrangement) was already removed entirely once
+          // nothing used it — not re-added for this reversion since
+          // `pinnedHeader` covers this exact spot on its own.
           pinnedHeader={
             <CreateNew
               title="New Outbound"
@@ -10729,6 +11011,8 @@ export function AgentNextGenPage({
                 count={interactions.length}
                 sort={assignmentSort}
                 onSortChange={setAssignmentSort}
+                allExpanded={channelsAllExpanded}
+                onToggleAllExpanded={handleToggleAllChannelsExpanded}
               />
               {/* No cards until the agent actually starts one above — each
                   card is one contact (or quick-dialed number), with every
@@ -10881,7 +11165,7 @@ export function AgentNextGenPage({
                     // to see. Harmless/redundant on a real switch, where
                     // the effect would already handle it.
                     onClick={() => {
-                      setActiveInteractionId(interaction.id);
+                      switchActiveInteraction(interaction.id);
                       setPanelFullScreen(false);
                     }}
                     awaitingResponse={channels.some((c) => c.awaitingResponse)}
@@ -10892,6 +11176,26 @@ export function AgentNextGenPage({
                     onDismiss={() => handleDismissInteraction(interaction.id)}
                     onDismissChannel={(channel) => handleDismissChannel(interaction.id, channel)}
                     headerAction={getHeaderAction(interaction.id)}
+                    // Per explicit request: the expanded card's "+" (Add
+                    // Channel, `getHeaderAction` above) is replaced with a
+                    // chevron that expands/collapses this card's own
+                    // channel list — `headerAction` itself is left wired
+                    // above (harmless; `InteractionNavItem` ignores it
+                    // whenever `collapsible` is true — see that prop's own
+                    // doc comment in interaction-nav-item.tsx) rather than
+                    // removed, so Add Channel is one prop-flip away from
+                    // coming back to this exact spot if that's ever wanted
+                    // again.
+                    collapsible
+                    // "Collapse all"/"Expand all" (`AssignmentsExpandCollapseAllButton`
+                    // above) — see `channelsAllExpanded`'s own doc comment
+                    // near its declaration for why this is a one-shot
+                    // `{ expanded, version }` override object rather than a
+                    // plain controlled boolean.
+                    channelsExpandedOverride={{
+                      expanded: channelsAllExpanded,
+                      version: channelsExpandedOverrideVersion,
+                    }}
                     // Kept in sync with the ChannelToggle bar in this
                     // interaction's record-header PageHeader — see
                     // ActiveInteraction.currentChannelId's own doc comment.
@@ -10946,6 +11250,82 @@ export function AgentNextGenPage({
                 right stacks vertically. */}
             <div className="flex flex-1 overflow-hidden min-h-0">
               {showPanelToggle && activeInteraction && (
+                // `key`ed on the assignment's own id, same "force a full
+                // remount on every genuine switch" technique the content
+                // column further down already uses (see that div's own
+                // `animate-in fade-in-0 duration-200 delay-150 fill-mode-
+                // backwards` doc comment for the full explanation) —
+                // applied here too per explicit follow-up report: an
+                // earlier fix suppressed `SidePanel`'s own width/opacity
+                // transition instead (a briefly-toggled `!important` CSS
+                // class), which stopped it sliding open/shut but replaced
+                // that with a different problem — the panel then just
+                // snapped into view with no animation at all while the
+                // content column beside it was still doing its own soft
+                // fade, so the two read as out of sync ("not fading, just
+                // appearing").
+                //
+                // Remounting fixes both at once: a freshly-inserted DOM
+                // node has no PRIOR width/opacity value on that same node
+                // for `SidePanel`'s own `transition` to animate FROM, so
+                // its width-slide never plays (no suppression hack
+                // needed) — but a CSS *animation* (unlike a *transition*)
+                // still runs from its keyframes at mount regardless, which
+                // is exactly what `animate-in fade-in-0` on this wrapper
+                // is, so the panel now genuinely fades in, on the same
+                // `duration-200 delay-150` timing as the content column,
+                // instead of either sliding open or hard-cutting into
+                // place.
+                //
+                // Side effect, expected rather than a regression: this
+                // panel's own internal `activeTab` (Overview/Detail/
+                // Directory — `CustomerInformationSidePanel`'s own
+                // `useState(0)`) now resets to Overview on every genuine
+                // assignment switch too, since remounting discards it
+                // along with everything else in the subtree. Landing on a
+                // different customer's Overview tab first, rather than
+                // wherever the PREVIOUS customer's panel happened to be
+                // left, matches the same "genuinely new context should
+                // start from the top" reasoning `lastActiveInteractionIdRef`
+                // already documents above for the transcript's own
+                // Customer History tab/session state.
+                //
+                // `z-[5]` here (on THIS wrapper, not just relying on
+                // `SidePanel`'s own internal `z-[5]`) — per explicit
+                // follow-up report: a full-screen restore (this panel
+                // unpinned/`position: absolute`, meant to overlay the
+                // whole content column) briefly flashed with the
+                // transcript visible on top instead of properly
+                // underneath. Root cause is a well-known CSS gotcha: ANY
+                // element with a live `animation-name` (which `animate-in`
+                // sets, permanently, for as long as the class stays on the
+                // element — not just while actually mid-play) forms its
+                // OWN stacking context, same as `opacity`/`transform`/
+                // `filter` do. Before this wrapper existed, `SidePanel`'s
+                // own `position: absolute; z-index: 5` sat DIRECTLY in
+                // `Container`'s stacking context, at the same explicit-
+                // positive-z-index tier as the record header's sticky
+                // separator (`z-[1]`), `InteriorPanel` (`z-[3]`), and the
+                // shared panel's fullscreen overlay (`z-[9]`) — see those
+                // components' own doc comments for this whole tier system.
+                // Once wrapped, `z-[5]` on `SidePanel` only orders things
+                // INSIDE this new stacking context (nothing else is in
+                // here to compete with) — this wrapper itself, having NO
+                // z-index of its own, instead got silently pushed down to
+                // the plain "z-index: auto" tier alongside the content
+                // column sibling next to it, so the two started competing
+                // by DOM ORDER instead of by their intended z-index
+                // values, and the content column (which happens to come
+                // second in the JSX) could paint on top. Setting `z-[5]`
+                // explicitly on this wrapper (a flex item of the
+                // `flex flex-1 overflow-hidden min-h-0` row above — z-index
+                // applies to flex items without needing `position` set)
+                // restores the exact same tier this whole subtree occupied
+                // before the wrapper was introduced.
+                <div
+                  key={`side-panel-${activeInteraction.id}`}
+                  className="shrink-0 z-[5] animate-in fade-in-0 duration-200 delay-150 fill-mode-backwards"
+                >
                 <CustomerInformationSidePanel
                   open={sidePanelOpen}
                   // Always unpinned (floating overlay) while full-screen —
@@ -10980,6 +11360,7 @@ export function AgentNextGenPage({
                   onWidthChange={setSidePanelWidth}
                   onResizeStateChange={setSidePanelResizing}
                 />
+                </div>
               )}
               <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
 
@@ -11048,7 +11429,43 @@ export function AgentNextGenPage({
                 // one's already open) should still remount and replay the
                 // fade-in, not just re-render the same subtree with new
                 // props, the way a static key would.
-                <div key={`interaction-${activeInteraction.id}`} className="flex flex-1 flex-col min-w-0 overflow-hidden animate-in fade-in-0 duration-200">
+                //
+                // `delay-150 fill-mode-backwards` added to the plain
+                // `animate-in fade-in-0` above (per explicit request — a
+                // switch between assignments should read as one clean soft
+                // fade, not a flash of whatever this specific assignment's
+                // own content happens to animate on mount). A fresh remount
+                // isn't actually blank underneath: things like an open-by-
+                // default `Accordion` (Customer Information's Overview
+                // cards) run their own `animate-accordion-down` height
+                // grow-in the INSTANT they're painted, regardless of
+                // whether the surrounding wrapper is still fading up from
+                // opacity 0 — CSS animations tied to a class/data-attribute
+                // that's already true at first paint still play from their
+                // first frame, they don't wait for an ancestor's opacity to
+                // reach 1 first. With only a plain fade before, that meant
+                // briefly seeing pieces of the new assignment (cards
+                // growing open, etc.) settle into place THROUGH the fade
+                // rather than after it — every switch showing a flicker of
+                // its own internals assembling.
+                //
+                // `fill-mode-backwards` (tailwindcss-animate's own utility
+                // for `animation-fill-mode`) holds the fade-in animation's
+                // FIRST frame — opacity 0 — for the entire `delay-150`
+                // window before the animation itself starts, keeping this
+                // whole subtree invisible while those nested mount-time
+                // animations run their course out of sight. 150ms
+                // comfortably covers the accordion height animation's own
+                // 200ms duration by the time the fade-in itself finishes
+                // (150ms delay + 200ms fade ≈ 350ms total), so by the time
+                // anything here actually becomes visible, the new
+                // assignment has already finished assembling underneath —
+                // the agent just sees one soft fade to the fully-settled
+                // page, never the assembly itself. `duration-200` (below)
+                // is unchanged — this only changes WHEN the fade starts and
+                // HOW it looks the moment it does, not how long the actual
+                // fade takes once it begins.
+                <div key={`interaction-${activeInteraction.id}`} className="flex flex-1 flex-col min-w-0 overflow-hidden animate-in fade-in-0 duration-200 delay-150 fill-mode-backwards">
                   {showPageHeader && (
                     // ── Record header, replaced with a tab bar ──
                     // Per explicit request: the old `PageHeader` (customer
