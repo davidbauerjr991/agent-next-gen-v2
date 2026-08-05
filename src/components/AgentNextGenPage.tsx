@@ -814,10 +814,15 @@ function AssignmentsSortButton({
   );
 }
 
-/* "Assignments (N active)" section caption — sits directly below the
-   Home/Settings rail (LeftNav's `itemsFirst`, left-nav.tsx) and above the
-   list of InteractionNavItem cards, both passed together as `header` at the
-   LeftNav call site below. `count` is `interactions.length`, the exact same
+/* "Assignments (N active)" section caption — sits at the very top of
+   LeftNav's scrollable `header` region (left-nav.tsx), directly under the
+   "New Outbound" `pinnedHeader`, with the list of InteractionNavItem cards
+   below it — both passed together as `header` at the LeftNav call site
+   below. The Home/Settings rail itself renders LAST now (LeftNav's
+   default, non-`itemsFirst` order — see that call site's own comment for
+   why), sticky to the BOTTOM of the scroll region instead of the top, so
+   this caption + the cards are what scrolls, not the rail. `count` is
+   `interactions.length`, the exact same
    live list the cards render from, so the two numbers can't drift apart.
    Collapsed to icon-only rail (`expanded` false), the text has nowhere to
    go — but the sort button is a real standalone action, not just a label,
@@ -857,8 +862,11 @@ function AssignmentsSectionCaption({
     );
   }
   return (
+    // `Separator` moved below the heading row (was above it) — per
+    // explicit request, it should read as "under the Assignments (N
+    // active) caption," separating the heading from the card list below,
+    // not separating the caption from "New Outbound" above it.
     <div className="flex flex-col gap-3 pb-2">
-      <Separator />
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-baseline gap-1">
           <span className="lyra-body-md-emphasis text-lyra-fg-default">Assignments</span>
@@ -866,6 +874,7 @@ function AssignmentsSectionCaption({
         </div>
         {showSort && <AssignmentsSortButton value={sort} onValueChange={onSortChange} />}
       </div>
+      <Separator />
     </div>
   );
 }
@@ -4917,7 +4926,7 @@ function InteractionTranscript({
         onScroll={handleTranscriptScroll}
         className="h-full overflow-y-auto"
       >
-        <div className="w-full max-w-[1200px] mx-auto px-6 py-4 lyra-transcript-wrap">
+        <div className="w-full max-w-[1200px] mx-auto px-6 py-4">
           {sessionsToRender.map((session) => {
             // Falls back to `[]` for the synthetic "just launched" session
             // (not seeded into `sessionMessages` at mount, since it isn't
@@ -4985,7 +4994,27 @@ function InteractionTranscript({
                   onDismiss={session.id === lastSessionId ? onDismissChannel : undefined}
                 />
                 {messages.length > 0 && (
-                  <div className="flex flex-col gap-5 py-4">
+                  // `lyra-transcript-wrap` (container-type: inline-size,
+                  // lyra-tokens.css — drives the avatar-collapse breakpoint
+                  // below 400px) lives here, scoped to just this session's
+                  // own messages — NOT on any ancestor of
+                  // `TranscriptSessionSeparator` above (this div is that
+                  // separator's SIBLING, not its parent). Two earlier
+                  // placements both silently broke the separator's own
+                  // `sticky top-0` ("we lost that at some point"): first the
+                  // padded/centered column one level up from here, then
+                  // (when moving it out to fix that) the scroll container
+                  // itself — `container-type` implies CSS containment
+                  // wherever it sits, and turns out ANY contained ancestor
+                  // between a sticky element and its real scrolling
+                  // ancestor stops that element from sticking at all, even
+                  // the scrolling ancestor itself. This is the one spot
+                  // that measures every message's avatar (still a
+                  // descendant of THIS div) without being an ancestor of
+                  // the sticky separator at all — confirmed against a live
+                  // screenshot after the first fix didn't actually resolve
+                  // it.
+                  <div className="flex flex-col gap-5 py-4 lyra-transcript-wrap">
                     {messages.map((message) => (
                       <TranscriptMessageBubble
                         key={message.id}
@@ -5023,36 +5052,54 @@ function InteractionTranscript({
                     </p>
                   </div>
                 )}
+                {/* Live messages — this interaction's own sent/received
+                    messages (see `ActiveInteraction.liveMessages`'s own doc
+                    comment) — rendered here, INSIDE the last session's own
+                    per-session block (`session.id === lastSessionId`), not
+                    as a separate block after this whole `.map()` (where it
+                    used to live). Still no separator of its own — it's a
+                    continuation of the same open conversation, not a new
+                    session — but it has to be a DOM descendant of this same
+                    `<div key={session.id}>` for `TranscriptSessionSeparator`'s
+                    `sticky top-0` above to actually work once live messages
+                    are what's overflowing: a `position: sticky` element can
+                    only stick for as long as its OWN containing block still
+                    has height below it to scroll through. With live
+                    messages rendered as a sibling of this whole block
+                    instead of inside it, the fresh-launch session's own
+                    container held nothing but the separator itself (its
+                    real `messages` array is empty — the conversation is
+                    entirely live), so that container's height was
+                    essentially zero and the separator unstuck itself almost
+                    immediately — sticky worked for the fixed mock sessions
+                    (separator + real messages sharing one container) but
+                    not for a brand-new conversation (per explicit report:
+                    "sticky for existing conversations but new conversations
+                    ... when the conversation reaches an overflow-y it is
+                    not sticky"). */}
+                {session.id === lastSessionId && liveMessages.length > 0 && (
+                  <div className="flex flex-col gap-5 py-4">
+                    {liveMessages.map((message) => (
+                      <TranscriptMessageBubble
+                        key={message.id}
+                        message={{
+                          ...message,
+                          ...(message.sender === "customer" ? { name: displayName, initials: displayInitials } : {}),
+                          tags: liveMessageTags[message.id] ?? message.tags,
+                        }}
+                        tagPickerOpen={tagPickerOpenId === message.id}
+                        onTagPickerOpenChange={(open) => setTagPickerOpenId(open ? message.id : null)}
+                        onAddTag={(option) => addLiveTag(message.id, option)}
+                        onRemoveTag={(tagId) => removeLiveTag(message.id, tagId)}
+                        onClearTags={() => clearLiveTags(message.id)}
+                        onCopy={() => copyMessage(message.text)}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
-          {/* Live messages — this interaction's own sent/received messages
-              (see `ActiveInteraction.liveMessages`'s own doc comment),
-              appended after whichever of the two branches above rendered:
-              the fixed mock log's last session, or the fresh-launch
-              session's empty slate. No separator of its own — it's a
-              continuation of the same open conversation, not a new
-              session. */}
-          {liveMessages.length > 0 && (
-            <div className="flex flex-col gap-5 py-4">
-              {liveMessages.map((message) => (
-                <TranscriptMessageBubble
-                  key={message.id}
-                  message={{
-                    ...message,
-                    ...(message.sender === "customer" ? { name: displayName, initials: displayInitials } : {}),
-                    tags: liveMessageTags[message.id] ?? message.tags,
-                  }}
-                  tagPickerOpen={tagPickerOpenId === message.id}
-                  onTagPickerOpenChange={(open) => setTagPickerOpenId(open ? message.id : null)}
-                  onAddTag={(option) => addLiveTag(message.id, option)}
-                  onRemoveTag={(tagId) => removeLiveTag(message.id, tagId)}
-                  onClearTags={() => clearLiveTags(message.id)}
-                  onCopy={() => copyMessage(message.text)}
-                />
-              ))}
-            </div>
-          )}
         </div>
       </div>
       {!isAtBottom && (
@@ -10652,12 +10699,18 @@ export function AgentNextGenPage({
           open={navOpen}
           onToggle={() => setNavOpen((v) => !v)}
           overlay={isNavNarrow}
-          // Home/Settings render above the "Assignments (N active)" caption
-          // + interaction cards below (see `itemsFirst`'s own doc comment
-          // in left-nav.tsx) — matches the reference screenshot's "Home
-          // (active), separator, Assignments (N active)" order, rather than
-          // the component's default "cards above the rail" arrangement.
-          itemsFirst
+          // Default (non-`itemsFirst`) order, per explicit follow-up
+          // request: the "Assignments (N active)" caption + interaction
+          // cards render FIRST (scrolling in the space below "New
+          // Outbound"), and the Home/Settings rail renders LAST, `sticky
+          // bottom-0` within that same scroll region — pinned to the
+          // bottom of the nav whenever the card list is short enough to
+          // leave slack, and sticking there as the list scrolls once it's
+          // long enough to actually overflow, so cards scroll underneath/
+          // behind the rail rather than the rail scrolling away with them.
+          // (This app used to opt into `itemsFirst` — rail above the
+          // caption/cards instead — per an earlier explicit request; that
+          // request was superseded by this one.)
           pinnedHeader={
             <CreateNew
               title="New Outbound"
