@@ -1016,12 +1016,17 @@ function formatHeaderDateTime(): string {
   return `${datePart} · ${timePart}`;
 }
 
-/* Welcome modal — last login timestamp, assigned-skills count, and live
-   online/available teammate counts shown under the greeting. */
+/* Welcome modal — last login timestamp shown under the greeting. The
+   assigned-skills/online-teammate counts that used to accompany it
+   (`AGENT_SKILLS_COUNT`/`TEAMMATES_ONLINE_COUNT`/`TEAMMATES_AVAILABLE_COUNT`)
+   are commented out below, not deleted — the info-box that displayed them
+   is hidden for now (per explicit request; see the `AgentWelcomeMessage`
+   call site), so keeping unused consts around would just be dead-code
+   lint noise until it comes back. */
 const WELCOME_MODAL_LAST_LOGIN = "Today at 8:42 AM";
-const AGENT_SKILLS_COUNT = 3;
-const TEAMMATES_ONLINE_COUNT = 8;
-const TEAMMATES_AVAILABLE_COUNT = 5;
+// const AGENT_SKILLS_COUNT = 3;
+// const TEAMMATES_ONLINE_COUNT = 8;
+// const TEAMMATES_AVAILABLE_COUNT = 5;
 
 const INTERACTION_OWNERS = [
   "John Smith",
@@ -3548,12 +3553,41 @@ const CUSTOMER_AUTO_REPLY_POOL = [
   "Perfect, that answers my question.",
 ];
 
+// Expanded to 25 (per explicit request, to actually exercise TagPicker's
+// scrollable checkbox list rather than a 5-row set that never needed to
+// scroll) — a realistic support-conversation tag vocabulary, not filler:
+// sentiment/feedback tags (Complain/Praise/...), the common request
+// categories an agent would tag a message with (Billing/Refund/
+// Cancellation/...), and a few urgency/risk markers (Escalation/Fraud
+// Alert/Churn Risk). Still only `default`/`success`/`warning`/`critical`/
+// `info`/`neutral` variants — see this file's own note above reserving
+// `purple`/`teal`/`pink` for channel-type coloring.
 const QUICK_TAG_OPTIONS: Omit<TranscriptTag, "id">[] = [
   { label: "Complain", variant: "critical" },
   { label: "Help", variant: "info" },
   { label: "Praise", variant: "success" },
   { label: "Share", variant: "default" },
   { label: "Billing", variant: "default" },
+  { label: "Refund", variant: "warning" },
+  { label: "Cancellation", variant: "critical" },
+  { label: "Escalation", variant: "critical" },
+  { label: "Follow-Up", variant: "info" },
+  { label: "Feedback", variant: "neutral" },
+  { label: "Bug Report", variant: "critical" },
+  { label: "Feature Request", variant: "info" },
+  { label: "Shipping", variant: "default" },
+  { label: "Delivery Delay", variant: "warning" },
+  { label: "Password Reset", variant: "info" },
+  { label: "Account Access", variant: "warning" },
+  { label: "Upgrade", variant: "success" },
+  { label: "Downgrade", variant: "neutral" },
+  { label: "Fraud Alert", variant: "critical" },
+  { label: "Payment Failed", variant: "critical" },
+  { label: "Subscription", variant: "default" },
+  { label: "Warranty", variant: "neutral" },
+  { label: "Return", variant: "warning" },
+  { label: "Exchange", variant: "default" },
+  { label: "Technical Issue", variant: "info" },
 ];
 
 /* ── TranscriptMessageBubble ──
@@ -3666,6 +3700,16 @@ function TranscriptMessageBubble({
                 open={tagPickerOpen}
                 onOpenChange={onTagPickerOpenChange}
                 onSelect={onAddTag}
+                // `TagPicker` is now a real checkbox multi-select (per
+                // explicit request) — unchecking an already-applied tag
+                // needs to actually remove it, not just no-op. Looks the
+                // matching `TranscriptTag` up by label to get the real id
+                // `onRemoveTag` needs (this component only tracks labels,
+                // not ids — see tag-picker.tsx's own doc comment).
+                onDeselect={(label) => {
+                  const tag = message.tags?.find((t) => t.label === label);
+                  if (tag) onRemoveTag(tag.id);
+                }}
               />
             </div>
           </div>
@@ -11890,6 +11934,15 @@ export function AgentNextGenPage({
         closeOnBackdropClick={false}
         ariaTitle={`Good morning, ${CURRENT_AGENT_FIRST_NAME} ${CURRENT_AGENT_LAST_NAME}`}
       >
+        {/* Info-box `children` (skills/teammates summary) hidden for
+            now — per explicit request. `AgentWelcomeMessage` only renders
+            that slot (and the Separator above the footer that goes with
+            it) when `children` is actually passed, so simply omitting it
+            here removes the box cleanly rather than rendering it empty.
+            The numbers it used to show (`AGENT_SKILLS_COUNT`/
+            `TEAMMATES_ONLINE_COUNT`/`TEAMMATES_AVAILABLE_COUNT`) are still
+            defined/unused above — left in place to restore this easily
+            later. */}
         <AgentWelcomeMessage
           bare
           icon={<img src={appIcon} alt="" className="h-8 w-8 shrink-0" />}
@@ -11897,12 +11950,7 @@ export function AgentNextGenPage({
           lastLogin={WELCOME_MODAL_LAST_LOGIN}
           onPrimaryClick={handleGoAvailable}
           onSecondaryClick={handleStartUnavailable}
-        >
-          <p className="lyra-body-md text-lyra-fg-default">
-            You are currently assigned to {AGENT_SKILLS_COUNT} skills. {TEAMMATES_ONLINE_COUNT} teammates are
-            online, {TEAMMATES_AVAILABLE_COUNT} are available. Select an option below to begin.
-          </p>
-        </AgentWelcomeMessage>
+        />
       </Modal>
 
       {/* Fired by `fireDismissToast`, from either `handleDismissInteraction`
