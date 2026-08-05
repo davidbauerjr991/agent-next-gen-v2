@@ -5914,11 +5914,15 @@ function buildLatestNote(customerName: string | undefined, recordId: string): Cu
   };
 }
 
-// Placeholder tab set (per reference screenshot). The screenshot itself
-// showed "Interactions" active, but the panel should open on "Overview"
-// (index 0) by default — so `activeTab` below just starts at 0 rather than
-// looking up a specific tab's index.
-const CUSTOMER_PANEL_TABS = ["Overview", "Detail", "Directory", "Tasks", "Notes", "Accounts", "Tickets"];
+// Placeholder tab set (per reference screenshot). The panel should open on
+// "Overview" (index 0) by default — so `activeTab` below just starts at 0
+// rather than looking up a specific tab's index. "Interactions" (this
+// customer's own session history — was a separate, independently-selectable
+// "Customer History" tab in the record header, alongside the channel tabs —
+// see `CustomerHistoryTabContent`'s own doc comment) moved in here per
+// explicit request, so it's now just another tab of this same panel like
+// Detail/Directory/etc., not a separate top-level control.
+const CUSTOMER_PANEL_TABS = ["Overview", "Interactions", "Detail", "Directory", "Tasks", "Notes", "Accounts", "Tickets"];
 
 // Temporarily hides the Overview tab's "Ask about this customer..."
 // `AIInput` footer during an active interaction, per explicit request —
@@ -6385,15 +6389,31 @@ function isWithinCustomerHistoryDateRange(
   }
 }
 
-/** The "Customer History" tab's own body — a toolbar (search + Channel
- *  type/Direction/Tags checklists + a date-range filter) above a scrollable
- *  list of `CustomerHistorySessionEntry` cards (see this section's own doc
- *  comment above). `selectedIndex`/`onSelectIndex` drive which one's own
- *  detail panel (`CustomerHistorySessionDetailPanel`, rendered as a sibling
- *  at the call site) is open; clicking the already-open card's own row
- *  toggles it back closed instead of just re-selecting the same one, same
- *  convention `CustomersListView`'s own `onRowClick` uses for
- *  `CustomerRowInfoPanel`.
+/** The "Interactions" tab's own body — a toolbar (search + Channel
+ *  type/Direction/Tags checklists + a date-range filter) above a list of
+ *  `CustomerHistorySessionEntry` cards (see this section's own doc comment
+ *  above). `selectedIndex`/`onSelectIndex` drive which one's own detail
+ *  panel (`CustomerHistorySessionDetailPanel`, rendered as a sibling at the
+ *  call site) is open; clicking the already-open card's own row toggles it
+ *  back closed instead of just re-selecting the same one, same convention
+ *  `CustomersListView`'s own `onRowClick` uses for `CustomerRowInfoPanel`.
+ *
+ *  Scrolls in its OWN independent box (`flex-1 min-h-0 overflow-hidden`
+ *  below, with the list itself `overflow-y-auto`) — not as part of the
+ *  Customer Information panel's shared `PanelContent` scroll region.
+ *  Briefly changed to the latter (single shared scroll + a `sticky`
+ *  toolbar) while chasing what turned out to be a real bug one level up —
+ *  `SidePanel`'s own docked/pinned branch was missing an `h-full` its
+ *  full-screen branch already had, so nothing above this component ever
+ *  had a genuinely definite height to bound against, no matter how this
+ *  component itself was built. With that fixed at its actual source (see
+ *  `CustomerInformationPanelBody`'s own outer wrapper comment), the
+ *  original independent-scroll design works as intended again, and is
+ *  worth keeping over the shared-scroll fallback: it's what lets
+ *  `CustomerHistorySessionDetailPanel` (rendered as this component's own
+ *  sibling at the call site) overlay ON TOP of this list instead of
+ *  pushing it down or inheriting an arbitrary, content-driven height that
+ *  doesn't match the visible viewport.
  *
  *  Search/filter state is local (`useState` in here), not lifted to
  *  `AgentNextGenPage` — unlike `selectedIndex` (which has to survive this
@@ -6493,7 +6513,15 @@ function CustomerHistoryTabContent({
           <p className="lyra-body-md text-lyra-fg-disabled text-center">No interactions match these filters</p>
         </div>
       ) : (
-        <div className="flex flex-1 flex-col overflow-y-auto">
+        // `min-h-0` — without it, this flex-column item's default
+        // `min-height: auto` lets it refuse to shrink below its own
+        // (potentially long) list's natural content height during the
+        // flex algorithm's shrink pass, so it would grow past its actual
+        // available space instead of respecting it — the classic nested-
+        // flex-scroll gotcha. Needed now that this list is back to
+        // scrolling in its own independent box (see this component's own
+        // doc comment).
+        <div className="flex flex-1 flex-col min-h-0 overflow-y-auto">
           {filteredEntries.map(({ entry, index }, i) => {
             const isSelected = selectedIndex === index;
             return (
@@ -6520,19 +6548,30 @@ function CustomerHistoryTabContent({
               >
                 <CustomerHistoryChannelIcon channelType={entry.channelType} direction={entry.direction} />
                 <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                  {/* Full-width now that the timestamp isn't sharing this
+                      row with it anymore — was truncating badly (e.g. a
+                      whole phone number down to "(456) 383-3...") in the
+                      Customer Information panel's own narrower width (this
+                      list used to only ever render at full page width, back
+                      when "Interactions" was a separate top-level tab — see
+                      `CUSTOMER_PANEL_TABS`), since the timestamp's own
+                      `whitespace-nowrap` column was claiming a fixed chunk
+                      of that now-scarcer horizontal space on every row. */}
                   <span className="lyra-body-md text-lyra-fg-default truncate">{entry.target}</span>
-                  <span className="lyra-body-sm text-lyra-fg-secondary">{entry.typeLabel}</span>
+                  {/* Just the timestamp now — the call type/direction text
+                      (e.g. "Outbound call", "Inbound sms", formerly inline
+                      here next to it) and the trailing status column (e.g.
+                      "Disconnected"/"Dialing") were both dropped per
+                      explicit request. Direction is still conveyed visually
+                      via `CustomerHistoryChannelIcon`'s own up/down arrow
+                      (left of the target line above), so removing the
+                      redundant text label doesn't lose that information. */}
+                  <span className="lyra-body-sm text-lyra-fg-secondary whitespace-nowrap">
+                    {entry.timestampDisplay}
+                  </span>
                   <span className="lyra-body-sm-emphasis text-lyra-fg-default truncate">
                     {entry.agentName} ({entry.agentEmail.toUpperCase()})
                   </span>
-                </div>
-                <div className="flex flex-col items-end gap-0.5 shrink-0 text-right">
-                  <span className="lyra-body-sm text-lyra-fg-secondary whitespace-nowrap">{entry.timestampDisplay}</span>
-                  {entry.statusLabel && (
-                    <span className="lyra-body-sm-emphasis text-lyra-fg-default whitespace-nowrap">
-                      {entry.statusLabel}
-                    </span>
-                  )}
                 </div>
               </div>
             );
@@ -6658,14 +6697,16 @@ function CustomerHistoryConversationContent({ entry }: { entry: CustomerHistoryS
  *  table (see that component's own doc comment), just over
  *  `CustomerHistorySessionEntry` rows instead of `CustomerListRecord` ones.
  *
- *  Two tabs, per explicit request: "Details" (this session's own identity
- *  fields — now a collapsible `Accordion`, same as "Conversation Details"
- *  right below it, rather than a permanently-expanded block — plus that
- *  same summary blurb) and "Conversation" (the actual reconstructed
- *  conversation content, `CustomerHistoryConversationContent` above). Own
- *  `activeTab` state, reset back to "Details" whenever a different
- *  session's entry is opened (via `entry?.id`) — a `Conversation` tab left
- *  open on session A shouldn't carry over silently to session B. */
+ *  Two tabs, per explicit request: "Details" (a "Conversation Details" card
+ *  — summary blurb + Duration for voice entries — directly above a
+ *  "Session Details" card of this session's own identity fields, both
+ *  collapsible `Accordion`s rather than permanently-expanded blocks; panel
+ *  header itself reads "Interaction Details", was "Session Details") and
+ *  "Conversation" (the actual reconstructed conversation content,
+ *  `CustomerHistoryConversationContent` above). Own `activeTab` state,
+ *  reset back to "Details" whenever a different session's entry is opened
+ *  (via `entry?.id`) — a `Conversation` tab left open on session A
+ *  shouldn't carry over silently to session B. */
 function CustomerHistorySessionDetailPanel({
   entry,
   onClose,
@@ -6714,7 +6755,7 @@ function CustomerHistorySessionDetailPanel({
       // doc comment) and the shared panel's fullscreen overlay (`z-[9]`).
       className="z-[3]"
       storageKey="customer-history-session-detail-panel-width"
-      headerTitle="Session Details"
+      headerTitle="Interaction Details"
       headerSubhead={entry?.timestampDisplay}
       headerActions={
         <>
@@ -6744,6 +6785,30 @@ function CustomerHistorySessionDetailPanel({
     >
       {entry && activeTab === CUSTOMER_HISTORY_DETAIL_TABS.indexOf("Details") && (
         <div className="flex flex-col gap-4 px-4 pt-3 pb-4 lyra-form-grid-wrap">
+          {/* Conversation Details — moved above Session Details (per
+              explicit request; was below it). Duration added here too
+              (voice entries only — `callDurationDisplay` is only ever set
+              for `channelType === "voice"`, see `CustomerHistorySessionEntry`'s
+              own doc comment — SMS/email entries just show the summary
+              alone, same as before). */}
+          <Accordion
+            className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
+            defaultValue="conversation-details"
+            items={[
+              {
+                id: "conversation-details",
+                title: "Conversation Details",
+                content: (
+                  <div className="flex flex-col gap-4">
+                    {entry.callDurationDisplay && (
+                      <CustomerHistoryDetailField label="Duration" value={entry.callDurationDisplay} />
+                    )}
+                    <p className="lyra-body-md text-lyra-fg-secondary">{entry.conversationSummary}</p>
+                  </div>
+                ),
+              },
+            ]}
+          />
           <Accordion
             className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
             defaultValue="session-details"
@@ -6767,19 +6832,6 @@ function CustomerHistorySessionDetailPanel({
                     <CustomerHistoryDetailField label="External Interaction ID" value={entry.externalInteractionId} />
                     <CustomerHistoryDetailField label="External Thread ID" value={entry.externalThreadId} />
                   </div>
-                ),
-              },
-            ]}
-          />
-          <Accordion
-            className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
-            defaultValue="conversation-details"
-            items={[
-              {
-                id: "conversation-details",
-                title: "Conversation Details",
-                content: (
-                  <p className="lyra-body-md text-lyra-fg-secondary">{entry.conversationSummary}</p>
                 ),
               },
             ]}
@@ -7155,6 +7207,8 @@ function CustomerInformationPanelBody({
   fields,
   latestInteraction,
   latestNote,
+  recordId,
+  channels,
 }: {
   activeTab: number;
   /** Needed here (not just by `buildCustomerInfoFields`) for the Detail
@@ -7173,25 +7227,82 @@ function CustomerInformationPanelBody({
    *  Interaction (see the "Latest Interaction"/"Latest Note" column
    *  comment below). */
   latestNote: CustomerLatestNote;
+  /** Supplied by `CustomerInformationSidePanel` and `CustomerInfoHoverPreview`
+   *  (both have a real interaction's `recordId`/`channels` in scope to
+   *  synthesize session history from) — left `undefined` only by
+   *  `CustomerRowInfoPanel` (Customers-table row, no `TrackedChannel[]` of
+   *  its own to build from), where the Interactions tab renders nothing
+   *  (same "no content behind it yet" treatment as Tasks/Notes/Accounts/
+   *  Tickets below) rather than a possibly-misleading empty state. See the
+   *  Interactions-tab branch below for how this gates that content. */
+  recordId?: string;
+  channels?: TrackedChannel[];
 }) {
-  // Controlled open/closed state for the Latest Interaction/Latest Note
-  // pair below (each defaults open, matching their old `defaultValue`s) —
-  // needed so the two cards' shared "match heights" className (see
-  // `bothCardsOpen` below) can be turned OFF the instant either one
-  // collapses. Forcing equal height unconditionally (the first pass at
-  // this) made collapsing pointless: a collapsed card was still stretched
-  // to match its still-open sibling, leaving a big dead gray gap where its
-  // content used to be — confirmed via screenshot, and explicitly not what
-  // was wanted. Equal height only actually makes sense while BOTH cards
-  // are showing real content to compare side by side; the moment either
-  // one closes, both fall back to their own natural content height so
-  // collapsing always visibly does something.
-  const [latestInteractionAccordionValue, setLatestInteractionAccordionValue] = useState("latest-interaction");
+  // Controlled (not `defaultValue`, unlike Latest Interaction beside it)
+  // specifically so the stacked column below knows whether Latest Note
+  // itself is open — needed to gate its own `flex-1` height-matching growth
+  // (see that Accordion's own comment) off while it's collapsed. Growing a
+  // COLLAPSED card to fill the column's full stretched height would stretch
+  // its little closed header row across a tall box with a big dead gray gap
+  // below it instead of matching content — the exact failure mode this
+  // file's own `bothCardsOpen` gate was originally written to avoid for the
+  // two cards' old side-by-side row (see git history), reapplied here to
+  // just the one trailing card that actually needs it now.
   const [latestNoteAccordionValue, setLatestNoteAccordionValue] = useState("latest-note");
-  const bothCardsOpen = latestInteractionAccordionValue !== "" && latestNoteAccordionValue !== "";
+  const latestNoteOpen = latestNoteAccordionValue !== "";
+
+  // Interactions tab — this customer's synthesized session history
+  // (`CustomerHistoryTabContent`/`CustomerHistorySessionDetailPanel`, see
+  // that section's own doc comment) — was a separate, independently-
+  // selectable "Customer History" tab in the record header before, moved in
+  // here per explicit request so it's just another tab of this same panel.
+  // State lives locally in this component (not lifted to `AgentNextGenPage`
+  // the way it used to be) because this whole component already remounts on
+  // a genuine interaction switch via its caller's own
+  // `key={`side-panel-${activeInteraction.id}`}` wrapper — the exact same
+  // "survives navigate-away-and-back to the SAME interaction, resets on a
+  // genuinely different one" behavior the old lifted state was hand-rolling
+  // via a ref-based identity check, now free from the remount itself.
+  // `undefined` while `recordId` isn't supplied (see that prop's own doc
+  // comment) — this tab renders nothing at all in that case, so the
+  // synthesized-entries memo just yields an empty array and nothing below
+  // ever reads `selectedHistoryIndex`.
+  const customerHistoryEntries = useMemo(
+    () => (recordId ? buildCustomerHistoryEntries(customerName, recordId, channels ?? []) : []),
+    [customerName, recordId, channels]
+  );
+  const [selectedHistoryIndex, setSelectedHistoryIndex] = useState<number | null>(null);
+  const selectedHistoryEntry = selectedHistoryIndex !== null ? customerHistoryEntries[selectedHistoryIndex] ?? null : null;
+  const handleHistoryNav = (direction: 1 | -1) => {
+    setSelectedHistoryIndex((prev) => {
+      if (prev === null) return prev;
+      const next = prev + direction;
+      if (next < 0 || next >= customerHistoryEntries.length) return prev;
+      return next;
+    });
+  };
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col h-full min-h-0">
+      {/* `h-full min-h-0` — unconditional, every tab, not just gated to
+          Interactions. Two earlier attempts at giving Interactions its own
+          independently-scrolling box (one gated to just this tab, one
+          unconditional like this) both failed live — but the actual root
+          cause turned out to be one level up, not here: `SidePanel`'s own
+          pinned/docked branch (side-panel.tsx) was missing the `h-full`
+          its unpinned/full-screen branch already had, so `PanelContent`
+          above this wrapper never reliably had a DEFINITE height to give
+          it in docked mode specifically (confirmed by the exact symptom
+          reported: full-screen scrolled fine, docked didn't — full-screen
+          reaches its height a completely different way, `position:
+          absolute` against `Container`'s own unambiguous flex-grow height,
+          which was never affected by the bug). With that fixed at its
+          actual source, this wrapper's own `h-full` now resolves correctly
+          again — every tab gets a real box matching `PanelContent`'s
+          available height (harmless for Overview/Detail/etc., which just
+          overflow it normally with no clipping, same as always), and the
+          Interactions tab below gets a genuinely bounded box to build its
+          own internal list-scroll + overlaying detail panel on top of. */}
       {/* No avatar/name/presence block here — the InteriorPanel's own
           header (`headerTitle="Customer Information"` +
           `headerSubhead="{name} · {id}"`) already shows the name, so a
@@ -7282,200 +7393,271 @@ function CustomerInformationPanelBody({
           above it. */}
       {activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") && (
         <div className="px-4 py-3 flex flex-col gap-4">
-          {/* Customer Overview field list. Wrapped in a neutral container
-              (`bg-lyra-bg-control-subtle`, rounded) per CONTRIBUTING.md's
-              "Composing panel body content" convention, rather than
-              sitting flush against the panel background — the convention
-              to follow for any future card-like block added here, not a
-              one-off choice for this block alone. Collapsible via lyra-
-              ui's `Accordion` (single item, open by default) rather than a
-              plain static block, so the panel can be collapsed once read. */}
-          <Accordion
-            className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
-            defaultValue="customer-overview"
-            items={[
-              {
-                id: "customer-overview",
-                title: "Customer Overview",
-                content: (
-                  <div className="flex flex-col gap-3">
-                    {fields.map((field, index) => (
-                      <div key={field.label} className="flex flex-col gap-3">
-                        <div className="flex items-center justify-between gap-4">
-                          <Label label={field.label} />
-                          <span className="lyra-body-md text-lyra-fg-secondary whitespace-nowrap">
-                            {field.value}
-                          </span>
-                        </div>
-                        {index < fields.length - 1 && <Separator />}
-                      </div>
-                    ))}
-                  </div>
-                ),
-              },
-            ]}
-          />
-
+          {/* Customer Overview now sits directly LEFT of a stacked Latest
+              Interaction/Latest Note column (per explicit request) — was a
+              full-width block on its own row above that pair, back when
+              Latest Interaction and Latest Note were side-by-side beneath
+              it instead of stacked. Reuses the same `.lyra-card-split-wrap`/
+              `.lyra-card-split`/`.lyra-card-split-even` family the two-
+              column Latest Interaction/Latest Note row already used for "a
+              couple of regions side by side, stacking once the container's
+              own width gets tight" (see that modifier's own doc comment in
+              lyra-tokens.css) — just with two DIFFERENT regions as the
+              row's two children now: this Accordion on the left, and the
+              new stacked wrapper below on the right, rather than each half
+              being one Accordion the way the old row was. Its ≤480px
+              stacking threshold still fits here: at the panel's normal
+              resizable width (~325–425px) it stacks to a column (Customer
+              Overview on top, matching the old top-to-bottom reading order),
+              and `allowFullScreen`'d width stays comfortably side by side. */}
           <div className="lyra-card-split-wrap">
             <div className="lyra-card-split" style={{ gap: "1rem" }}>
-              {/* Latest Interaction summary — directly left of Latest Note
-                  (per explicit request). Its trigger renders the "Latest
-                  Interaction" title itself — no hand-styled label needed
-                  here at all, which also fixes an earlier mistake: that
-                  label used to be a hand-built `uppercase tracking-wide`
-                  span, applying an all-caps CSS transform to change how it
-                  displayed instead of just typing it correctly — exactly
-                  the thing CONTRIBUTING.md §17 ("Field label casing") says
-                  not to do ("don't add `text-transform`; type the label
-                  text correctly to begin with"). Typing the string as
-                  `"Latest Interaction"` (already correct Title Case) and
-                  letting the shared component's own typography render it is
-                  the fix, not restyling it further.
+              {/* Customer Overview field list. Wrapped in a neutral
+                  container (`bg-lyra-bg-control-subtle`, rounded) per
+                  CONTRIBUTING.md's "Composing panel body content"
+                  convention, rather than sitting flush against the panel
+                  background — the convention to follow for any future
+                  card-like block added here, not a one-off choice for this
+                  block alone. Collapsible via lyra-ui's `Accordion` (single
+                  item, open by default) rather than a plain static block,
+                  so the panel can be collapsed once read.
 
-                  Content itself comes from `latestInteraction` (built by
-                  `buildLatestInteraction`) rather than one fixed placeholder
-                  blurb — see that function's own doc comment for why (it
-                  used to be the exact same "Asked about upgrading her
-                  plan..." summary for every customer, gendered pronoun and
-                  all, regardless of who was actually open).
-
-                  Status used to render as its own pill `Badge` sitting to
-                  the right of the timestamp line — reverted per explicit
-                  request (a filled pill there read as too visually loud/
-                  noticeable). Now a plain second line directly below the
-                  timestamp: a small circle `Badge` dot (`shape="circle"
-                  dot"`, colored via `statusVariant` the same semantic-role
-                  vocabulary `ContactHistoryStatusVariant`/Contact History's
-                  own status dots already use) plus the status name as
-                  plain text next to it — quieter than a filled pill, same
-                  "dot + label" idiom already established elsewhere in this
-                  file. */}
+                  Stays `h-fit` (its own natural content height, from
+                  `CUSTOMER_INFO_ACCORDION_CLASSNAME`) rather than stretching
+                  itself — per explicit follow-up request, the two COLUMNS
+                  should match height, and since this one's own field list is
+                  reliably the taller side (8 fixed fields vs. two summary
+                  blurbs), it's the one the stacked column on the right grows
+                  to match, not the other way around. See the stacked
+                  wrapper's own comment below for how that growth actually
+                  happens. */}
               <Accordion
-                // `h-auto` (was `h-full`, which didn't actually work — see
-                // below), and now applied CONDITIONALLY (was unconditional)
-                // — per explicit request, these two cards should match
-                // heights row-to-row instead of each sizing to its own
-                // (different-length) content, but ONLY while both are open.
-                // An earlier unconditional version made collapsing either
-                // card pointless: a collapsed card still stretched to match
-                // its still-open sibling, leaving a big dead gray gap where
-                // its content used to be (confirmed via screenshot) — the
-                // opposite of what collapsing should do. `bothCardsOpen`
-                // (derived from this Accordion's own controlled `value`,
-                // now wired below instead of `defaultValue`, plus Latest
-                // Note's matching state) gates `h-auto` off the instant
-                // either card closes, so both fall back to their own
-                // natural content height and collapsing always visibly
-                // does something. `CUSTOMER_INFO_ACCORDION_CLASSNAME`'s own
-                // `h-fit` is what was overriding the `.lyra-card-split`
-                // row's default `align-items: stretch` in the first place
-                // (see that constant's own doc comment — "harmless" there
-                // meant "leaves invisible empty space," which was true
-                // right up until unequal heights became visibly the wrong
-                // look here).
-                //
-                // `h-full` (100%) was the first attempt at matching heights
-                // and, confirmed live, doesn't work: a percentage height
-                // only resolves against a containing block with a DEFINITE
-                // height, and `.lyra-card-split` (the flex row) has no
-                // explicit height of its own — it's exactly as tall as its
-                // stretched children need it to be, which is indeterminate
-                // for percentage purposes. `100%` of an indefinite height
-                // computes as `auto` instead, i.e. it silently did nothing
-                // different from the `h-fit` it was supposed to override.
-                // `h-auto` fixes this by not fighting the flex algorithm at
-                // all — with no explicit height set, a flex item under the
-                // container's default `align-items: stretch` is stretched
-                // to the row's cross size natively by the flex layout
-                // algorithm itself (the same mechanism any other unequal-
-                // content card row relies on for matching heights,
-                // `DashboardCard` bodies included — none of them set an
-                // explicit height on the stretched item either).
-                //
-                // `cn()`/`tailwind-merge` resolves the conflicting height
-                // utility in favor of whichever comes last, so this
-                // reliably wins over the shared constant's `h-fit`
-                // regardless of source order (when present at all — see
-                // `bothCardsOpen &&` above) — unlike the row's own `gap`
-                // override above, `h-fit`/`h-auto` are both genuine
-                // Tailwind utilities for the same CSS property, which is
-                // exactly what `tailwind-merge` is built to dedupe
-                // correctly (verified directly against the installed
-                // `tailwind-merge` version, not assumed).
-                className={cn(
-                  CUSTOMER_INFO_ACCORDION_CLASSNAME,
-                  "lyra-card-split-even",
-                  bothCardsOpen && "h-auto"
-                )}
-                value={latestInteractionAccordionValue}
-                onValueChange={setLatestInteractionAccordionValue}
+                className={cn(CUSTOMER_INFO_ACCORDION_CLASSNAME, "lyra-card-split-even")}
+                defaultValue="customer-overview"
                 items={[
                   {
-                    id: "latest-interaction",
-                    title: "Latest Interaction",
+                    id: "customer-overview",
+                    title: "Customer Overview",
                     content: (
                       <div className="flex flex-col gap-3">
-                        <div className="flex flex-col gap-1">
-                          <span className="inline-flex items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
-                            <Clock className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
-                            {latestInteraction.timeAgo} · {latestInteraction.channel}
-                          </span>
-                          <span className="inline-flex items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
-                            <Badge shape="circle" dot size="sm" variant={latestInteraction.statusVariant} aria-hidden="true" />
-                            {latestInteraction.status}
+                        {fields.map((field, index) => (
+                          <div key={field.label} className="flex flex-col gap-3">
+                            <div className="flex items-center justify-between gap-4">
+                              <Label label={field.label} />
+                              <span className="lyra-body-md text-lyra-fg-secondary whitespace-nowrap">
+                                {field.value}
+                              </span>
+                            </div>
+                            {index < fields.length - 1 && <Separator />}
+                          </div>
+                        ))}
+                      </div>
+                    ),
+                  },
+                ]}
+              />
+
+              {/* Latest Interaction stacked directly ABOVE Latest Note (per
+                  explicit request) — was side-by-side with it in its own
+                  row below Customer Overview before; now the two share this
+                  plain flex column instead, which is itself the second
+                  (right) child of the Customer Overview split row above.
+                  `lyra-card-split-even` goes on THIS wrapper (a direct
+                  child of `.lyra-card-split`), not on the two Accordions
+                  inside it — they're no longer direct children of the split
+                  row themselves, just plain stacked flex-column children.
+
+                  `align-items: stretch` (the split row's own default)
+                  stretches this wrapper's HEIGHT to match Customer
+                  Overview's, since it has no explicit height of its own to
+                  opt out with (unlike Customer Overview's Accordion, whose
+                  own `h-fit` opts it out — see that Accordion's own
+                  comment). That alone only gets the outer wrapper box to
+                  the right total height, though — a plain `flex-col` of two
+                  natural-height Accordions doesn't automatically grow its
+                  own children to fill that extra space, so without more,
+                  the wrapper would just end in blank unbordered space below
+                  Latest Note instead of the two columns visually lining up
+                  (confirmed live — this was the very next thing reported).
+                  Latest Note's own `flex-1` (see that Accordion's own
+                  comment below) is what actually closes that gap, growing
+                  ITS bordered box to absorb the leftover height so the
+                  stack's own bottom edge lines up with Customer Overview's
+                  — same "stretch a card's own box to fill available height,
+                  even past its natural content" mechanism this file's own
+                  `bothCardsOpen`/`h-auto` used for the two cards' old
+                  side-by-side row, just applied to one trailing card in a
+                  column instead of two peer cards in a row. */}
+              <div className="flex flex-col gap-4 lyra-card-split-even">
+                {/* Its trigger renders the "Latest Interaction" title
+                    itself — no hand-styled label needed here at all, which
+                    also fixes an earlier mistake: that label used to be a
+                    hand-built `uppercase tracking-wide` span, applying an
+                    all-caps CSS transform to change how it displayed
+                    instead of just typing it correctly — exactly the thing
+                    CONTRIBUTING.md §17 ("Field label casing") says not to
+                    do ("don't add `text-transform`; type the label text
+                    correctly to begin with"). Typing the string as
+                    `"Latest Interaction"` (already correct Title Case) and
+                    letting the shared component's own typography render it
+                    is the fix, not restyling it further.
+
+                    Content itself comes from `latestInteraction` (built by
+                    `buildLatestInteraction`) rather than one fixed
+                    placeholder blurb — see that function's own doc comment
+                    for why (it used to be the exact same "Asked about
+                    upgrading her plan..." summary for every customer,
+                    gendered pronoun and all, regardless of who was actually
+                    open).
+
+                    Status used to render as its own pill `Badge` sitting to
+                    the right of the timestamp line — reverted per explicit
+                    request (a filled pill there read as too visually loud/
+                    noticeable). Now a plain second line directly below the
+                    timestamp: a small circle `Badge` dot (`shape="circle"
+                    dot"`, colored via `statusVariant` the same semantic-role
+                    vocabulary `ContactHistoryStatusVariant`/Contact
+                    History's own status dots already use) plus the status
+                    name as plain text next to it — quieter than a filled
+                    pill, same "dot + label" idiom already established
+                    elsewhere in this file. */}
+                <Accordion
+                  className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
+                  defaultValue="latest-interaction"
+                  items={[
+                    {
+                      id: "latest-interaction",
+                      title: "Latest Interaction",
+                      content: (
+                        <div className="flex flex-col gap-3">
+                          <div className="flex flex-col gap-1">
+                            <span className="inline-flex items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
+                              <Clock className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+                              {latestInteraction.timeAgo} · {latestInteraction.channel}
+                            </span>
+                            <span className="inline-flex items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
+                              <Badge shape="circle" dot size="sm" variant={latestInteraction.statusVariant} aria-hidden="true" />
+                              {latestInteraction.status}
+                            </span>
+                          </div>
+                          <p className="lyra-body-md text-lyra-fg-default">{latestInteraction.summary}</p>
+                          <span className="lyra-body-sm text-lyra-fg-secondary">
+                            {latestInteraction.caseId} · Handled by {latestInteraction.handledBy}
                           </span>
                         </div>
-                        <p className="lyra-body-md text-lyra-fg-default">{latestInteraction.summary}</p>
-                        <span className="lyra-body-sm text-lyra-fg-secondary">
-                          {latestInteraction.caseId} · Handled by {latestInteraction.handledBy}
-                        </span>
-                      </div>
-                    ),
-                  },
-                ]}
-              />
+                      ),
+                    },
+                  ]}
+                />
 
-              {/* Latest Note — directly right of Latest Interaction (per
-                  explicit request). Same neutral-container + collapsible-
-                  Accordion treatment as Latest Interaction beside it (see
-                  that block's own comments for the container/collapsible
-                  rationale — applies identically here), synthesized by
-                  `buildLatestNote` the same deterministic-per-customer way.
-                  No status `Badge` here — notes don't carry a resolution
-                  status the way an interaction does — just the author +
-                  relative time, same placement `latestInteraction`'s
-                  case-id/handled-by line uses. */}
-              <Accordion
-                // See the matching comment on the Latest Interaction
-                // `Accordion` just above for the full "h-auto, now
-                // conditional on `bothCardsOpen`" rationale — applies
-                // identically here, mirrored rather than repeated in full.
-                className={cn(
-                  CUSTOMER_INFO_ACCORDION_CLASSNAME,
-                  "lyra-card-split-even",
-                  bothCardsOpen && "h-auto"
-                )}
-                value={latestNoteAccordionValue}
-                onValueChange={setLatestNoteAccordionValue}
-                items={[
-                  {
-                    id: "latest-note",
-                    title: "Latest Note",
-                    content: (
-                      <div className="flex flex-col gap-3">
-                        <span className="inline-flex items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
-                          <FileText className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
-                          {latestNote.timeAgo}
-                        </span>
-                        <p className="lyra-body-md text-lyra-fg-default">{latestNote.note}</p>
-                        <span className="lyra-body-sm text-lyra-fg-secondary">By {latestNote.author}</span>
-                      </div>
-                    ),
-                  },
-                ]}
-              />
+                {/* Latest Note — directly below Latest Interaction (per
+                    explicit request). Same neutral-container + collapsible-
+                    Accordion treatment as Latest Interaction above it (see
+                    that block's own comments for the container/collapsible
+                    rationale — applies identically here), synthesized by
+                    `buildLatestNote` the same deterministic-per-customer
+                    way. No status `Badge` here — notes don't carry a
+                    resolution status the way an interaction does — just the
+                    author + relative time, same placement
+                    `latestInteraction`'s case-id/handled-by line uses.
+
+                    `flex-1` (only while open — see `latestNoteOpen`) is
+                    what actually makes the stacked column's own stretched
+                    height (from the split row's `align-items: stretch`,
+                    see the wrapper's own comment above) show up as a real,
+                    visibly-taller bordered box instead of invisible space
+                    below it — growing THIS card, specifically, rather than
+                    Latest Interaction above it, so the trailing card in the
+                    stack is the one that absorbs the leftover height,
+                    matching Customer Overview's own bottom edge. `h-auto`
+                    alongside it clears `CUSTOMER_INFO_ACCORDION_CLASSNAME`'s
+                    own `h-fit` for the same reason it did on the two cards'
+                    old side-by-side row (see that history for the full
+                    "h-fit silently overriding stretch" explanation) — this
+                    is a flex-COLUMN growing on the main axis (height) this
+                    time rather than a flex-ROW stretching on the cross axis,
+                    but an explicit `h-fit` risks the same kind of fight
+                    with the flex algorithm either way, so it's cleared here
+                    too rather than assumed harmless. */}
+                <Accordion
+                  className={cn(CUSTOMER_INFO_ACCORDION_CLASSNAME, latestNoteOpen && "flex-1 h-auto")}
+                  value={latestNoteAccordionValue}
+                  onValueChange={setLatestNoteAccordionValue}
+                  items={[
+                    {
+                      id: "latest-note",
+                      title: "Latest Note",
+                      content: (
+                        <div className="flex flex-col gap-3">
+                          <span className="inline-flex items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
+                            <FileText className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+                            {latestNote.timeAgo}
+                          </span>
+                          <p className="lyra-body-md text-lyra-fg-default">{latestNote.note}</p>
+                          <span className="lyra-body-sm text-lyra-fg-secondary">By {latestNote.author}</span>
+                        </div>
+                      ),
+                    },
+                  ]}
+                />
+              </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {activeTab === CUSTOMER_PANEL_TABS.indexOf("Interactions") && recordId && (
+        // `relative flex flex-1 min-h-0 overflow-hidden` — restored (was
+        // briefly simplified away to plain `relative` while chasing what
+        // turned out to be an unrelated bug one level up — see the outer
+        // wrapper's own comment above). This is the shape that was always
+        // intended: a flex ROW, bounded to this tab's own share of the
+        // panel's real available height (`min-h-0` off the now-reliably-
+        // definite `h-full` chain above).
+        //   - `relative` gives `CustomerHistorySessionDetailPanel` (a
+        //     right-docked `InteriorPanel`) the positioning context it
+        //     needs to dock within THIS box specifically, not the whole
+        //     app shell.
+        //   - At this panel's normal docked/popover widths (well under
+        //     `InteriorPanel`'s own 1024px `isNarrow` threshold), that
+        //     panel renders via its absolute-overlay branch — floating on
+        //     TOP of the list below, not pushing it down, and (now that
+        //     this box has a real bounded height instead of an arbitrary
+        //     content-driven one) sized to the actual visible area instead
+        //     of the full unscrolled list height — which is what was
+        //     causing the reported "double scroll"/cut-off-with-room-to-
+        //     spare symptoms: an absolutely-positioned `h-full` matching a
+        //     content-driven ancestor's height is exactly as tall as ALL
+        //     the (possibly very long) list content, not the viewport.
+        //   - At real full-screen width (≥1024px, `allowFullScreen`'d),
+        //     that same panel switches to its normal inline branch instead
+        //     — and because THIS wrapper is a flex ROW (not a plain block),
+        //     that inline panel sits beside `CustomerHistoryTabContent` as
+        //     a true side-by-side dock, not stacked below it (a plain
+        //     block wrapper, as this briefly was, stacks block children
+        //     vertically instead — confirmed live as the "session details
+        //     opening below the list in full screen" report).
+        //   - `CustomerHistoryTabContent`'s own `flex-1 min-h-0 overflow-
+        //     hidden` root (see that component) is what then gives its
+        //     list a real box to scroll independently WITHIN — a single
+        //     scroll, not the double-scroll this box's earlier, unbounded
+        //     `relative`-only version produced (list content overflowing
+        //     into the page's own scroll AND the detail panel separately
+        //     trying to scroll its own oversized box).
+        <div className="relative flex flex-1 min-h-0 overflow-hidden">
+          <CustomerHistoryTabContent
+            entries={customerHistoryEntries}
+            selectedIndex={selectedHistoryIndex}
+            onSelectIndex={setSelectedHistoryIndex}
+          />
+          <CustomerHistorySessionDetailPanel
+            entry={selectedHistoryEntry}
+            onClose={() => setSelectedHistoryIndex(null)}
+            onPrevious={() => handleHistoryNav(-1)}
+            onNext={() => handleHistoryNav(1)}
+            hasPrevious={selectedHistoryIndex !== null && selectedHistoryIndex > 0}
+            hasNext={selectedHistoryIndex !== null && selectedHistoryIndex < customerHistoryEntries.length - 1}
+          />
         </div>
       )}
 
@@ -7559,7 +7741,19 @@ function CustomerInfoHoverPreview({
     <div
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className="flex max-h-[70vh] w-[340px] flex-col overflow-hidden rounded-lyra-lg border border-lyra-border-default bg-lyra-bg-surface-container-subtle shadow-lg"
+      // `h-[80vh] max-h-[768px]` — a standard size regardless of which
+      // tab's content happens to be active, rather than shrinking to fit
+      // whatever's shortest (confirmed live: switching to the Interactions
+      // tab here — before it had `recordId`/`channels` wired below — showed
+      // nothing, and with no min/fixed height the whole flyout collapsed
+      // down to just its header, which read as broken rather than merely
+      // empty). `80vh` scales with the viewport (was `90vh` — confirmed
+      // live that overflowed the screen on a normal-height display, since
+      // this popover trigger sits fairly high up the record header, not
+      // vertically centered — 80vh leaves enough margin above/below to
+      // stay fully on-screen), and `max-h-[768px]` caps it from growing
+      // arbitrarily tall on very large displays — per explicit spec.
+      className="flex h-[80vh] max-h-[768px] w-[340px] flex-col overflow-hidden rounded-lyra-lg border border-lyra-border-default bg-lyra-bg-surface-container-subtle shadow-lg"
     >
       <PanelHeader
         title={customerName ?? "Customer"}
@@ -7581,6 +7775,14 @@ function CustomerInfoHoverPreview({
           fields={fields}
           latestInteraction={latestInteraction}
           latestNote={latestNote}
+          // Was left unwired (Interactions rendered nothing here, same
+          // stub treatment as Tasks/Notes/Accounts/Tickets) — but unlike
+          // those genuinely-unimplemented tabs, this data is already
+          // sitting right here in scope (this component's own required
+          // `recordId`/`channels` props), so there's no real reason not to
+          // show it. Per explicit follow-up request.
+          recordId={recordId}
+          channels={channels}
         />
       </div>
       {/* Same Overview-only `AIInput` footer as the real panel (see its own
@@ -7834,6 +8036,8 @@ function CustomerInformationSidePanel({
         fields={fields}
         latestInteraction={latestInteraction}
         latestNote={latestNote}
+        recordId={recordId}
+        channels={channels}
       />
     </SidePanel>
   );
@@ -8402,84 +8606,12 @@ export function AgentNextGenPage({
     if (nextIndex < 0 || nextIndex >= customerSortedRows.length) return;
     setSelectedCustomerRow(customerSortedRows[nextIndex]);
   };
-  // Whether the record header's own "Customer History" tab (not the
-  // Customer Information toggle icon next to it — a separate, unrelated
-  // control) is the selected tab. A real selection, independent of both the
-  // side panel's open/pinned state and of which channel tab is selected —
-  // mutually exclusive with the channel tabs (see `handleChannelSelect`,
-  // which flips this back off whenever a channel tab is picked instead).
-  const [customerHistoryTabActive, setCustomerHistoryTabActive] = useState(false);
-  // Which `CustomerHistorySessionEntry` (by index into that customer's own
-  // `buildCustomerHistoryEntries` list, computed at the render site) has its
-  // `CustomerHistorySessionDetailPanel` open — `null` when none does. Reset
-  // whenever the tab itself isn't showing (below), or a genuinely
-  // DIFFERENT interaction becomes active (`lastActiveInteractionIdRef`
-  // effect further down), so a stale index from a previous customer's
-  // (differently sized) history list can't linger and either point at the
-  // wrong session or silently fail `entries[index]`.
-  const [selectedHistoryIndex, setSelectedHistoryIndex] = useState<number | null>(null);
-  useEffect(() => {
-    if (!customerHistoryTabActive) setSelectedHistoryIndex(null);
-  }, [customerHistoryTabActive]);
-  // Distinguishes "the agent navigated away (Home/Settings) and back to
-  // THIS SAME interaction" (`activeInteractionId` goes id → null → the
-  // exact same id again) from "the agent switched to a genuinely DIFFERENT
-  // interaction" (id → a different id, whether or not it passed through
-  // `null` on the way) — only the latter should reset which tab/session was
-  // showing, per explicit request: navigating away and back should leave
-  // the agent exactly where they left off (the interaction detail page's
-  // own `key={`interaction-${id}`}` below already forces a full remount
-  // whenever Home/Settings swaps in a different page branch entirely, which
-  // discards every piece of state actually owned INSIDE that subtree — but
-  // `customerHistoryTabActive`/`selectedHistoryIndex` live up here in the
-  // parent instead, specifically so they can survive that remount and this
-  // effect can choose whether to actually clear them). Landing on a
-  // genuinely new interaction should always show its transcript first, not
-  // wherever the PREVIOUS interaction's own tab/session happened to be
-  // left — same reasoning `CustomerRowInfoPanel`'s own state surviving a
-  // Desk-tab switch already established, just via a ref-based identity
-  // check here instead of that component's "stay mounted, toggle
-  // opacity-0/inert" mechanism (this page-level branch's remount-on-switch
-  // behavior is deliberate — see that ternary's own doc comment — so it
-  // isn't a candidate for the same always-mounted treatment).
-  const lastActiveInteractionIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (activeInteractionId && activeInteractionId !== lastActiveInteractionIdRef.current) {
-      setCustomerHistoryTabActive(false);
-      setSelectedHistoryIndex(null);
-    }
-    if (activeInteractionId) {
-      lastActiveInteractionIdRef.current = activeInteractionId;
-    }
-  }, [activeInteractionId]);
   // Drives the main content area: whenever an interaction is active, the
   // Desk dashboard is replaced by that interaction's blank detail page (see
   // the PageHeader "record header" mode below) — starting/quick-dialing/
   // redialing a new assignment always sets this, so the screen switches
   // over automatically the moment one is added.
   const activeInteraction = interactions.find((i) => i.id === activeInteractionId) ?? null;
-  // This customer's synthesized session history for the "Customer History"
-  // tab (`CustomerHistoryTabContent`/`CustomerHistorySessionDetailPanel` —
-  // see that section's own doc comment) — memoized on the customer's own
-  // identity (not `activeInteraction` itself, which is a fresh object most
-  // renders) so it doesn't resynthesize a brand new list on every
-  // unrelated re-render, only when the customer actually changes.
-  const customerHistoryEntries = useMemo(
-    () =>
-      activeInteraction
-        ? buildCustomerHistoryEntries(activeInteraction.customerName, activeInteraction.recordId, activeInteraction.channels)
-        : [],
-    [activeInteraction?.customerName, activeInteraction?.recordId, activeInteraction?.channels]
-  );
-  const selectedHistoryEntry = selectedHistoryIndex !== null ? customerHistoryEntries[selectedHistoryIndex] ?? null : null;
-  const handleHistoryNav = (direction: 1 | -1) => {
-    setSelectedHistoryIndex((prev) => {
-      if (prev === null) return prev;
-      const next = prev + direction;
-      if (next < 0 || next >= customerHistoryEntries.length) return prev;
-      return next;
-    });
-  };
   // Which channel type `InteractionTranscript` (below) should render content
   // for — the same "current" channel the record header's own
   // `ChannelToggleGroup` highlights (see its `active={... === key}` a few
@@ -8988,6 +9120,36 @@ export function AgentNextGenPage({
   // and force-reopened for every new one. Only an explicit close (the
   // panel's own close button, or the header icon toggle while pinned)
   // changes it now.
+
+  // Delayed reveal for the record header's "Customer Information" toggle
+  // button + divider (`showPanelToggle && ...` at the render site below,
+  // only ever shown while the panel is closed). `sidePanelOpen` itself
+  // still drives the real panel's own `open` prop directly (so its own
+  // close animation timing is unaffected) — but rendering the button off
+  // a plain `!sidePanelOpen` made it pop into the header the INSTANT the
+  // panel started closing, while `SidePanel`'s own 250ms width-collapse
+  // (side-panel.tsx) was still visibly playing — a button inviting the
+  // agent to reopen a panel that hadn't actually finished closing yet,
+  // confirmed live as a jarring flash/glitch. This mirrors `sidePanelOpen`
+  // but with a short delay on the "reveal" edge only (closing → show
+  // button) — the "hide" edge (opening → hide button) stays instant, since
+  // there's no equivalent glitch in hiding something the moment it's no
+  // longer true. 100ms (started at 250ms, matching the panel's own full
+  // close transition exactly, then trimmed to 150ms, then this — both per
+  // explicit follow-up request) — short enough the button no longer reads
+  // as visibly lagging behind the rest of the collapse, while still
+  // clearing the worst of the original flash/glitch.
+  const [sidePanelToggleVisible, setSidePanelToggleVisible] = useState(!sidePanelOpen);
+  const sidePanelToggleRevealTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    clearTimeout(sidePanelToggleRevealTimer.current);
+    if (sidePanelOpen) {
+      setSidePanelToggleVisible(false);
+    } else {
+      sidePanelToggleRevealTimer.current = setTimeout(() => setSidePanelToggleVisible(true), 100);
+    }
+    return () => clearTimeout(sidePanelToggleRevealTimer.current);
+  }, [sidePanelOpen]);
 
   // Hover-preview handlers — guarded on `sidePanelPinned` (not the
   // narrow-adjusted `effectiveSidePanelPinned`): once pinned, hover does
@@ -9633,9 +9795,6 @@ export function AgentNextGenPage({
         interaction.id === interactionId ? { ...interaction, currentChannelId: channelKey } : interaction
       )
     );
-    // Picking a channel tab always deselects "Customer History" — the two
-    // are mutually exclusive tabs in the same row.
-    setCustomerHistoryTabActive(false);
   };
 
   /** Fired by `InteractionComposer`'s Send button — appends the agent's
@@ -11278,17 +11437,18 @@ export function AgentNextGenPage({
                 // place.
                 //
                 // Side effect, expected rather than a regression: this
-                // panel's own internal `activeTab` (Overview/Detail/
-                // Directory — `CustomerInformationSidePanel`'s own
-                // `useState(0)`) now resets to Overview on every genuine
-                // assignment switch too, since remounting discards it
-                // along with everything else in the subtree. Landing on a
-                // different customer's Overview tab first, rather than
-                // wherever the PREVIOUS customer's panel happened to be
-                // left, matches the same "genuinely new context should
-                // start from the top" reasoning `lastActiveInteractionIdRef`
-                // already documents above for the transcript's own
-                // Customer History tab/session state.
+                // panel's own internal `activeTab` (Overview/Interactions/
+                // Detail/Directory — `CustomerInformationSidePanel`'s own
+                // `useState(0)`), and the Interactions tab's own
+                // `selectedHistoryIndex` (`CustomerInformationPanelBody`),
+                // now reset to their defaults on every genuine assignment
+                // switch too, since remounting discards them along with
+                // everything else in the subtree. Landing on a different
+                // customer's Overview tab first, rather than wherever the
+                // PREVIOUS customer's panel happened to be left, matches the
+                // same "genuinely new context should start from the top"
+                // reasoning the outer interaction detail page's own
+                // `key={`interaction-${id}`}` remount already establishes.
                 //
                 // `z-[5]` here (on THIS wrapper, not just relying on
                 // `SidePanel`'s own internal `z-[5]`) — per explicit
@@ -11324,7 +11484,20 @@ export function AgentNextGenPage({
                 // before the wrapper was introduced.
                 <div
                   key={`side-panel-${activeInteraction.id}`}
-                  className="shrink-0 z-[5] animate-in fade-in-0 duration-200 delay-150 fill-mode-backwards"
+                  // `h-full` — explicit, not left to this flex item's own
+                  // default cross-axis `align-items: stretch` from its
+                  // parent row (`flex flex-1 overflow-hidden min-h-0`,
+                  // "Row: Customer Information panel + everything else"
+                  // above) — confirmed live as the actual root cause of
+                  // the docked panel's own internal scrolling never
+                  // engaging (while full-screen/unpinned mode, which
+                  // reaches its height via `position: absolute` against
+                  // `Container` instead — an unambiguous MAIN-axis
+                  // flex-grow box, not cross-axis stretch — worked fine
+                  // the whole time). Mirrored one level down on
+                  // `SidePanel`'s own pinned-branch outer div
+                  // (side-panel.tsx), which had the identical gap.
+                  className="shrink-0 h-full z-[5] animate-in fade-in-0 duration-200 delay-150 fill-mode-backwards"
                 >
                 <CustomerInformationSidePanel
                   open={sidePanelOpen}
@@ -11474,13 +11647,15 @@ export function AgentNextGenPage({
                     // live in the pinned Customer Information `SidePanel`'s
                     // own header now, so repeating them here was redundant.
                     // This row is just: the Customer Information toggle
-                    // icon, a divider, then a single `TabList` holding a
-                    // separate, independently-selectable "Customer History"
-                    // tab (own `customerHistoryTabActive` state — NOT
-                    // another trigger for the panel icon) plus one tab per
-                    // open channel, replacing `ChannelToggleGroup`'s job of
-                    // switching between them — real `Tab`s now, not toggle
-                    // pills. `ChannelTab`/`TabList` are safe to bring back
+                    // icon, a divider, then a single `TabList` holding one
+                    // tab per open channel, replacing `ChannelToggleGroup`'s
+                    // job of switching between them — real `Tab`s now, not
+                    // toggle pills. (Used to also hold a separate
+                    // "Customer History" tab here, mutually exclusive with
+                    // the channel tabs — moved into the Customer Information
+                    // panel itself as an "Interactions" tab per explicit
+                    // request, see `CUSTOMER_PANEL_TABS`.) `ChannelTab`/
+                    // `TabList` are safe to bring back
                     // here (this row's ONLY content, not squeezed into a
                     // `titleSuffix` slot alongside a title block) — it
                     // doesn't have the "no real width to fill" problem that
@@ -11512,14 +11687,47 @@ export function AgentNextGenPage({
                       {/* Only shown while the panel itself is closed — once
                           it's open, this same icon would just sit there
                           doing nothing useful next to a panel that's
-                          already visible (the panel's own close button, and
-                          the "Customer History" tab, are the ways to act on
-                          it once open); per explicit request. Its own
-                          divider goes with it — a lone divider with nothing
-                          to its left would just look like a stray line at
-                          the start of the row. */}
-                      {showPanelToggle && !sidePanelOpen && (
-                        <>
+                          already visible (the panel's own close button is
+                          the way to act on it once open); per explicit
+                          request. Its own divider goes with it — a lone
+                          divider with nothing to its left would just look
+                          like a stray line at the start of the row.
+
+                          Stays MOUNTED whenever `showPanelToggle` is true
+                          (gated only on `sidePanelToggleVisible` below, via
+                          a `grid-template-columns` 0fr↔1fr track — same
+                          trick this file's own collapsible channel list
+                          already uses for an analogous "unknown/auto
+                          content size but needs to animate smoothly"
+                          problem, just on the width axis here instead of
+                          height) rather than conditionally rendered — a
+                          CSS *transition* needs a PRIOR value on the same
+                          DOM node to animate from, so a freshly-mounted
+                          node (which conditional rendering would produce
+                          every time this reappears) never animates; only
+                          re-flowing an already-mounted node does. Per
+                          explicit follow-up request: animate the REVEAL
+                          (closing → button grows in) but not the hide
+                          (opening → button should still vanish instantly,
+                          same as before) — `transition-[grid-template-
+                          columns]` only appears in the `sidePanelToggleVisible`
+                          branch below, so collapsing back to `0fr` has no
+                          transition property active and snaps instantly,
+                          while expanding to `1fr` picks the transition up
+                          and animates — same asymmetric "only transition
+                          in one direction" idiom `SidePanel`'s own
+                          `widthTransition` (`isResizing ? "none" : "width
+                          250ms ..."`) already establishes in lyra-ui. */}
+                      {showPanelToggle && (
+                        <div
+                          className={cn(
+                            "grid overflow-hidden",
+                            sidePanelToggleVisible
+                              ? "grid-cols-[1fr] transition-[grid-template-columns] duration-200 ease-out"
+                              : "grid-cols-[0fr]"
+                          )}
+                        >
+                        <div className="flex min-w-0 items-center gap-3 overflow-hidden">
                           {/* Plain outlined icon `Button`, not a
                               `PanelPinButton` — per explicit request, this
                               needs a bordered "outline" look with no
@@ -11619,7 +11827,8 @@ export function AgentNextGenPage({
                             </Button>
                           </Popover>
                           <div className="h-8 w-px bg-lyra-border-subtle shrink-0" aria-hidden="true" />
-                        </>
+                        </div>
+                        </div>
                       )}
                       {/* `border-b-0` — cancels TabList's own default
                           bottom border (which only ever spans its own box,
@@ -11637,35 +11846,18 @@ export function AgentNextGenPage({
                           (tabs.tsx) keeps each tab's label/icon centered
                           within its now-taller box, so nothing looks
                           squished by this. */}
-                      {/* `growToFillRow` — this row sits alongside the
-                          "Customer History" tab + divider before it and the
-                          "+" button after it, so it needs to actually claim
-                          the rest of that horizontal row instead of sizing
-                          to its own near-content-less width (which was
-                          reading as narrow enough to collapse the
-                          `overflowMenu` breakpoint early even with plenty
-                          of real room available — see that prop's own doc
-                          comment in tabs.tsx). `className`'s own `flex-1
-                          min-w-0` still lands on the inner tab row itself
-                          (unrelated, unaffected by this prop). */}
+                      {/* `growToFillRow` — this row sits alongside the icon
+                          button + divider before it and the "+" button
+                          after it, so it needs to actually claim the rest of
+                          that horizontal row instead of sizing to its own
+                          near-content-less width (which was reading as
+                          narrow enough to collapse the `overflowMenu`
+                          breakpoint early even with plenty of real room
+                          available — see that prop's own doc comment in
+                          tabs.tsx). `className`'s own `flex-1 min-w-0` still
+                          lands on the inner tab row itself (unrelated,
+                          unaffected by this prop). */}
                       <TabList overflowMenu growToFillRow className="flex-1 min-w-0 self-stretch border-b-0">
-                        {/* "Customer History" — a separate, independently
-                            selectable tab, NOT another trigger for the
-                            Customer Information side panel (that's the
-                            person-icon button to the left of the divider
-                            only). Its own `customerHistoryTabActive` state,
-                            mutually exclusive with the channel tabs below
-                            (see `handleChannelSelect`, which turns this back
-                            off whenever a channel tab is picked instead). No
-                            real content behind it yet — selecting it just
-                            shows as the active tab for now. */}
-                        <Tab
-                          active={customerHistoryTabActive}
-                          onClick={() => setCustomerHistoryTabActive(true)}
-                          icon={<History className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
-                        >
-                          Customer History
-                        </Tab>
                         {activeInteraction.channels.map((c) => {
                           const key = c.id ?? c.type;
                           // Same `${interactionId}:${channelKey}` scheme the
@@ -11694,7 +11886,7 @@ export function AgentNextGenPage({
                               showAddressOnFace={false}
                               messageCount={c.messageCount}
                               interactionId={c.interactionId}
-                              active={!customerHistoryTabActive && (activeInteraction.currentChannelId ?? activeInteraction.channels[activeInteraction.channels.length - 1]?.id) === key}
+                              active={(activeInteraction.currentChannelId ?? activeInteraction.channels[activeInteraction.channels.length - 1]?.id) === key}
                               onClick={() => handleChannelSelect(activeInteraction.id, key)}
                               onDismiss={() => {
                                 if (activeInteraction.channels.length > 1) handleDismissChannel(activeInteraction.id, c);
@@ -11759,36 +11951,14 @@ export function AgentNextGenPage({
                       Information now renders as a `SidePanel` docked left of
                       the whole outer Container (see above), not inside this
                       row — so this is just the transcript/composer column
-                      now, no docked panel sibling here anymore. */}
-                  <div className="relative flex flex-1 overflow-hidden">
-                    {customerHistoryTabActive ? (
-                      // "Customer History" tab — a scrollable list of this
-                      // customer's own past sessions
-                      // (`CustomerHistoryTabContent`), with the selected
-                      // one's own detail panel
-                      // (`CustomerHistorySessionDetailPanel`) docked right
-                      // as a sibling — same "list + right InteriorPanel"
-                      // shape `CustomersListView`/`CustomerRowInfoPanel`
-                      // already use, see that section's own doc comment.
-                      // This wrapping div's own `relative` (on the parent
-                      // above) is what lets the panel dock/overlay
-                      // correctly without an extra positioning context.
-                      <>
-                        <CustomerHistoryTabContent
-                          entries={customerHistoryEntries}
-                          selectedIndex={selectedHistoryIndex}
-                          onSelectIndex={setSelectedHistoryIndex}
-                        />
-                        <CustomerHistorySessionDetailPanel
-                          entry={selectedHistoryEntry}
-                          onClose={() => setSelectedHistoryIndex(null)}
-                          onPrevious={() => handleHistoryNav(-1)}
-                          onNext={() => handleHistoryNav(1)}
-                          hasPrevious={selectedHistoryIndex !== null && selectedHistoryIndex > 0}
-                          hasNext={selectedHistoryIndex !== null && selectedHistoryIndex < customerHistoryEntries.length - 1}
-                        />
-                      </>
-                    ) : (
+                      now, no docked panel sibling here anymore. (Used to
+                      also conditionally show the "Customer History" tab's
+                      list + right-docked detail panel here instead, when
+                      that tab was selected — moved into the Customer
+                      Information panel itself as an "Interactions" tab per
+                      explicit request, see `CUSTOMER_PANEL_TABS`, so this is
+                      unconditional again.) */}
+                  <div className="flex flex-1 overflow-hidden">
                       <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
                         {/* Reopened-from-history, closed interaction — read-only
                             notice. See `ActiveInteraction.closed`'s own doc
@@ -11867,7 +12037,6 @@ export function AgentNextGenPage({
                           <InteractionComposer onSend={(text) => handleSendMessage(activeInteraction.id, text)} />
                         )}
                       </div>
-                    )}
                   </div>
                 </div>
               ) : (
