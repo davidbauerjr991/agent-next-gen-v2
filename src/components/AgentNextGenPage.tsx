@@ -476,6 +476,56 @@ interface TrackedChannel {
    *  type, including voice); shown on this channel's `ChannelToggle` tooltip as
    *  "#{interactionId}". */
   interactionId?: string;
+  /**
+   * Every time this channel is restarted at the SAME address/handle (same
+   * `id`, reused via `handleStartCall`'s "same contact already has an
+   * interaction open" merge branch) while its own `channelStatuses` entry
+   * currently reads `"Closed"`, one entry gets appended here — per explicit
+   * request, reopening a closed channel via "Add Channel" shouldn't just
+   * silently resume the same conversation as if nothing happened; it should
+   * read as a genuinely NEW session, appended below whatever's already
+   * there (the old closed session's own messages, real mock history or
+   * otherwise) rather than replacing it. `InteractionTranscript` (this
+   * file, further down) turns each entry here into one more synthetic,
+   * empty "Session Details" separator — the exact same shape
+   * `isFreshLaunch`'s own single synthetic session already uses, just one
+   * per reopen instead of unconditionally one total — appended AFTER
+   * whichever base session list (`TRANSCRIPT_SESSIONS`/`_VOICE`/`_EMAIL`,
+   * or the `isFreshLaunch` synthetic one) that channel type would otherwise
+   * render. `liveMessages` for this channel's own key is deliberately left
+   * UNTOUCHED at the reopen moment (per explicit correction — an earlier
+   * pass wiped it here via a `withoutLiveMessages` call, which lost the
+   * prior session's real message history entirely instead of preserving
+   * it): whatever the agent types next still starts blank under this
+   * newest entry (`sessionsToRender`'s own last id — see
+   * `InteractionTranscript`'s `lastSessionId`) because `InteractionTranscript`
+   * slices the flat array back into per-session chunks using each entry's
+   * own `messagesBeforeReopen` boundary below, not because the array
+   * itself was ever cleared. Kept (not reset) across multiple close→reopen
+   * cycles on the same channel, so each one gets its own distinct row
+   * rather than the latest reopen silently overwriting a prior one. Text
+   * channels (chat/sms/whatsapp) only — see `InteractionTranscript`'s own
+   * `isTextChannel` gate for why voice/email don't have an equivalent
+   * multi-session concept to extend here.
+   */
+  reopenedSessions?: {
+    id: string;
+    date: string;
+    startTime: string;
+    /**
+     * Snapshot of `liveMessages[this channel's id]?.length` at the exact
+     * moment this reopen happened — per explicit correction, reopening a
+     * closed channel must NOT wipe its prior messages; they stay visible
+     * (dimmed) under their original session instead of vanishing. This
+     * boundary is what lets `InteractionTranscript` slice the one flat
+     * `liveMessages` array back into per-session chunks: everything before
+     * this index belongs to whatever session came before this reopen (the
+     * base session, or an earlier reopen), everything from this index up
+     * to the NEXT reopen's own `messagesBeforeReopen` (or the array's end,
+     * for the last entry) belongs to this reopen's own session.
+     */
+    messagesBeforeReopen: number;
+  }[];
 }
 
 /** One live interaction in the left nav — an agent/customer/team/skill
@@ -539,8 +589,22 @@ interface ActiveInteraction {
    * itself (not local component state) so it survives switching away to a
    * different interaction and back via the left nav, instead of resetting
    * every time `InteractionTranscript` remounts.
+   *
+   * Keyed by channel (`TrackedChannel.id ?? .type`, same scheme
+   * `currentChannelId`/`channelStatuses` already use — see the latter's own
+   * doc comment), NOT one flat array for the whole interaction — this used
+   * to be a lone `TranscriptMessage[]`, which was a real, confirmed bug:
+   * every message sent on ANY channel landed in that one shared array, so
+   * switching to a different (or freshly opened) channel on the same card
+   * showed every other channel's own conversation too — e.g. opening a
+   * Voice channel right after chatting on WhatsApp showed the WhatsApp
+   * messages under the Voice tab. Per-channel keys fix that: the render call
+   * site resolves only the CURRENT channel's own entry
+   * (`liveMessages?.[currentKey] ?? []`) before handing it to
+   * `InteractionTranscript`, same as `channelStatuses` already does for
+   * status.
    */
-  liveMessages?: TranscriptMessage[];
+  liveMessages?: Record<string, TranscriptMessage[]>;
   /**
    * True when this interaction was reopened from a CLOSED Contact History
    * row (`handleReopenContactHistoryEntry` — see `ContactHistoryEntry.closed`'s
@@ -644,23 +708,39 @@ function formatWaitTime(totalSeconds: number): string {
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
 }
 
+/** Wait threshold (seconds) past which a just-answered channel's green
+ *  "success" tier escalates to amber ("warning") — see `getAwaitingSeverity`
+ *  below. Per explicit request: the moment the customer's message lands,
+ *  this reads as a plain green "responded" signal, not an alert — only
+ *  once it's sat unanswered this long does it actually need attention.
+ *  Placeholder value; tune to whatever the real digital-channel SLA calls
+ *  for. */
+const AWAITING_WARNING_SECONDS = 30;
+
 /** Wait threshold (seconds) past which an awaiting channel escalates from
  *  amber ("warning") to red ("critical") — see `getAwaitingSeverity` below.
  *  Placeholder value; tune to whatever the real digital-channel SLA calls
- *  for. There's no separate "not urgent yet" tier below this: the moment a
- *  channel is genuinely awaiting a reply it already needs attention, so it
- *  starts at amber immediately rather than sitting on the plain blue/gray
- *  look until some warm-up period has passed. */
+ *  for. */
 const AWAITING_CRITICAL_SECONDS = 60;
 
 /** Maps a channel's own "how long has it been awaiting a reply" duration
  *  (seconds since `lastCustomerMessageTick`, NOT since the channel opened —
- *  see that field's own doc comment) to the severity tier
- *  `InteractionNavItem`/`ChannelRow` (lyra-ui) render. Only ever called for
- *  a channel that IS awaiting — there's no "none" tier here, that's
- *  represented by `awaitingSeverity` being omitted entirely. */
-function getAwaitingSeverity(waitSeconds: number): "warning" | "critical" {
-  return waitSeconds >= AWAITING_CRITICAL_SECONDS ? "critical" : "warning";
+ *  see that field's own doc comment) to the three-tier severity
+ *  `InteractionNavItem`/`ChannelRow`/`ChannelTab` (lyra-ui) render, plus the
+ *  "nearing/breached SLA" banner (`activeChannelAwaitingSeverity` — that one
+ *  only actually renders for "warning"/"critical", treating "success" the
+ *  same as no banner at all, see its own call site). Only ever called for a
+ *  channel that IS awaiting — there's no separate return value for "not
+ *  awaiting at all" here, that's represented by `awaitingSeverity` being
+ *  omitted entirely at each call site; a channel that only just started
+ *  awaiting is still very much awaiting, it just isn't overdue yet, so it
+ *  gets the green "success" tier (a customer got a response promptly, this
+ *  channel's own dot/color/etc. saying so) rather than no color or an
+ *  immediate amber alert. */
+function getAwaitingSeverity(waitSeconds: number): "success" | "warning" | "critical" {
+  if (waitSeconds >= AWAITING_CRITICAL_SECONDS) return "critical";
+  if (waitSeconds >= AWAITING_WARNING_SECONDS) return "warning";
+  return "success";
 }
 
 /* ── Left nav items ──
@@ -2430,34 +2510,59 @@ type CustomerFilterKey = Exclude<keyof CustomerListRecord, "channels">;
 const CUSTOMER_CHANNEL_ORDER: ChannelType[] = ["voice", "sms", "email", "whatsapp"];
 
 /** Which field the launch popover's address dropdown shows for a given
- *  channel — email uses the row's `emailAddress`, voice/sms/whatsapp all
- *  use its `firstPhone`. This dataset only carries one number/address per
- *  customer (unlike the full Outbound picker's `resolveOutboundDetailField`,
- *  which juggles several candidate numbers), so there's just one option to
- *  offer either way. */
+ *  channel — email uses the row's `emailAddress`, voice/sms use its
+ *  `firstPhone`, WhatsApp uses a synthesized `@FirstName LastName` handle
+ *  (see below) rather than either of those. This dataset only carries one
+ *  number/address per customer (unlike the full Outbound picker's
+ *  `resolveOutboundDetailField`, which juggles several candidate numbers),
+ *  so there's just one option to offer either way.
+ *
+ *  WhatsApp used to fall into the same `firstPhone` branch as voice/sms —
+ *  a real, confirmed bug: this table's own database (`CREATE_NEW_CUSTOMERS`,
+ *  `create-new-customers-data.ts`) has no `whatsappHandle`-style field to
+ *  read a real one from, so the launch popover's "Select Phone" field
+ *  listed this row's plain phone number (and, via `addressOptionsForChannel`
+ *  below, the same shared `OUTBOUND_CONFIG.phoneOptions` pool every OTHER
+ *  phone-based channel offers) for a channel that isn't actually reached by
+ *  phone number at all. `@${row.firstName} ${row.lastName}` mirrors the
+ *  exact synthesis lyra-ui's own `resolveOutboundDetailField` already uses
+ *  for the real "New Outbound" launch flow (`create-new.tsx`,
+ *  `channel === "whatsapp"` branch: `` `@${contact.name}` `` — the same
+ *  "no real per-contact handle field exists yet" gap that function's own
+ *  doc comment documents) so this table's picker maps to the exact same
+ *  handle the rest of the app would derive for this same customer, instead
+ *  of a second, disconnected value. */
 function customerChannelAddress(row: CustomerListRecord, channel: ChannelType): { label: string; value: string } {
-  return channel === "email"
-    ? { label: "Select Email Address", value: row.emailAddress }
-    : { label: "Select Phone", value: row.firstPhone };
+  if (channel === "email") return { label: "Select Email Address", value: row.emailAddress };
+  if (channel === "whatsapp") return { label: "Select WhatsApp Handle", value: `@${row.firstName} ${row.lastName}` };
+  return { label: "Select Phone", value: row.firstPhone };
 }
 
 /** Every known address this row can be reached at for a given channel —
- *  the row's own number/email first (same value `customerChannelAddress`
- *  returns), then, for phone-based channels only, the same shared fallback
- *  pool (`OUTBOUND_CONFIG.phoneOptions`) already offered everywhere else a
- *  phone number needs to be picked (e.g. the `CreateNew` outbound picker's
- *  own "Select Phone" screen) — deduped so the row's own number isn't
- *  listed twice if it happens to coincide with a pool entry. Without this,
- *  a channel type already open on its ONE known number read as fully
+ *  the row's own number/email/handle first (same value
+ *  `customerChannelAddress` returns), then, for PHONE-based channels only
+ *  (voice/sms — NOT WhatsApp, see below), the same shared fallback pool
+ *  (`OUTBOUND_CONFIG.phoneOptions`) already offered everywhere else a phone
+ *  number needs to be picked (e.g. the `CreateNew` outbound picker's own
+ *  "Select Phone" screen) — deduped so the row's own number isn't listed
+ *  twice if it happens to coincide with a pool entry. Without this, a
+ *  channel type already open on its ONE known number read as fully
  *  exhausted here even though the very same contact still has other real
  *  numbers reachable elsewhere in the app (caught from a screenshot of
  *  Sarah Miller's SMS icon disappearing entirely despite her own "Add
- *  Channel" picker still listing 3 more unused numbers). Email has no such
- *  shared pool — a customer only ever has the one address on file. */
+ *  Channel" picker still listing 3 more unused numbers). Email and
+ *  WhatsApp both have no such shared pool — a customer only ever has the
+ *  one address/handle on file for either (WhatsApp's is synthesized, see
+ *  `customerChannelAddress`'s own doc comment, but is still just the one
+ *  value) — `OUTBOUND_CONFIG.phoneOptions` is a pool of raw PHONE numbers
+ *  specifically, and mixing WhatsApp's own handle-shaped value into that
+ *  pool (its pre-existing behavior) offered actual phone numbers as
+ *  "WhatsApp handles," which was the bug this whole function got rewritten
+ *  to fix. */
 function addressOptionsForChannel(row: CustomerListRecord, channel: ChannelType): { value: string; label: string }[] {
   const own = customerChannelAddress(row, channel);
   const options = own.value ? [{ value: own.value, label: own.value }] : [];
-  if (channel === "email") return options;
+  if (channel === "email" || channel === "whatsapp") return options;
   for (const opt of OUTBOUND_CONFIG.phoneOptions) {
     if (!options.some((o) => o.value === opt.value)) options.push(opt);
   }
@@ -2622,7 +2727,13 @@ function CustomerChannelPicker({
             placeholder={
               hasAddress
                 ? undefined
-                : `No ${selectedChannel === "email" ? "email address" : "unused phone number"} available`
+                : `No ${
+                    selectedChannel === "email"
+                      ? "email address"
+                      : selectedChannel === "whatsapp"
+                      ? "WhatsApp handle"
+                      : "unused phone number"
+                  } available`
             }
             options={remainingOptions}
           />
@@ -4528,6 +4639,7 @@ function InteractionTranscript({
   recordId,
   skillLabel,
   isFreshLaunch,
+  reopenedSessions,
   liveMessages,
   currentStatus,
   onCurrentStatusChange,
@@ -4542,6 +4654,7 @@ function InteractionTranscript({
   onOutcomeSave,
   onOutcomeCancel,
   onDismissChannel,
+  dimmed,
 }: {
   /** Which channel's content to show — see this component's own doc
    *  comment above. Undefined (no active interaction/channel yet) renders
@@ -4575,6 +4688,23 @@ function InteractionTranscript({
    *  there's no "pre-existing conversation" for either to wrongly show in
    *  the first place. */
   isFreshLaunch: boolean;
+  /**
+   * One entry per time this channel was reopened (via "Add Channel") while
+   * closed — `ActiveInteraction`'s own `TrackedChannel.reopenedSessions`,
+   * passed straight through. Rendered as one additional, empty synthetic
+   * "Session Details" separator per entry, appended AFTER whichever base
+   * session list this channel type otherwise shows (see this component's
+   * own doc comment above and the render return below) — see that field's
+   * own doc comment for the full reasoning. Text channels
+   * (chat/sms/whatsapp) only; always `undefined`/ignored for voice/email,
+   * which have no equivalent multi-session concept (`isTextChannel` below
+   * gates this the same way it gates `isFreshLaunch`). Each entry's own
+   * `messagesBeforeReopen` is what lets `liveMessagesBySessionId` below
+   * slice the flat `liveMessages` prop back into per-session chunks — see
+   * that field's own doc comment (on `TrackedChannel.reopenedSessions`) for
+   * the full boundary reasoning.
+   */
+  reopenedSessions?: { id: string; date: string; startTime: string; messagesBeforeReopen: number }[];
   /**
    * Messages actually sent this session (`InteractionComposer`'s Send
    * button) plus the simulated customer reply that follows — this
@@ -4650,6 +4780,20 @@ function InteractionTranscript({
    * (`TriangleAlert`), same action, just a second real trigger for it.
    */
   onDismissChannel?: () => void;
+  /**
+   * True once this whole conversation reads as over/read-only — either
+   * `ActiveInteraction.closed` (a reopened, fully-closed historical
+   * interaction) or the ACTIVE channel's own `channelStatuses` entry
+   * reading `"Closed"` (still an otherwise-open assignment, just this one
+   * channel closed via the status popover) — the same union of conditions
+   * that already gate the "You are viewing a closed interaction."/"This
+   * channel is closed." banners at the render call site, reused here
+   * rather than re-derived from `currentStatus` alone so this fades for
+   * BOTH closed states those two banners cover, not just one of them. Per
+   * explicit request, fades every session's messages (not just the
+   * current one) to 50% opacity — the whole conversation is inert now, not
+   * just its most recent stretch. */
+  dimmed?: boolean;
 }) {
   // A freshly-launched Chat/SMS/WhatsApp interaction (see `isFreshLaunch`'s
   // own doc comment) shows just a single synthesized "Session Details"
@@ -4691,7 +4835,7 @@ function InteractionTranscript({
   // session info, but a call or an email shouldn't be mislabeled "SMS" in
   // its own Session Details panel just because it fell into the same
   // default branch.
-  const sessionsToRender: TranscriptSession[] = isFreshTextLaunch
+  const baseSessionsToRender: TranscriptSession[] = isFreshTextLaunch
     ? [
         {
           id: "session-fresh",
@@ -4711,9 +4855,74 @@ function InteractionTranscript({
     : channelType === "email"
     ? TRANSCRIPT_SESSIONS_EMAIL
     : TRANSCRIPT_SESSIONS;
+  // One more synthetic, empty "Session Details" separator per reopen — see
+  // `reopenedSessions`' own doc comment above. Same synthetic shape as
+  // `session-fresh` above, just built from the reopen's own captured
+  // date/time (`reopenedSessions` entries) instead of "now" and keyed by
+  // that entry's own id rather than the fixed `"session-fresh"` one, so
+  // several reopens on the same channel each render as their own distinct
+  // row instead of colliding on id. Text channels only, same as
+  // `isFreshTextLaunch` above — voice/email have no multi-session concept
+  // to extend here (their `reopenedSessions` prop is always `undefined` in
+  // practice, but `isTextChannel` guards this regardless).
+  const reopenedSessionsToRender: TranscriptSession[] = isTextChannel
+    ? (reopenedSessions ?? []).map((entry) => ({
+        id: entry.id,
+        caseId: recordId,
+        date: entry.date,
+        startTime: entry.startTime,
+        endTime: "—",
+        channel: freshSessionChannelLabel,
+        skill: skillLabel ?? "—",
+        agent: `${CURRENT_AGENT_FIRST_NAME} ${CURRENT_AGENT_LAST_NAME}`,
+        status: "Open",
+        messages: [],
+      }))
+    : [];
+  const sessionsToRender: TranscriptSession[] = [...baseSessionsToRender, ...reopenedSessionsToRender];
   // The "current" session for status purposes — see `currentStatus`/
-  // `onCurrentStatusChange`'s own doc comments above.
+  // `onCurrentStatusChange`'s own doc comments above. Now always the most
+  // RECENT reopen (if any) rather than always `baseSessionsToRender`'s own
+  // last entry — reopening should hand "current" over to the brand-new
+  // session, not leave it pointed at the old closed one.
   const lastSessionId = sessionsToRender[sessionsToRender.length - 1]?.id;
+
+  // Slices the one flat `liveMessages` array back into per-session chunks,
+  // keyed by session id — per explicit correction, reopening a closed
+  // channel must NOT wipe its prior messages; they need to keep rendering
+  // (dimmed) under their ORIGINAL session, with only the messages sent
+  // since the reopen landing under the new one. Each `reopenedSessions`
+  // entry's own `messagesBeforeReopen` (see that field's own doc comment)
+  // is the exact index boundary: everything before the first reopen's
+  // boundary belongs to `baseSessionsToRender`'s own last id (the session
+  // `liveMessages` always attached to before reopens existed at all);
+  // everything between one reopen's boundary and the next belongs to that
+  // reopen's own session id; everything after the last boundary belongs to
+  // the most recent reopen. Plain computation (not a memo) — cheap, and
+  // `sessionsToRender` right above it isn't memoized either.
+  const baseLiveMessageSessionId = baseSessionsToRender[baseSessionsToRender.length - 1]?.id;
+  const liveMessagesBySessionId: Record<string, TranscriptMessage[]> = {};
+  if (isTextChannel) {
+    const boundaries = reopenedSessionsToRender.map(
+      (_, idx) => reopenedSessions?.[idx]?.messagesBeforeReopen ?? liveMessages.length
+    );
+    let start = 0;
+    if (baseLiveMessageSessionId) {
+      const end = boundaries[0] ?? liveMessages.length;
+      liveMessagesBySessionId[baseLiveMessageSessionId] = liveMessages.slice(0, end);
+      start = end;
+    }
+    reopenedSessionsToRender.forEach((session, idx) => {
+      const end = boundaries[idx + 1] ?? liveMessages.length;
+      liveMessagesBySessionId[session.id] = liveMessages.slice(start, end);
+      start = end;
+    });
+  } else if (baseLiveMessageSessionId) {
+    // Voice/Email — no reopen concept at all (see `isTextChannel`'s own
+    // gate above); the whole flat array still attaches to the single base
+    // session's id, same as before this per-session slicing existed.
+    liveMessagesBySessionId[baseLiveMessageSessionId] = liveMessages;
+  }
 
   // Local, per-session tag state — removing/adding a tag on one message
   // shouldn't touch any other message's tags (in this session or any
@@ -5014,7 +5223,29 @@ function InteractionTranscript({
               status: getSessionStatus(session),
             };
             return (
-              <div key={session.id} className="flex flex-col">
+              <div
+                key={session.id}
+                className={cn(
+                  "flex flex-col",
+                  // Per explicit request — a closed conversation's own
+                  // bubbles/session content read as inert/faded rather than
+                  // full-strength, matching the "read-only" treatment the
+                  // banners above this transcript (and the hidden composer)
+                  // already establish for the same closed states. Now
+                  // per-session rather than applied once to the whole
+                  // transcript: any session that ISN'T the current one
+                  // (`lastSessionId`) is, by definition, already-closed
+                  // history — a prior session that got superseded by a
+                  // reopen — so it stays dimmed regardless of whether the
+                  // channel/interaction is CURRENTLY closed. The current
+                  // session's own opacity still follows the `dimmed` prop
+                  // as before (this channel/interaction being closed right
+                  // now). `transition-opacity` so a session that just
+                  // became non-current (a fresh reopen landing) fades
+                  // rather than snapping.
+                  (session.id !== lastSessionId || dimmed) && "opacity-50 transition-opacity"
+                )}
+              >
                 <TranscriptSessionSeparator
                   session={sessionWithCurrentStatus}
                   customerName={customerName}
@@ -5024,8 +5255,18 @@ function InteractionTranscript({
                   // Only a real, meaningful count for chat/SMS/WhatsApp —
                   // see this prop's own doc comment on `TranscriptSession
                   // Separator` for why Voice/Email (`messages: []`
-                  // placeholders) are left `undefined` instead of `0`.
-                  messageCount={isTextChannel ? messages.length : undefined}
+                  // placeholders) are left `undefined` instead of `0`. Adds
+                  // in this session's own slice of live messages
+                  // (`liveMessagesBySessionId`) on top of the static mock
+                  // count — a fresh/reopened synthetic session always has
+                  // `messages: []` (nothing seeded into `sessionMessages`
+                  // for it), so without this its header would always read
+                  // "0 Messages" even once real messages exist under it.
+                  messageCount={
+                    isTextChannel
+                      ? messages.length + (liveMessagesBySessionId[session.id]?.length ?? 0)
+                      : undefined
+                  }
                   statusMenuOpen={statusMenuOpenId === session.id}
                   statusMenuView={statusMenuView}
                   onStatusMenuOpenChange={(nextOpen) => handleStatusMenuOpenChange(session.id, nextOpen)}
@@ -5124,12 +5365,18 @@ function InteractionTranscript({
                 )}
                 {/* Live messages — this interaction's own sent/received
                     messages (see `ActiveInteraction.liveMessages`'s own doc
-                    comment) — rendered here, INSIDE the last session's own
-                    per-session block (`session.id === lastSessionId`), not
-                    as a separate block after this whole `.map()` (where it
-                    used to live). Still no separator of its own — it's a
-                    continuation of the same open conversation, not a new
-                    session — but it has to be a DOM descendant of this same
+                    comment) — rendered here, INSIDE this session's own
+                    per-session block, not as a separate block after this
+                    whole `.map()` (where it used to live). Sliced per-
+                    session via `liveMessagesBySessionId` (see that const's
+                    own doc comment) rather than always attaching the whole
+                    flat array to `lastSessionId` — per explicit correction,
+                    reopening a closed channel keeps its PRIOR messages
+                    visible under their original session (dimmed, above),
+                    with only newly-sent messages landing under the current
+                    one. Still no separator of its own — it's a continuation
+                    of the same session's conversation, not a new session —
+                    but it has to be a DOM descendant of this same
                     `<div key={session.id}>` for `TranscriptSessionSeparator`'s
                     `sticky top-0` above to actually work once live messages
                     are what's overflowing: a `position: sticky` element can
@@ -5147,26 +5394,31 @@ function InteractionTranscript({
                     "sticky for existing conversations but new conversations
                     ... when the conversation reaches an overflow-y it is
                     not sticky"). */}
-                {session.id === lastSessionId && liveMessages.length > 0 && (
-                  <div className="flex flex-col gap-5 py-4">
-                    {liveMessages.map((message) => (
-                      <TranscriptMessageBubble
-                        key={message.id}
-                        message={{
-                          ...message,
-                          ...(message.sender === "customer" ? { name: displayName, initials: displayInitials } : {}),
-                          tags: liveMessageTags[message.id] ?? message.tags,
-                        }}
-                        tagPickerOpen={tagPickerOpenId === message.id}
-                        onTagPickerOpenChange={(open) => setTagPickerOpenId(open ? message.id : null)}
-                        onAddTag={(option) => addLiveTag(message.id, option)}
-                        onRemoveTag={(tagId) => removeLiveTag(message.id, tagId)}
-                        onClearTags={() => clearLiveTags(message.id)}
-                        onCopy={() => copyMessage(message.text)}
-                      />
-                    ))}
-                  </div>
-                )}
+                {(() => {
+                  const sessionLiveMessages = liveMessagesBySessionId[session.id] ?? [];
+                  return (
+                    sessionLiveMessages.length > 0 && (
+                      <div className="flex flex-col gap-5 py-4">
+                        {sessionLiveMessages.map((message) => (
+                          <TranscriptMessageBubble
+                            key={message.id}
+                            message={{
+                              ...message,
+                              ...(message.sender === "customer" ? { name: displayName, initials: displayInitials } : {}),
+                              tags: liveMessageTags[message.id] ?? message.tags,
+                            }}
+                            tagPickerOpen={tagPickerOpenId === message.id}
+                            onTagPickerOpenChange={(open) => setTagPickerOpenId(open ? message.id : null)}
+                            onAddTag={(option) => addLiveTag(message.id, option)}
+                            onRemoveTag={(tagId) => removeLiveTag(message.id, tagId)}
+                            onClearTags={() => clearLiveTags(message.id)}
+                            onCopy={() => copyMessage(message.text)}
+                          />
+                        ))}
+                      </div>
+                    )
+                  );
+                })()}
               </div>
             );
           })}
@@ -6722,10 +6974,13 @@ function CustomerHistorySessionDetailPanel({
   hasPrevious: boolean;
   hasNext: boolean;
 }) {
-  const [activeTab, setActiveTab] = useState(0);
-  useEffect(() => {
-    setActiveTab(0);
-  }, [entry?.id]);
+  /* Defaults to "Conversation", not "Details" — agents open a past session
+     to read what was said; the metadata fields are the secondary tab.
+     Deliberately NOT reset when `entry.id` changes (it used to reset to 0
+     on every change): the prev/next chevrons' primary use is scanning back
+     through several sessions reading each conversation, and resetting the
+     tab forced a re-click of "Conversation" on every step of that scan. */
+  const [activeTab, setActiveTab] = useState(() => CUSTOMER_HISTORY_DETAIL_TABS.indexOf("Conversation"));
 
   return (
     <InteriorPanel
@@ -6839,7 +7094,18 @@ function CustomerHistorySessionDetailPanel({
         </div>
       )}
       {entry && activeTab === CUSTOMER_HISTORY_DETAIL_TABS.indexOf("Conversation") && (
-        <CustomerHistoryConversationContent entry={entry} />
+        <>
+          {/* One-line outcome header — status · agent · date — so quick
+              "how did that end?" lookups can finish without reading the
+              thread at all. Same lyra-body-sm secondary treatment as the
+              Overview tab's Latest Interaction meta lines. */}
+          <div className="px-4 pt-3">
+            <span className="lyra-body-sm text-lyra-fg-secondary">
+              {[entry.statusLabel, entry.agentName, entry.timestampDisplay].filter(Boolean).join(" · ")}
+            </span>
+          </div>
+          <CustomerHistoryConversationContent entry={entry} />
+        </>
       )}
     </InteriorPanel>
   );
@@ -7209,8 +7475,22 @@ function CustomerInformationPanelBody({
   latestNote,
   recordId,
   channels,
+  onSelectTab,
+  isFullScreen,
+  onRequestFullScreenChange,
 }: {
   activeTab: number;
+  /** Lets this body ask its OWNER to switch the panel's own tab — used by
+   *  the Overview tab's "Open conversation" deep link (Latest Interaction
+   *  accordion) to jump to the Interactions tab with the newest session's
+   *  detail already open. Optional: the hover preview doesn't pass it. */
+  onSelectTab?: (tabIndex: number) => void;
+  /** Auto-fullscreen while a session detail is open at docked width — a
+   *  conversation is unreadable through a ≤425px keyhole. Only the real
+   *  side panel passes these (the hover preview has no fullscreen). See
+   *  the effect below for the enter/exit rules. */
+  isFullScreen?: boolean;
+  onRequestFullScreenChange?: (fullScreen: boolean) => void;
   /** Needed here (not just by `buildCustomerInfoFields`) for the Detail
    *  tab's "First Name"/"Last Name" fields — see `CustomerDetailTabContent`. */
   customerName?: string;
@@ -7273,6 +7553,29 @@ function CustomerInformationPanelBody({
   );
   const [selectedHistoryIndex, setSelectedHistoryIndex] = useState<number | null>(null);
   const selectedHistoryEntry = selectedHistoryIndex !== null ? customerHistoryEntries[selectedHistoryIndex] ?? null : null;
+
+  /* Auto-fullscreen while a session detail is open at docked width.
+     Fires only on OPEN/CLOSE transitions of the detail panel (tracked via
+     `prevHistoryDetailOpenRef`), never on `isFullScreen` changes — so an
+     agent who manually exits fullscreen mid-read isn't fought back into it.
+     `autoEnteredFullScreenRef` remembers whether WE entered fullscreen, so
+     closing the detail only exits fullscreen when it was auto-entered (a
+     manually-chosen fullscreen is left exactly as the agent set it). */
+  const historyDetailOpen = selectedHistoryEntry !== null;
+  const prevHistoryDetailOpenRef = useRef(false);
+  const autoEnteredFullScreenRef = useRef(false);
+  useEffect(() => {
+    const wasOpen = prevHistoryDetailOpenRef.current;
+    prevHistoryDetailOpenRef.current = historyDetailOpen;
+    if (!onRequestFullScreenChange) return;
+    if (historyDetailOpen && !wasOpen && !isFullScreen) {
+      autoEnteredFullScreenRef.current = true;
+      onRequestFullScreenChange(true);
+    } else if (!historyDetailOpen && wasOpen && autoEnteredFullScreenRef.current) {
+      autoEnteredFullScreenRef.current = false;
+      if (isFullScreen) onRequestFullScreenChange(false);
+    }
+  }, [historyDetailOpen, isFullScreen, onRequestFullScreenChange]);
   const handleHistoryNav = (direction: 1 | -1) => {
     setSelectedHistoryIndex((prev) => {
       if (prev === null) return prev;
@@ -7544,6 +7847,27 @@ function CustomerInformationPanelBody({
                           <span className="lyra-body-sm text-lyra-fg-secondary">
                             {latestInteraction.caseId} · Handled by {latestInteraction.handledBy}
                           </span>
+                          {/* Deep link: the single most common history lookup
+                              ("what happened last time?") in ONE click from the
+                              panel's landing tab — jumps to Interactions with
+                              the newest session's detail open (which itself now
+                              defaults to its Conversation tab). Only rendered
+                              when the owner can switch tabs (real side panel,
+                              not the hover preview) and entries exist. */}
+                          {onSelectTab && customerHistoryEntries.length > 0 && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="self-start"
+                              onClick={() => {
+                                setSelectedHistoryIndex(0);
+                                onSelectTab(CUSTOMER_PANEL_TABS.indexOf("Interactions"));
+                              }}
+                            >
+                              Open Conversation
+                              <ChevronRight className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                            </Button>
+                          )}
                         </div>
                       ),
                     },
@@ -8038,6 +8362,17 @@ function CustomerInformationSidePanel({
         latestNote={latestNote}
         recordId={recordId}
         channels={channels}
+        onSelectTab={setActiveTab}
+        isFullScreen={Boolean(fullScreen)}
+        onRequestFullScreenChange={
+          onToggleFullScreen
+            ? (next) => {
+                /* `onToggleFullScreen` is a toggle; only fire it when the
+                   requested state differs from the current one. */
+                if (next !== Boolean(fullScreen)) onToggleFullScreen();
+              }
+            : undefined
+        }
       />
     </SidePanel>
   );
@@ -8629,6 +8964,13 @@ export function AgentNextGenPage({
       )
     : undefined;
   const activeChannelType = activeChannel?.type;
+  // The bare channel-key half of `activeChannelOutcomeKey` below — used on
+  // its own to resolve this channel's own entry out of
+  // `ActiveInteraction.liveMessages` (see that field's own doc comment for
+  // why it's keyed per-channel) at the `InteractionTranscript` render call
+  // site further down, so a freshly opened/different channel never shows
+  // another channel's own live messages.
+  const activeChannelKey = activeChannel?.id ?? activeChannel?.type ?? "channel";
   // Same `${interactionId}:${channelKey}` scheme the LeftNav's own
   // `ChannelRow` Outcome button keys `outcomeDraftKey` with (a few hundred
   // lines down) — computed here too so `InteractionTranscript`'s current-
@@ -8668,6 +9010,19 @@ export function AgentNextGenPage({
     }, 1000);
     return () => clearInterval(id);
   }, []);
+  // Same "how urgently is this channel awaiting a reply" signal the record-
+  // header tab bar's own `<ChannelTab awaitingSeverity=...>` call site
+  // computes per-channel (render return, further down) — resolved once
+  // more, here, for the ACTIVE channel specifically so the "nearing SLA
+  // breach"/"breached SLA" `InlineNotification` banner (also in the render
+  // return, directly above the transcript) reflects the exact same tier as
+  // that channel's own tab, rather than re-deriving it a third time at the
+  // banner's own JSX. `undefined` whenever the active channel isn't
+  // awaiting at all (mirrors `awaitingSeverity` being omitted for that case
+  // everywhere else) — that's what tells the banner to render nothing.
+  const activeChannelAwaitingSeverity: "success" | "warning" | "critical" | undefined = activeChannel?.awaitingResponse
+    ? getAwaitingSeverity(clockTick - (activeChannel.lastCustomerMessageTick ?? activeChannel.startTick))
+    : undefined;
   const [activeDeskTab, setActiveDeskTab] = useState<"home" | "customers" | "accounts" | "tickets" | "wem">("home");
   // Desk-tab display order — separate from `activeDeskTab` above (which
   // one is selected), so the user can click-and-drag reorder the Home/
@@ -9397,8 +9752,42 @@ export function AgentNextGenPage({
     // has a card open decides whether Customer Information animates open
     // (see the `setSidePanelOpen` call at the end of this handler).
     const isNewInteraction = !interactions.some((i) => i.id === selection.contact.id);
+    // Read before `setInteractions` below, same reasoning as
+    // `isNewInteraction` — this channel's own id (`type:phone`, reused
+    // verbatim across restarts at the same address) is how a restart of a
+    // previously-CLOSED channel is actually detected: if a channel with
+    // this exact id already exists on this contact's interaction AND its
+    // own `channelStatuses` entry currently reads `"Closed"`, this is a
+    // genuine reopen (agent picked the same channel/handle again via "Add
+    // Channel"), not a brand-new one — see `TrackedChannel.
+    // reopenedSessions`'s own doc comment for what that then does.
+    const existingInteraction = interactions.find((i) => i.id === selection.contact.id);
+    const existingChannelId = `${selection.channel}:${selection.phone}`;
+    const existingChannel = existingInteraction?.channels.find((c) => c.id === existingChannelId);
+    const isReopenOfClosedChannel =
+      !!existingChannel && existingInteraction?.channelStatuses?.[existingChannelId] === "Closed";
+    const reopenedSessions = isReopenOfClosedChannel
+      ? [
+          ...(existingChannel!.reopenedSessions ?? []),
+          {
+            // `Date.now()` (a real, always-unique timestamp), not
+            // `clockTick` (an incrementing seconds counter this app's own
+            // shared 1s interval drives) — two reopens landing inside the
+            // same tick would otherwise collide on id.
+            id: `session-reopened-${Date.now()}`,
+            date: new Date().toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }),
+            startTime: new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }),
+            // Snapshot of how many live messages this channel had BEFORE
+            // this reopen — per explicit correction, those messages must
+            // stay visible (dimmed) under their own prior session, not be
+            // wiped. See this field's own doc comment on `TrackedChannel.
+            // reopenedSessions` for how `InteractionTranscript` uses it.
+            messagesBeforeReopen: existingInteraction?.liveMessages?.[existingChannelId]?.length ?? 0,
+          },
+        ]
+      : existingChannel?.reopenedSessions;
     const newChannel: TrackedChannel = {
-      id: `${selection.channel}:${selection.phone}`,
+      id: existingChannelId,
       type: selection.channel,
       startTick: clockTick,
       preview: skillLabel,
@@ -9411,6 +9800,7 @@ export function AgentNextGenPage({
       // `ChannelTabProps.messageCount`'s own doc comment.
       messageCount: selection.channel === "voice" ? undefined : 0,
       interactionId: generateInteractionId(),
+      reopenedSessions,
     };
 
     setInteractions((prev) => {
@@ -9470,6 +9860,20 @@ export function AgentNextGenPage({
           // status. A genuinely new channel (`chIdx === -1`) has no entry
           // to clear in the first place, so this is a no-op there.
           channelStatuses: withoutChannelStatus(interaction.channelStatuses, newChannel.id),
+          // NOTE: `liveMessages` is deliberately left untouched here (no
+          // `withoutLiveMessages` call) — per explicit correction, reopening
+          // a closed channel must NOT wipe its prior messages. They stay in
+          // the flat `liveMessages[newChannel.id]` array exactly as they
+          // were; `InteractionTranscript` slices that array back into
+          // per-session chunks using each `reopenedSessions` entry's own
+          // `messagesBeforeReopen` boundary, so the old messages keep
+          // rendering (dimmed) under their original session instead of
+          // vanishing. `withoutLiveMessages` is still used elsewhere
+          // (`handleQuickDial`/`handleRedial`/
+          // `handleReopenContactHistoryEntry`/
+          // `handleOpenAssignmentFromNotification`) — those flows have no
+          // reopened-session concept to attribute old messages to, so
+          // clearing is still correct there.
         };
       });
     });
@@ -9557,12 +9961,18 @@ export function AgentNextGenPage({
       const idx = prev.findIndex((i) => i.id === id);
       if (idx === -1) return [...prev, { id, recordId: generateCaseId(), channels: [newChannel], currentChannelId: newChannel.id, startedFresh: true }];
       // `channels: [newChannel]` wholesale-replaces every previous channel
-      // with this one fresh "voice" channel, so `channelStatuses` is reset
-      // entirely too (rather than selectively cleared like
-      // `handleStartCall`'s reused-id case) — no other channel survives
-      // this merge for a stale entry to belong to.
+      // with this one fresh "voice" channel, so `channelStatuses`/
+      // `liveMessages` are reset entirely too (rather than selectively
+      // cleared like `handleStartCall`'s reused-id case) — no other channel
+      // survives this merge for a stale entry to belong to. `liveMessages`
+      // in particular matters here since `newChannel.id` is always the same
+      // literal `"voice"` — without clearing it, redialing the same number
+      // again would reopen still showing whatever was said on the PREVIOUS
+      // call under that reused id.
       return prev.map((interaction, i) =>
-        i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, channelStatuses: undefined } : interaction
+        i === idx
+          ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, channelStatuses: undefined, liveMessages: undefined }
+          : interaction
       );
     });
     switchActiveInteraction(id);
@@ -9612,10 +10022,12 @@ export function AgentNextGenPage({
       const idx = prev.findIndex((i) => i.id === id);
       if (idx === -1) return [...prev, { id, customerName: entry.name, recordId: entry.caseId, channels: [newChannel], currentChannelId: newChannel.id, startedFresh: true }];
       // Same reasoning as `handleQuickDial` above — `channels: [newChannel]`
-      // wholesale-replaces every previous channel, so `channelStatuses`
-      // resets entirely rather than being selectively cleared.
+      // wholesale-replaces every previous channel, so `channelStatuses`/
+      // `liveMessages` reset entirely rather than being selectively cleared.
       return prev.map((interaction, i) =>
-        i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, channelStatuses: undefined } : interaction
+        i === idx
+          ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, channelStatuses: undefined, liveMessages: undefined }
+          : interaction
       );
     });
     switchActiveInteraction(id);
@@ -9688,6 +10100,15 @@ export function AgentNextGenPage({
               currentChannelId: newChannel.id,
               closed: entry.closed,
               channelStatuses: { [newChannel.id]: entry.statusLabel },
+              // `channels: [newChannel]` wholesale-replaces every previous
+              // channel (same as `handleQuickDial`/`handleRedial` above),
+              // and `newChannel.id` here is just `entry.channelType` — so
+              // reopening the same history row again (or one that happens
+              // to share a channel type with whatever this card had open
+              // before) needs `liveMessages` cleared too, or it'd reopen
+              // still showing a stale previous conversation under that
+              // reused key.
+              liveMessages: undefined,
             }
           : interaction
       );
@@ -9823,7 +10244,27 @@ export function AgentNextGenPage({
       text: trimmed,
     };
 
-    const applyToCurrentChannel = (
+    // Captured once, here, from whichever channel is current on THIS
+    // interaction right now — `InteractionComposer` (which fired this) is
+    // always scoped to the currently active channel, so this is genuinely
+    // "the channel this message was sent on." NOT recomputed separately
+    // inside `applyToChannel` at both the immediate-send and delayed-reply
+    // moments below: the agent is free to switch to a different channel tab
+    // (or away and back) during the 2.5s before the simulated customer
+    // reply lands, and re-deriving "current" at that later point would
+    // misattribute the reply (and the `liveMessages` entry it's appended
+    // to) to whatever channel happens to be active THEN instead of the one
+    // this whole exchange actually started on.
+    const interactionAtSend = interactions.find((i) => i.id === interactionId);
+    const channelKeyAtSend =
+      interactionAtSend?.currentChannelId ??
+      (interactionAtSend?.channels[interactionAtSend.channels.length - 1]
+        ? interactionAtSend.channels[interactionAtSend.channels.length - 1].id ??
+          interactionAtSend.channels[interactionAtSend.channels.length - 1].type
+        : undefined) ??
+      "channel";
+
+    const applyToChannel = (
       interaction: ActiveInteraction,
       message: TranscriptMessage,
       awaitingResponse: boolean,
@@ -9833,26 +10274,25 @@ export function AgentNextGenPage({
       // just `undefined`-valued) on the agent-send branch so it doesn't
       // overwrite the channel's existing value with `undefined` there.
       lastCustomerMessageTick?: number
-    ): ActiveInteraction => {
-      const currentKey =
-        interaction.currentChannelId ??
-        (interaction.channels[interaction.channels.length - 1]
-          ? interaction.channels[interaction.channels.length - 1].id ?? interaction.channels[interaction.channels.length - 1].type
-          : undefined);
-      return {
-        ...interaction,
-        liveMessages: [...(interaction.liveMessages ?? []), message],
-        channels: interaction.channels.map((c) =>
-          (c.id ?? c.type) === currentKey
-            ? { ...c, awaitingResponse, ...(lastCustomerMessageTick !== undefined ? { lastCustomerMessageTick } : {}) }
-            : c
-        ),
-      };
-    };
+    ): ActiveInteraction => ({
+      ...interaction,
+      // Keyed by `channelKeyAtSend` — see `ActiveInteraction.liveMessages`'s
+      // own doc comment for why this can't be one flat array shared across
+      // every channel on the card.
+      liveMessages: {
+        ...interaction.liveMessages,
+        [channelKeyAtSend]: [...(interaction.liveMessages?.[channelKeyAtSend] ?? []), message],
+      },
+      channels: interaction.channels.map((c) =>
+        (c.id ?? c.type) === channelKeyAtSend
+          ? { ...c, awaitingResponse, ...(lastCustomerMessageTick !== undefined ? { lastCustomerMessageTick } : {}) }
+          : c
+      ),
+    });
 
     setInteractions((prev) =>
       prev.map((interaction) =>
-        interaction.id === interactionId ? applyToCurrentChannel(interaction, agentMessage, false) : interaction
+        interaction.id === interactionId ? applyToChannel(interaction, agentMessage, false) : interaction
       )
     );
 
@@ -9879,7 +10319,7 @@ export function AgentNextGenPage({
             // called, and a plain closure over `clockTick` would still
             // read its value from THAT moment, not now. See the ref's own
             // doc comment above.
-            ? applyToCurrentChannel(interaction, customerMessage, true, clockTickRef.current)
+            ? applyToChannel(interaction, customerMessage, true, clockTickRef.current)
             : interaction
         )
       );
@@ -9955,6 +10395,15 @@ export function AgentNextGenPage({
       const byType: Partial<Record<ChannelType, string[]>> = {};
       const types = new Set<ChannelType>();
       for (const c of interaction.channels) {
+        // Per explicit request: a channel the agent has explicitly CLOSED
+        // (via the status popover — `channelStatuses[c.id] === "Closed"`)
+        // no longer counts as "open" here, so "Add Channel"/"Select
+        // Channel" offers its type/address again instead of disabling it
+        // as already-in-use. Reselecting it is exactly how a closed
+        // channel gets reopened — see `handleStartCall`'s own
+        // `isReopenOfClosedChannel` branch, which is what actually detects
+        // and handles that case once the agent picks it back here.
+        if (interaction.channelStatuses?.[c.id] === "Closed") continue;
         types.add(c.type);
         if (!c.value) continue;
         (byType[c.type] ??= []).push(c.value);
@@ -10275,7 +10724,17 @@ export function AgentNextGenPage({
         }];
       }
       return prev.map((interaction, i) =>
-        i === idx ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id } : interaction
+        i === idx
+          // `channels: [newChannel]` wholesale-replaces every previous
+          // channel here too (same as the other launch paths above) — this
+          // one doesn't reset `channelStatuses` (pre-existing, unrelated to
+          // this fix), but `liveMessages` does need clearing: `newChannel.id`
+          // reuses a fixed per-notification channel type/id, so without
+          // this, opening the same notification-backed assignment again
+          // could reopen it still showing a stale previous conversation
+          // under that reused key.
+          ? { ...interaction, channels: [newChannel], currentChannelId: newChannel.id, liveMessages: undefined }
+          : interaction
       );
     });
     switchActiveInteraction(id);
@@ -11203,34 +11662,49 @@ export function AgentNextGenPage({
                   // state for the whole left nav (only one popover open at
                   // a time), not scoped per-card.
                   const outcomeKey = `${interaction.id}:${c.id ?? c.type}`;
+                  // Per explicit request: a channel that's been explicitly
+                  // closed (via the status popover) stops counting toward
+                  // SLA/awaiting-response entirely — same reasoning the
+                  // record-header `ChannelTab` call site already applies
+                  // (`activeInteraction.channelStatuses?.[c.id] !== "Closed"`
+                  // there) — there's no reply pending on something that's
+                  // already been closed out, so it shouldn't keep escalating
+                  // amber/red (or green) no matter how long it's sat since.
+                  const isClosed = interaction.channelStatuses?.[c.id] === "Closed";
+                  const effectiveAwaitingResponse = !isClosed && (c.awaitingResponse ?? false);
                   return {
                     id: c.id,
                     type: c.type,
                     // Awaiting: "how long since the CUSTOMER last wrote" —
                     // the metric that actually matters for a digital SLA.
-                    // Not awaiting: "how long since this channel opened",
-                    // same as before — that's still the useful reading once
-                    // there's nothing pending. See `lastCustomerMessageTick`'s
-                    // own doc comment for why these two diverge after more
-                    // than one exchange.
-                    elapsed: c.awaitingResponse
+                    // Not awaiting (including a now-closed channel, per
+                    // `effectiveAwaitingResponse` above): "how long since
+                    // this channel opened", same as before — that's still
+                    // the useful reading once there's nothing pending. See
+                    // `lastCustomerMessageTick`'s own doc comment for why
+                    // these two diverge after more than one exchange.
+                    elapsed: effectiveAwaitingResponse
                       ? formatElapsedTime(channelAwaitingWaitSeconds(c))
                       : formatElapsedTime(clockTick - c.startTick),
                     preview: c.preview,
                     current: c.id === currentId,
-                    // Read straight off the tracked channel (see
-                    // TrackedChannel.awaitingResponse's own doc comment) —
-                    // not derived from `type` — so a freshly-started outbound
-                    // channel never renders red just for being SMS/chat/
-                    // email/WhatsApp instead of voice.
-                    awaitingResponse: c.awaitingResponse ?? false,
-                    // Amber-vs-red escalation (see `getAwaitingSeverity`'s
-                    // own doc comment) — `undefined` (not computed at all)
-                    // when this channel isn't awaiting, so `ChannelRow`/
-                    // `InteractionNavItem` (lyra-ui) fall back to their own
-                    // "nothing pending" look rather than a stray severity
-                    // value with no `awaitingResponse` to go with it.
-                    awaitingSeverity: c.awaitingResponse ? getAwaitingSeverity(channelAwaitingWaitSeconds(c)) : undefined,
+                    // See `effectiveAwaitingResponse` above — not read
+                    // straight off `c.awaitingResponse` any more, since a
+                    // closed channel should never render red/amber/green
+                    // just because it happened to be awaiting right before
+                    // it was closed.
+                    awaitingResponse: effectiveAwaitingResponse,
+                    // Amber-vs-red-vs-green escalation (see
+                    // `getAwaitingSeverity`'s own doc comment) — `undefined`
+                    // (not computed at all) when this channel isn't
+                    // effectively awaiting (not awaiting at all, OR closed),
+                    // so `ChannelRow`/`InteractionNavItem` (lyra-ui) fall
+                    // back to their own "nothing pending" look rather than a
+                    // stray severity value with no `awaitingResponse` to go
+                    // with it.
+                    awaitingSeverity: effectiveAwaitingResponse
+                      ? getAwaitingSeverity(channelAwaitingWaitSeconds(c))
+                      : undefined,
                     // A closed (reopened-from-history) interaction is
                     // read-only — no per-channel kebab, so there's no way to
                     // Unassign & Dismiss/Consult/Transfer/change Outcome on a
@@ -11276,16 +11750,33 @@ export function AgentNextGenPage({
                     } satisfies ChannelOutcomeConfig,
                   };
                 });
-                const earliestStart = Math.min(...interaction.channels.map((c) => c.startTick));
+                // Closed channels drop out of every card-level SLA/timer
+                // computation below — per explicit request, once a channel
+                // is closed it should stop counting toward the card's own
+                // dot/color/timer entirely, not just stop escalating. A
+                // card whose only channel(s) are all closed ends up with an
+                // empty `cardOpenChannels`, which is exactly what makes
+                // `earliestStart` (and so `elapsed`, at the render call site
+                // below) `undefined` — the counter itself disappears rather
+                // than falling back to "time since it was opened," same as
+                // the dot disappearing once `awaitingSeverity` has nothing
+                // left to compute from.
+                const cardOpenChannels = interaction.channels.filter(
+                  (c) => interaction.channelStatuses?.[c.id] !== "Closed"
+                );
+                const earliestStart =
+                  cardOpenChannels.length > 0 ? Math.min(...cardOpenChannels.map((c) => c.startTick)) : undefined;
                 // Card-level awaiting wait: the WORST (longest) of this
-                // card's own awaiting channels, not the earliest-opened
-                // channel's own elapsed time — a card with one fresh
-                // channel and one long-overdue one should read as overdue,
-                // not average out to something in between. `undefined` when
-                // nothing on this card is awaiting at all, so the card
-                // falls back to `earliestStart`'s plain "since it opened"
-                // reading below, same as before this feature existed.
-                const cardAwaitingChannels = interaction.channels.filter((c) => c.awaitingResponse);
+                // card's own awaiting, still-OPEN channels — not the
+                // earliest-opened channel's own elapsed time — a card with
+                // one fresh channel and one long-overdue one should read as
+                // overdue, not average out to something in between.
+                // `undefined` when nothing still-open on this card is
+                // awaiting at all, so the card falls back to
+                // `earliestStart`'s plain "since it opened" reading below
+                // (itself `undefined`, and so blank, once every channel is
+                // closed) — same as before this feature existed.
+                const cardAwaitingChannels = cardOpenChannels.filter((c) => c.awaitingResponse);
                 const cardAwaitingWaitSeconds =
                   cardAwaitingChannels.length > 0
                     ? Math.max(...cardAwaitingChannels.map(channelAwaitingWaitSeconds))
@@ -11327,9 +11818,16 @@ export function AgentNextGenPage({
                       switchActiveInteraction(interaction.id);
                       setPanelFullScreen(false);
                     }}
-                    awaitingResponse={channels.some((c) => c.awaitingResponse)}
+                    awaitingResponse={cardAwaitingChannels.length > 0}
                     awaitingSeverity={cardAwaitingWaitSeconds !== undefined ? getAwaitingSeverity(cardAwaitingWaitSeconds) : undefined}
-                    elapsed={formatElapsedTime(cardAwaitingWaitSeconds ?? clockTick - earliestStart)}
+                    // "" (not a fallback duration) once every channel on
+                    // this card is closed — see `cardOpenChannels`'s own doc
+                    // comment above for why `earliestStart` is `undefined`
+                    // in that case. `InteractionNavItem` (lyra-ui) skips
+                    // rendering the elapsed span entirely for an empty
+                    // string, so the counter itself disappears rather than
+                    // showing a stale/frozen time.
+                    elapsed={earliestStart !== undefined ? formatElapsedTime(cardAwaitingWaitSeconds ?? clockTick - earliestStart) : ""}
                     expanded={navOpen}
                     channels={channels}
                     onDismiss={() => handleDismissInteraction(interaction.id)}
@@ -11377,7 +11875,19 @@ export function AgentNextGenPage({
                   <div key={interaction.id} className="relative">
                     {navItem}
                     {currentChannelType && channels.length <= 1 && (
-                      <CollapsedChannelBadge type={currentChannelType} />
+                      <CollapsedChannelBadge
+                        type={currentChannelType}
+                        // Same `cardAwaitingWaitSeconds`/`getAwaitingSeverity`
+                        // this card's own `InteractionNavItem
+                        // awaitingSeverity` prop above already resolves —
+                        // reused, not recomputed, so a single-channel card's
+                        // badge escalates in lockstep with everything else
+                        // reading this card's severity (the avatar/border,
+                        // the elapsed timer, the corner dot).
+                        severity={
+                          cardAwaitingWaitSeconds !== undefined ? getAwaitingSeverity(cardAwaitingWaitSeconds) : undefined
+                        }
+                      />
                     )}
                   </div>
                 ) : (
@@ -11887,6 +12397,43 @@ export function AgentNextGenPage({
                               messageCount={c.messageCount}
                               interactionId={c.interactionId}
                               active={(activeInteraction.currentChannelId ?? activeInteraction.channels[activeInteraction.channels.length - 1]?.id) === key}
+                              // Same "how long has the CUSTOMER been waiting"
+                              // signal the LeftNav's own `ChannelRow` colors
+                              // its elapsed-time text with (see that
+                              // component's own `interactions.map` above,
+                              // `channelAwaitingWaitSeconds`/
+                              // `getAwaitingSeverity`) — recomputed here
+                              // rather than threaded down from that separate
+                              // render pass, since this tab bar isn't a
+                              // descendant of it. The label text/underline
+                              // only actually recolor while this tab reads
+                              // `active` (see `Tab`'s own `severity` doc
+                              // comment) — an awaiting-but-not-currently-
+                              // viewed channel still shows those in plain
+                              // gray. Its leading icon is the one exception:
+                              // that stays in its success/warning/critical
+                              // color (and, once actually overdue, swaps to
+                              // the warning-triangle glyph — see
+                              // `ChannelTab`'s own `tabIcon`) even while not
+                              // selected, per explicit request.
+                              //
+                              // Both suppressed once THIS channel's own
+                              // status reads "Closed" (see
+                              // `ActiveInteraction.channelStatuses`'s own
+                              // doc comment for why status is tracked per-
+                              // channel) — per explicit follow-up, a closed
+                              // channel's tab resets to its plain neutral
+                              // look regardless of how the SLA clock reads,
+                              // since there's no reply pending on something
+                              // that's already been closed out.
+                              awaitingResponse={
+                                activeInteraction.channelStatuses?.[c.id] !== "Closed" && (c.awaitingResponse ?? false)
+                              }
+                              awaitingSeverity={
+                                activeInteraction.channelStatuses?.[c.id] !== "Closed" && c.awaitingResponse
+                                  ? getAwaitingSeverity(clockTick - (c.lastCustomerMessageTick ?? c.startTick))
+                                  : undefined
+                              }
                               onClick={() => handleChannelSelect(activeInteraction.id, key)}
                               onDismiss={() => {
                                 if (activeInteraction.channels.length > 1) handleDismissChannel(activeInteraction.id, c);
@@ -11988,6 +12535,36 @@ export function AgentNextGenPage({
                             </InlineNotification>
                           </div>
                         )}
+                        {/* SLA banner — same `activeChannelAwaitingSeverity`
+                            signal the record-header tab's own icon/color and
+                            the LeftNav card's own dot already reflect for
+                            this exact channel (see that derived value's own
+                            doc comment above), just surfaced here as an
+                            actual message too instead of relying on color
+                            alone. Only for "warning"/"critical" — the green
+                            "success" tier (customer just responded, still
+                            well within SLA) isn't something worth an actual
+                            banner over, same as "not awaiting at all"
+                            (`undefined`) isn't. Gated the same way the
+                            "channel closed" notice just above is — closed
+                            (read-only or per-channel) is never actually
+                            awaiting a reply, so `activeChannelAwaitingSeverity`
+                            would already be `undefined` in either case
+                            regardless, but the explicit checks keep this
+                            banner's conditions self-evidently aligned with
+                            its neighbor rather than relying on that being
+                            true by coincidence. */}
+                        {!activeInteraction.closed &&
+                          activeChannelStatus !== "Closed" &&
+                          (activeChannelAwaitingSeverity === "warning" || activeChannelAwaitingSeverity === "critical") && (
+                          <div className="shrink-0 px-6 pt-4">
+                            <InlineNotification variant={activeChannelAwaitingSeverity === "critical" ? "error" : "warning"}>
+                              {activeChannelAwaitingSeverity === "critical"
+                                ? "Agent has breached SLA time."
+                                : "Agent is nearing SLA breach."}
+                            </InlineNotification>
+                          </div>
+                        )}
                         <InteractionTranscript
                           channelType={activeChannelType}
                           customerName={activeInteraction.customerName}
@@ -11995,7 +12572,13 @@ export function AgentNextGenPage({
                           recordId={activeInteraction.recordId}
                           skillLabel={activeChannel?.preview}
                           isFreshLaunch={!!activeInteraction.startedFresh}
-                          liveMessages={activeInteraction.liveMessages ?? []}
+                          reopenedSessions={activeChannel?.reopenedSessions}
+                          liveMessages={activeInteraction.liveMessages?.[activeChannelKey] ?? []}
+                          // Same union of conditions the "closed
+                          // interaction"/"channel closed" banners just above
+                          // this transcript already gate on — see `dimmed`'s
+                          // own doc comment for why both, not just one.
+                          dimmed={!!activeInteraction.closed || activeChannelStatus === "Closed"}
                           currentStatus={activeChannelStatus}
                           onCurrentStatusChange={(status) =>
                             activeChannel && handleInteractionStatusChange(activeInteraction.id, activeChannel.id, status)
@@ -12033,9 +12616,22 @@ export function AgentNextGenPage({
                               : undefined
                           }
                         />
-                        {!activeInteraction.closed && activeChannelStatus !== "Closed" && (
-                          <InteractionComposer onSend={(text) => handleSendMessage(activeInteraction.id, text)} />
-                        )}
+                        {/* `activeChannelType !== "email" && !== "voice"` —
+                            per explicit request, hidden for now on both
+                            Email and Voice specifically: a plain "Chat with
+                            Customer" text composer sitting under either's
+                            own "Coming Soon ... Content" placeholder above
+                            (see that placeholder's own doc comment) reads as
+                            broken/out of place — there's no real Email/Voice
+                            UI yet for it to actually send into. Will come
+                            back once real content replaces those
+                            placeholders. */}
+                        {!activeInteraction.closed &&
+                          activeChannelStatus !== "Closed" &&
+                          activeChannelType !== "email" &&
+                          activeChannelType !== "voice" && (
+                            <InteractionComposer onSend={(text) => handleSendMessage(activeInteraction.id, text)} />
+                          )}
                       </div>
                   </div>
                 </div>
