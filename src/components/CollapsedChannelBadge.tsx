@@ -1,4 +1,5 @@
 import * as React from "react";
+import { TriangleAlert, CircleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge, type ChannelType, CHANNEL_TYPE_META as CHANNEL_ICON_META } from "@nicecxone/lyra-ui";
 
@@ -104,10 +105,24 @@ const CHANNEL_TYPE_ACCENT: Record<ChannelType, { bg: string; fg: string; border:
 export interface CollapsedChannelBadgeProps {
   /** Which open channel to badge — pass the interaction's current channel. */
   type: ChannelType;
+  /**
+   * Same "success"/"warning"/"critical" SLA-wait escalation
+   * `InteractionNavItem`'s own multi-channel count badge and `ChannelTab`'s
+   * `tabIcon` already key off (see either one's own doc comment,
+   * interaction-nav-item.tsx / channel-row.tsx) — per explicit follow-up
+   * request, a single-channel card's badge needs the exact same "swap to
+   * an alert glyph once overdue" treatment those two already get, not just
+   * stay a neutral channel-type icon no matter how late it's gotten. Only
+   * "warning"/"critical" actually change anything here (a triangle /
+   * circled "!" glyph, recolored to match); "success" (a reply just
+   * landed, still well within SLA) and `undefined` (not awaiting at all)
+   * both render the plain channel-type icon, same as before this prop
+   * existed. */
+  severity?: "success" | "warning" | "critical";
   className?: string;
 }
 
-export function CollapsedChannelBadge({ type, className }: CollapsedChannelBadgeProps) {
+export function CollapsedChannelBadge({ type, severity, className }: CollapsedChannelBadgeProps) {
   const accent = CHANNEL_TYPE_ACCENT[type];
   const meta = CHANNEL_ICON_META[type];
   // `meta.icon` arrives with its own fixed size class (e.g. `h-4 w-4`) —
@@ -117,7 +132,9 @@ export function CollapsedChannelBadge({ type, className }: CollapsedChannelBadge
   // 18px badge minus 2px padding each side = a 14px icon, same effective
   // size as before, just derived from real padding instead of a hardcoded
   // icon dimension that would silently stop matching if the badge's own
-  // size ever changed.
+  // size ever changed. The alert glyphs (below) use the same sizing
+  // reasoning, just via an explicit class rather than a clone, since
+  // they're not coming from `meta.icon` in the first place.
   const icon = React.isValidElement(meta.icon)
     ? React.cloneElement(meta.icon as React.ReactElement<{ className?: string; strokeWidth?: number }>, {
         className: "h-full w-full",
@@ -134,13 +151,27 @@ export function CollapsedChannelBadge({ type, className }: CollapsedChannelBadge
         // Overrides `size="sm"`'s own `min-w-[16px] h-[16px]` — see this
         // file's own top doc comment for why 18px specifically.
         "h-[18px] w-[18px] min-w-0",
-        accent.bg,
-        accent.fg,
-        accent.border,
+        // Once actually overdue, this badge switches off the channel-
+        // type's own soft/strong accent pairing entirely and onto the same
+        // solid warning/critical fill + white icon `InteractionNavItem`'s
+        // own count badge uses for the identical tier — same reasoning:
+        // a card that needs attention shouldn't still read as a calm,
+        // themed teal/pink/purple chip.
+        severity === "critical"
+          ? "border-transparent bg-lyra-bg-destructive text-lyra-fg-on-primary"
+          : severity === "warning"
+          ? "border-transparent bg-lyra-status-warning-strong text-lyra-fg-on-primary"
+          : [accent.bg, accent.fg, accent.border],
         className
       )}
     >
-      {icon}
+      {severity === "critical" ? (
+        <CircleAlert className="h-full w-full" strokeWidth={2.25} />
+      ) : severity === "warning" ? (
+        <TriangleAlert className="h-full w-full" strokeWidth={2.25} />
+      ) : (
+        icon
+      )}
     </Badge>
   );
 }
