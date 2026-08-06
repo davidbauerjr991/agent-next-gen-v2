@@ -7111,6 +7111,27 @@ function CustomerHistorySessionDetailPanel({
   );
 }
 
+/* ── HistoryConversationView ──
+   A past session's conversation rendered in the INTERACTION SPACE (the
+   record area's content column), as the body of the history tab the
+   Customer Information panel's "Open Conversation" deep link opens — full
+   reading width, unlike the ≤425px panel detail. Same one-line outcome
+   header + `CustomerHistoryConversationContent` composition the panel's own
+   detail view uses; `px-2` tops up that content's own `px-4` to the record
+   area's standard 24px inset. */
+function HistoryConversationView({ entry }: { entry: CustomerHistorySessionEntry }) {
+  return (
+    <div className="flex flex-1 flex-col min-h-0 overflow-y-auto px-2">
+      <div className="px-4 pt-4">
+        <span className="lyra-body-sm text-lyra-fg-secondary">
+          {[entry.statusLabel, entry.agentName, entry.timestampDisplay].filter(Boolean).join(" · ")}
+        </span>
+      </div>
+      <CustomerHistoryConversationContent entry={entry} />
+    </div>
+  );
+}
+
 const CUSTOMER_DETAIL_ACCOUNT_BLOCK_OPTIONS: SelectOption[] = [
   { value: "none", label: "None" },
   { value: "collections", label: "Collections" },
@@ -7475,22 +7496,14 @@ function CustomerInformationPanelBody({
   latestNote,
   recordId,
   channels,
-  onSelectTab,
-  isFullScreen,
-  onRequestFullScreenChange,
+  onOpenConversation,
 }: {
   activeTab: number;
-  /** Lets this body ask its OWNER to switch the panel's own tab — used by
-   *  the Overview tab's "Open conversation" deep link (Latest Interaction
-   *  accordion) to jump to the Interactions tab with the newest session's
-   *  detail already open. Optional: the hover preview doesn't pass it. */
-  onSelectTab?: (tabIndex: number) => void;
-  /** Auto-fullscreen while a session detail is open at docked width — a
-   *  conversation is unreadable through a ≤425px keyhole. Only the real
-   *  side panel passes these (the hover preview has no fullscreen). See
-   *  the effect below for the enter/exit rules. */
-  isFullScreen?: boolean;
-  onRequestFullScreenChange?: (fullScreen: boolean) => void;
+  /** Overview's "Open Conversation" deep link (Latest Interaction
+   *  accordion) — opens the newest past session's conversation as a TAB in
+   *  the interaction space (record header), not inside this panel. Only
+   *  the real side panel passes it; the hover preview doesn't. */
+  onOpenConversation?: (entry: CustomerHistorySessionEntry) => void;
   /** Needed here (not just by `buildCustomerInfoFields`) for the Detail
    *  tab's "First Name"/"Last Name" fields — see `CustomerDetailTabContent`. */
   customerName?: string;
@@ -7554,28 +7567,6 @@ function CustomerInformationPanelBody({
   const [selectedHistoryIndex, setSelectedHistoryIndex] = useState<number | null>(null);
   const selectedHistoryEntry = selectedHistoryIndex !== null ? customerHistoryEntries[selectedHistoryIndex] ?? null : null;
 
-  /* Auto-fullscreen while a session detail is open at docked width.
-     Fires only on OPEN/CLOSE transitions of the detail panel (tracked via
-     `prevHistoryDetailOpenRef`), never on `isFullScreen` changes — so an
-     agent who manually exits fullscreen mid-read isn't fought back into it.
-     `autoEnteredFullScreenRef` remembers whether WE entered fullscreen, so
-     closing the detail only exits fullscreen when it was auto-entered (a
-     manually-chosen fullscreen is left exactly as the agent set it). */
-  const historyDetailOpen = selectedHistoryEntry !== null;
-  const prevHistoryDetailOpenRef = useRef(false);
-  const autoEnteredFullScreenRef = useRef(false);
-  useEffect(() => {
-    const wasOpen = prevHistoryDetailOpenRef.current;
-    prevHistoryDetailOpenRef.current = historyDetailOpen;
-    if (!onRequestFullScreenChange) return;
-    if (historyDetailOpen && !wasOpen && !isFullScreen) {
-      autoEnteredFullScreenRef.current = true;
-      onRequestFullScreenChange(true);
-    } else if (!historyDetailOpen && wasOpen && autoEnteredFullScreenRef.current) {
-      autoEnteredFullScreenRef.current = false;
-      if (isFullScreen) onRequestFullScreenChange(false);
-    }
-  }, [historyDetailOpen, isFullScreen, onRequestFullScreenChange]);
   const handleHistoryNav = (direction: 1 | -1) => {
     setSelectedHistoryIndex((prev) => {
       if (prev === null) return prev;
@@ -7849,20 +7840,18 @@ function CustomerInformationPanelBody({
                           </span>
                           {/* Deep link: the single most common history lookup
                               ("what happened last time?") in ONE click from the
-                              panel's landing tab — jumps to Interactions with
-                              the newest session's detail open (which itself now
-                              defaults to its Conversation tab). Only rendered
-                              when the owner can switch tabs (real side panel,
-                              not the hover preview) and entries exist. */}
-                          {onSelectTab && customerHistoryEntries.length > 0 && (
+                              panel's landing tab — opens the newest past
+                              session's conversation as a tab in the
+                              INTERACTION SPACE (record header), full reading
+                              width, per explicit request. Only rendered when
+                              the owner wired it (real side panel, not the
+                              hover preview) and entries exist. */}
+                          {onOpenConversation && customerHistoryEntries.length > 0 && (
                             <Button
                               variant="ghost"
                               size="sm"
                               className="self-start"
-                              onClick={() => {
-                                setSelectedHistoryIndex(0);
-                                onSelectTab(CUSTOMER_PANEL_TABS.indexOf("Interactions"));
-                              }}
+                              onClick={() => onOpenConversation(customerHistoryEntries[0])}
                             >
                               Open Conversation
                               <ChevronRight className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
@@ -8191,9 +8180,13 @@ function CustomerInformationSidePanel({
   containerWidth,
   onWidthChange,
   onResizeStateChange,
+  onOpenHistoryConversation,
 }: {
   open: boolean;
   pinned: boolean;
+  /** Forwarded to `CustomerInformationPanelBody`'s `onOpenConversation` —
+   *  see that prop's own doc comment. */
+  onOpenHistoryConversation?: (entry: CustomerHistorySessionEntry) => void;
   /** Hides the panel WITHOUT unpinning it — rendered as a `PanelLeftClose`-
    *  iconed `PanelPinButton` in the header via `headerActions` below, NOT
    *  `SidePanel`'s own built-in pin button (that one has no way to
@@ -8362,17 +8355,7 @@ function CustomerInformationSidePanel({
         latestNote={latestNote}
         recordId={recordId}
         channels={channels}
-        onSelectTab={setActiveTab}
-        isFullScreen={Boolean(fullScreen)}
-        onRequestFullScreenChange={
-          onToggleFullScreen
-            ? (next) => {
-                /* `onToggleFullScreen` is a toggle; only fire it when the
-                   requested state differs from the current one. */
-                if (next !== Boolean(fullScreen)) onToggleFullScreen();
-              }
-            : undefined
-        }
+        onOpenConversation={onOpenHistoryConversation}
       />
     </SidePanel>
   );
@@ -8947,6 +8930,24 @@ export function AgentNextGenPage({
   // redialing a new assignment always sets this, so the screen switches
   // over automatically the moment one is added.
   const activeInteraction = interactions.find((i) => i.id === activeInteractionId) ?? null;
+
+  /* A past session's conversation opened as a TAB in the interaction space
+     (record header), via the Customer Information panel's Overview "Open
+     Conversation" deep link. One at a time; opening another replaces it.
+     `active` mirrors the channel tabs' selection model: clicking a channel
+     tab deactivates this tab (but keeps it in the strip); clicking it
+     re-activates it; its kebab's "Close Tab" removes it. Cleared when
+     switching to a DIFFERENT interaction (see `switchActiveInteraction`). */
+  const [historyConversationTab, setHistoryConversationTab] = useState<{
+    interactionId: string;
+    entry: CustomerHistorySessionEntry;
+    active: boolean;
+  } | null>(null);
+  const historyConversationForActive =
+    activeInteraction && historyConversationTab && historyConversationTab.interactionId === activeInteraction.id
+      ? historyConversationTab
+      : null;
+  const isHistoryConversationView = Boolean(historyConversationForActive?.active);
   // Which channel type `InteractionTranscript` (below) should render content
   // for — the same "current" channel the record header's own
   // `ChannelToggleGroup` highlights (see its `active={... === key}` a few
@@ -9602,6 +9603,7 @@ export function AgentNextGenPage({
   const sidePanelStateByAssignmentId = useRef(new Map<string, { open: boolean; fullScreen: boolean }>());
   const switchActiveInteraction = (nextId: string | null) => {
     const outgoingId = activeInteractionId;
+    if (outgoingId !== nextId) setHistoryConversationTab(null);
     if (outgoingId && outgoingId !== nextId) {
       sidePanelStateByAssignmentId.current.set(outgoingId, {
         open: sidePanelOpen,
@@ -12033,6 +12035,9 @@ export function AgentNextGenPage({
                   customerName={activeInteraction.customerName}
                   recordId={activeInteraction.recordId}
                   channels={activeInteraction.channels}
+                  onOpenHistoryConversation={(entry) =>
+                    setHistoryConversationTab({ interactionId: activeInteraction.id, entry, active: true })
+                  }
                   // Full-screen substitutes the parent Container's own
                   // measured width (`sidePanelContainerWidth` — already
                   // tracked for the narrow-container guard) for the normal
@@ -12396,7 +12401,10 @@ export function AgentNextGenPage({
                               showAddressOnFace={false}
                               messageCount={c.messageCount}
                               interactionId={c.interactionId}
-                              active={(activeInteraction.currentChannelId ?? activeInteraction.channels[activeInteraction.channels.length - 1]?.id) === key}
+                              active={
+                                !isHistoryConversationView &&
+                                (activeInteraction.currentChannelId ?? activeInteraction.channels[activeInteraction.channels.length - 1]?.id) === key
+                              }
                               // Same "how long has the CUSTOMER been waiting"
                               // signal the LeftNav's own `ChannelRow` colors
                               // its elapsed-time text with (see that
@@ -12434,7 +12442,10 @@ export function AgentNextGenPage({
                                   ? getAwaitingSeverity(clockTick - (c.lastCustomerMessageTick ?? c.startTick))
                                   : undefined
                               }
-                              onClick={() => handleChannelSelect(activeInteraction.id, key)}
+                              onClick={() => {
+                                setHistoryConversationTab((t) => (t && t.active ? { ...t, active: false } : t));
+                                handleChannelSelect(activeInteraction.id, key);
+                              }}
                               onDismiss={() => {
                                 if (activeInteraction.channels.length > 1) handleDismissChannel(activeInteraction.id, c);
                                 else handleDismissInteraction(activeInteraction.id);
@@ -12474,6 +12485,31 @@ export function AgentNextGenPage({
                             />
                           );
                         })}
+                        {/* Past-session conversation tab — opened via the
+                            Customer Information panel's Overview "Open
+                            Conversation" deep link. A plain `Tab` (not
+                            `ChannelTab` — it's not a live channel: no
+                            awaiting state, no address, no outcome). Its
+                            kebab's "Close Tab" removes it; clicking a
+                            channel tab deactivates it but keeps it here. */}
+                        {historyConversationForActive && (
+                          <Tab
+                            active={historyConversationForActive.active}
+                            icon={<History className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
+                            onClick={() =>
+                              setHistoryConversationTab((t) => (t ? { ...t, active: true } : t))
+                            }
+                            menuItems={[
+                              {
+                                id: "close-history-conversation-tab",
+                                label: "Close Tab",
+                                onClick: () => setHistoryConversationTab(null),
+                              },
+                            ]}
+                          >
+                            {historyConversationForActive.entry.timestampDisplay}
+                          </Tab>
+                        )}
                       </TabList>
                       {/* Same Add Channel control every `InteractionNavItem`
                           card already has (`getHeaderAction`) — sitting
@@ -12507,6 +12543,15 @@ export function AgentNextGenPage({
                       unconditional again.) */}
                   <div className="flex flex-1 overflow-hidden">
                       <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+                        {isHistoryConversationView && historyConversationForActive ? (
+                          /* Past-session conversation, opened as its own tab in
+                             this record area (see the history `Tab` in the
+                             header row above) — replaces the live transcript/
+                             composer while active. Read-only by nature: it's
+                             an archived session, so no composer renders. */
+                          <HistoryConversationView entry={historyConversationForActive.entry} />
+                        ) : (
+                        <>
                         {/* Reopened-from-history, closed interaction — read-only
                             notice. See `ActiveInteraction.closed`'s own doc
                             comment for the full picture (also drives hiding
@@ -12632,6 +12677,8 @@ export function AgentNextGenPage({
                           activeChannelType !== "voice" && (
                             <InteractionComposer onSend={(text) => handleSendMessage(activeInteraction.id, text)} />
                           )}
+                        </>
+                        )}
                       </div>
                   </div>
                 </div>
