@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import * as AccordionPrimitive from "@radix-ui/react-accordion";
 import { cn } from "@/lib/utils";
@@ -156,6 +156,7 @@ import {
   Bell,
   Pin,
   PanelLeftClose,
+  PanelRightClose,
   History,
   ChevronLeft,
   ChevronRight,
@@ -178,6 +179,9 @@ import {
   UserX,
   ChevronsDownUp,
   ChevronsUpDown,
+  Bookmark,
+  SlidersHorizontal,
+  IdCard,
   type LucideIcon,
 } from "lucide-react";
 
@@ -5459,7 +5463,7 @@ function InteractionTranscript({
         onScroll={handleTranscriptScroll}
         className="h-full overflow-y-auto"
       >
-        <div className="w-full max-w-[1200px] mx-auto px-6 py-4">
+        <div className="w-full max-w-[1200px] mx-auto px-6">
           {sessionsToRender.map((session) => {
             // Falls back to `[]` for the synthetic "just launched" session
             // (not seeded into `sessionMessages` at mount, since it isn't
@@ -6453,6 +6457,65 @@ function buildLatestNote(customerName: string | undefined, recordId: string): Cu
   };
 }
 
+// "Copilot" tab content — a short AI-generated-style briefing on WHY this
+// customer is reaching out (`reasonForContact`, shown in a plain info box)
+// plus a "Journey Summary" card recapping what's led up to this contact
+// (`journeySummary`) — see `CopilotTabContent`'s own doc comment for the
+// actual rendering. Same deterministic-synthesis approach as
+// `buildLatestInteraction`/`buildLatestNote` (no real conversational-AI
+// backend here yet) — one POOL of paired {reason, journey} strings (not two
+// independently-hashed pools) so the two boxes always tell one coherent
+// story instead of a "wants to update mailing address" reason sitting next
+// to an unrelated "received a OneTread x1000" journey.
+interface CopilotSummary {
+  reasonForContact: string;
+  journeySummary: string;
+}
+
+const COPILOT_SUMMARY_POOL: Array<{ reason: string; journey: string }> = [
+  {
+    reason: "would like to file a claim under their bike's warranty and needs assistance.",
+    journey:
+      "received their OneTread x1000 on 1/25/25 and had no issues until the tablet began freezing and showing a blinking red light.",
+  },
+  {
+    reason: "noticed an unfamiliar charge on their latest invoice and wants it explained.",
+    journey: "has been on the Plus plan since 3/12/24 with no billing issues until this month's statement.",
+  },
+  {
+    reason: "wants to cancel an upcoming subscription renewal before it charges.",
+    journey:
+      "signed up for a 12-month plan on 6/1/25 and has used the service steadily since, with the renewal now two weeks away.",
+  },
+  {
+    reason: "is having trouble logging in after a recent password reset.",
+    journey:
+      "reset their account password on 7/2/25 after a prompted security update, and hasn't been able to sign back in since.",
+  },
+  {
+    reason: "would like to reschedule an upcoming service appointment.",
+    journey: "booked the original appointment on 5/14/25 and has had no other open requests since.",
+  },
+  {
+    reason: "wants to return a recent order that arrived damaged.",
+    journey: "placed the order on 7/28/25 and reported the damage the same day it arrived.",
+  },
+];
+
+/** Deterministic per-customer Copilot summary — same `hashSeed`-on-`recordId`
+ *  approach as `buildLatestInteraction`/`buildLatestNote`, salted with its
+ *  own suffix so it doesn't land on the same pool indexes either of those
+ *  hash to for the same customer. */
+function buildCopilotSummary(customerName: string | undefined, recordId: string): CopilotSummary {
+  const seed = hashSeed(`${recordId || customerName || "customer"}-copilot-summary`);
+  const { reason, journey } = COPILOT_SUMMARY_POOL[seed % COPILOT_SUMMARY_POOL.length];
+  const displayName = customerName ?? "The customer";
+  return {
+    reasonForContact: `${displayName} ${reason}`,
+    journeySummary: `${displayName} ${journey}`,
+  };
+}
+
 // Placeholder tab set (per reference screenshot). The panel should open on
 // "Overview" (index 0) by default — so `activeTab` below just starts at 0
 // rather than looking up a specific tab's index. "Interactions" (this
@@ -6460,8 +6523,12 @@ function buildLatestNote(customerName: string | undefined, recordId: string): Cu
 // "Customer History" tab in the record header, alongside the channel tabs —
 // see `CustomerHistoryTabContent`'s own doc comment) moved in here per
 // explicit request, so it's now just another tab of this same panel like
-// Detail/Directory/etc., not a separate top-level control.
-const CUSTOMER_PANEL_TABS = ["Overview", "Interactions", "Detail", "Directory", "Tasks", "Notes", "Accounts", "Tickets"];
+// Detail/Directory/etc., not a separate top-level control. "Copilot" (per
+// explicit follow-up request) sits right after Overview — the panel still
+// opens on Overview by default everywhere; `activeTab` is only ever jumped
+// to Copilot explicitly, when a customer reply/new conversation comes in
+// (see `copilotFocusSignal` on `CustomerInformationSidePanel`).
+const CUSTOMER_PANEL_TABS = ["Overview", "Copilot", "Interactions", "Detail", "Directory", "Tasks", "Notes", "Accounts", "Tickets"];
 
 // Temporarily hides the Overview tab's "Ask about this customer..."
 // `AIInput` footer during an active interaction, per explicit request —
@@ -7775,12 +7842,134 @@ function CustomerDirectoryTabContent({ email, phoneDisplay }: { email: string; p
   );
 }
 
+/** Copilot tab content — per explicit request, shown whenever the panel's
+ *  "Copilot" tab is active: a plain info box giving the agent a one-line
+ *  reason the customer is reaching out, plus a "Journey Summary" card
+ *  recapping what's led up to this contact. Both pulled from
+ *  `buildCopilotSummary` (synthesized, same deterministic-per-customer
+ *  approach as Overview's Latest Interaction/Latest Note — see that
+ *  function's own doc comment). Purely a read-only recap — the actual
+ *  "ask copilot something" affordance is the separate `CopilotSearchFooter`
+ *  below, pinned to the bottom of this same tab by its caller (mirrors how
+ *  the Overview tab's own `AIInput` footer is pinned by ITS caller, not
+ *  rendered inline here — see `CustomerInformationSidePanel`'s `footer`
+ *  prop). */
+function CopilotTabContent({ summary }: { summary: CopilotSummary }) {
+  return (
+    <div className="flex flex-col gap-4 px-4 py-3">
+      {/* Reason for contact — plain info box, same background
+          `InlineNotification`'s own "info" variant uses
+          (`bg-lyra-status-info-subtle`, inline-notification.tsx) but without
+          its icon/dismiss chrome: this is a passive one-line summary, not an
+          alert the agent needs to acknowledge or dismiss. */}
+      <div className="rounded-lyra-md bg-lyra-status-info-subtle px-4 py-3">
+        <p className="lyra-body-md text-lyra-fg-default">{summary.reasonForContact}</p>
+      </div>
+
+      {/* Journey Summary — a bordered card with its own soft-purple header
+          band (icon + title) over a plain white body, per the reference
+          screenshot. `lyra-accent-purple-soft`/`-strong` (tailwind-preset.ts)
+          is the same accent pair `Badge`'s `color="purple"` variant resolves
+          to (badge.tsx) — used directly here since this is a fixed two-tone
+          header bar, not a pill needing that component's full variant
+          machinery. */}
+      <div className="overflow-hidden rounded-lyra-md border border-lyra-border-subtle">
+        <div className="flex items-center gap-2 bg-lyra-accent-purple-soft px-4 py-2.5">
+          <Bookmark className="h-4 w-4 shrink-0 text-lyra-accent-purple-strong" strokeWidth={1.5} aria-hidden="true" />
+          <span className="lyra-body-md-emphasis text-lyra-fg-default">Journey Summary</span>
+        </div>
+        <div className="bg-lyra-bg-surface-base px-4 py-3">
+          <p className="lyra-body-md text-lyra-fg-default">{summary.journeySummary}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** "Search copilot" input — the Copilot tab's own footer, pinned to the
+ *  bottom the same way the Overview tab's `AIInput` footer is (see
+ *  `CopilotTabContent`'s own doc comment). Deliberately a separate,
+ *  purpose-built component rather than a reskinned `AIInput`
+ *  (ai-input.tsx) — that component's stacked textarea-plus-toolbar shape
+ *  (attach button and submit button on their own row BELOW a multi-line
+ *  growing textarea, plus a helper-text line under the whole thing) is
+ *  built for composing a longer prompt, where this is a single-line,
+ *  single-row search-style affordance (per the reference screenshot: a
+ *  round "+" button, one pill-shaped field with an inline filter icon, and
+ *  a round send button, all in one row with no helper text) — closer to a
+ *  compact search bar than a chat composer. No real backend behind
+ *  "search" here (same "canned/no-op" treatment as `AIInput`'s own "Ask
+ *  about this customer..." placeholder elsewhere in this panel) — submitting
+ *  just clears the field. */
+function CopilotSearchFooter({ className }: { className?: string }) {
+  const [value, setValue] = useState("");
+  const canSubmit = value.trim().length > 0;
+
+  const handleSubmit = () => {
+    if (!canSubmit) return;
+    setValue("");
+  };
+
+  return (
+    <div className={cn("flex w-full items-center gap-2", className)}>
+      {/* `ActionIconButton` (actions.tsx) composes `Button variant="icon"` —
+          its own default shape is a small ROUNDED-SQUARE icon button (see
+          that component's own doc comment on why every icon button in the
+          design system routes through `Button` now), overridden here to the
+          round pill shape the reference screenshot shows via a plain
+          `rounded-full` className — `cn()`/tailwind-merge (already relied on
+          elsewhere in this file — see `INTERACTION_MAIN_CONTENT_MIN_WIDTH`
+          area) correctly drops `Button`'s own `rounded-lyra-sm` for this
+          later, more specific radius utility rather than fighting it. */}
+      <ActionIconButton
+        aria-label="Add"
+        title="Add"
+        className="shrink-0 rounded-full border border-lyra-border-default"
+      >
+        <Plus className="h-4 w-4" strokeWidth={1.5} />
+      </ActionIconButton>
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 items-center gap-2 rounded-full border bg-lyra-bg-surface-container-subtle py-1.5 pl-4 pr-2 transition-colors",
+          "border-lyra-border-strong hover:border-lyra-state-border-hover-neutral",
+          "focus-within:border-lyra-border-active focus-within:ring-2 focus-within:ring-lyra-border-active/20"
+        )}
+      >
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleSubmit();
+            }
+          }}
+          placeholder="Search copilot"
+          aria-label="Search copilot"
+          className="min-w-0 flex-1 bg-transparent outline-none lyra-body-md text-lyra-fg-default placeholder:text-lyra-fg-disabled"
+        />
+        <SlidersHorizontal className="h-4 w-4 shrink-0 text-lyra-fg-secondary" strokeWidth={1.5} aria-hidden="true" />
+      </div>
+      <ActionIconButton
+        aria-label="Send"
+        title="Send"
+        onClick={handleSubmit}
+        className="shrink-0 rounded-full bg-lyra-bg-surface-shell"
+      >
+        <Send className="h-4 w-4" strokeWidth={1.5} />
+      </ActionIconButton>
+    </div>
+  );
+}
+
 function CustomerInformationPanelBody({
   activeTab,
   customerName,
   fields,
   latestInteraction,
   latestNote,
+  copilotSummary,
   recordId,
   channels,
   onOpenConversation,
@@ -7827,6 +8016,9 @@ function CustomerInformationPanelBody({
    *  Interaction (see the "Latest Interaction"/"Latest Note" column
    *  comment below). */
   latestNote: CustomerLatestNote;
+  /** Built per-interaction by `buildCopilotSummary` — see that function's
+   *  own doc comment. Feeds the Copilot tab (`CopilotTabContent`). */
+  copilotSummary: CopilotSummary;
   /** Supplied by `CustomerInformationSidePanel` and `CustomerInfoHoverPreview`
    *  (both have a real interaction's `recordId`/`channels` in scope to
    *  synthesize session history from) — left `undefined` only by
@@ -8287,6 +8479,8 @@ function CustomerInformationPanelBody({
         </div>
       )}
 
+      {activeTab === CUSTOMER_PANEL_TABS.indexOf("Copilot") && <CopilotTabContent summary={copilotSummary} />}
+
       {activeTab === CUSTOMER_PANEL_TABS.indexOf("Interactions") && recordId && (
         // `relative flex flex-1 min-h-0 overflow-hidden` — restored (was
         // briefly simplified away to plain `relative` while chasing what
@@ -8417,6 +8611,7 @@ function CustomerInfoHoverPreview({
     [customerName, recordId]
   );
   const latestNote = useMemo(() => buildLatestNote(customerName, recordId), [customerName, recordId]);
+  const copilotSummary = useMemo(() => buildCopilotSummary(customerName, recordId), [customerName, recordId]);
 
   return (
     <div
@@ -8437,8 +8632,11 @@ function CustomerInfoHoverPreview({
       className="flex h-[80vh] max-h-[768px] w-[340px] flex-col overflow-hidden rounded-lyra-lg border border-lyra-border-default bg-lyra-bg-surface-container-subtle shadow-lg"
     >
       <PanelHeader
-        title={customerName ?? "Customer"}
-        subhead={recordId}
+        // Static "Customer Information" now (was the customer's own
+        // name + record id) — per explicit request, this hover preview's
+        // header no longer doubles as an identity readout; the name/id
+        // are still available via the Overview tab's own fields below.
+        title="Customer Information"
         tabs={
           <TabList className="px-4" overflowMenu>
             {CUSTOMER_PANEL_TABS.map((label, i) => (
@@ -8456,6 +8654,7 @@ function CustomerInfoHoverPreview({
           fields={fields}
           latestInteraction={latestInteraction}
           latestNote={latestNote}
+          copilotSummary={copilotSummary}
           // Was left unwired (Interactions rendered nothing here, same
           // stub treatment as Tasks/Notes/Accounts/Tickets) — but unlike
           // those genuinely-unimplemented tabs, this data is already
@@ -8470,15 +8669,25 @@ function CustomerInfoHoverPreview({
       {/* Same Overview-only `AIInput` footer as the real panel (see its own
           `footer` prop above) — kept here too for exact content parity,
           per this component's own doc comment. `SHOW_CUSTOMER_INFO_AI_INPUT`
-          — see that flag's own doc comment — temporarily hides it here too. */}
-      {SHOW_CUSTOMER_INFO_AI_INPUT && activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") && (
-        <PanelFooter className="relative shrink-0 justify-start">
-          <div
-            className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-transparent to-lyra-bg-surface-container-subtle"
-            aria-hidden="true"
-          />
-          <AIInput placeholder="Ask about this customer..." showAttach={false} className="w-full" />
+          — see that flag's own doc comment — temporarily hides it here too.
+          Copilot's own `CopilotSearchFooter` (per explicit request) is NOT
+          gated behind that flag — it's a distinct, always-on feature, not
+          the thing that flag was written to temporarily hide. */}
+      {activeTab === CUSTOMER_PANEL_TABS.indexOf("Copilot") ? (
+        <PanelFooter className="shrink-0 justify-start">
+          <CopilotSearchFooter />
         </PanelFooter>
+      ) : (
+        SHOW_CUSTOMER_INFO_AI_INPUT &&
+        activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") && (
+          <PanelFooter className="relative shrink-0 justify-start">
+            <div
+              className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-transparent to-lyra-bg-surface-container-subtle"
+              aria-hidden="true"
+            />
+            <AIInput placeholder="Ask about this customer..." showAttach={false} className="w-full" />
+          </PanelFooter>
+        )
       )}
     </div>
   );
@@ -8499,13 +8708,13 @@ function CustomerInfoHoverPreview({
    from the same source, rather than the caller assembling one string this
    component has to parse back apart.
 
-   Docked LEFT via the generic `SidePanel` primitive (matching the request
-   to move this content into a left side panel, per the reference
-   screenshot) rather than the right-docked `InteriorPanel` this was
-   previously built on — pin/hover-preview state lives in the parent
+   Docked via the generic `SidePanel` primitive (originally LEFT, matching
+   an early reference screenshot; now RIGHT — `side="right"` below — per a
+   later explicit request to move it, alongside the render site's own move
+   to the row's other end) rather than the right-docked `InteriorPanel` this
+   was previously built on — pin/hover-preview state lives in the parent
    (mirrors `AgentNextGenTemplate.stories.tsx`'s own `CustomerInformation-
-   Panel` usage, the current reference for a left-docked side panel in
-   this exact spot), since that's a `SidePanel`-only concept `InteriorPanel`
+   Panel` usage), since that's a `SidePanel`-only concept `InteriorPanel`
    never had. `allowFullScreen`/`exitFullScreenSignal`/`onOverlayModeChange`
    don't carry over — `SidePanel` has no "full screen" or "floating
    overlay" concept of its own; an unpinned panel simply shows/hides on
@@ -8550,6 +8759,7 @@ function CustomerInformationSidePanel({
   onWidthChange,
   onResizeStateChange,
   onOpenHistoryConversation,
+  copilotFocusSignal,
 }: {
   open: boolean;
   pinned: boolean;
@@ -8584,6 +8794,16 @@ function CustomerInformationSidePanel({
   containerWidth: number;
   onWidthChange: (width: number) => void;
   onResizeStateChange?: (isResizing: boolean) => void;
+  /** Bumps this panel over to the Copilot tab whenever it changes — per
+   *  explicit request, fired by `AgentNextGenPage` when a customer reply
+   *  lands (`handleSendMessage`'s simulated customer-reply timeout, which is
+   *  also "a customer starting a conversation" in this app's actual flow:
+   *  the agent always sends first, so a customer's first reply back IS the
+   *  start of the back-and-forth). A plain nonce/number, not a boolean — see
+   *  the `useEffect` reading it, below, for why a boolean can't reliably
+   *  re-fire on a second consecutive reply. `undefined` means "no request
+   *  pending" (the initial/idle value — see that same effect's own guard). */
+  copilotFocusSignal?: number;
 }) {
   const [activeTab, setActiveTab] = useState(0);
   const fields = useMemo(
@@ -8598,6 +8818,18 @@ function CustomerInformationSidePanel({
     () => buildLatestNote(customerName, recordId),
     [customerName, recordId]
   );
+  const copilotSummary = useMemo(() => buildCopilotSummary(customerName, recordId), [customerName, recordId]);
+
+  // Jumps this panel to the Copilot tab whenever `copilotFocusSignal`
+  // changes (see that prop's own doc comment) — a plain nonce, not a
+  // boolean, since the same target tab can need to be re-requested more
+  // than once in a row (e.g. two customer replies land back to back) with
+  // no other prop actually changing value in between to re-trigger a
+  // boolean-keyed effect.
+  useEffect(() => {
+    if (copilotFocusSignal === undefined) return;
+    setActiveTab(CUSTOMER_PANEL_TABS.indexOf("Copilot"));
+  }, [copilotFocusSignal]);
 
   // Never render wider than the parent Container actually is, docked or
   // full-screen — see `containerWidth`'s own doc comment. `Math.max(0, ...)`
@@ -8609,13 +8841,26 @@ function CustomerInformationSidePanel({
 
   return (
     <SidePanel
-      side="left"
+      // Docks on the RIGHT now (was "left") — per explicit request, moved
+      // alongside relocating this component's own wrapper to render AFTER
+      // the main content column instead of before it (see the render
+      // site's own doc comment). `SidePanel`'s `side` prop drives its
+      // border (`border-l` instead of `border-r`), unpinned/floating
+      // position (`right-0` instead of `left-0`), and drag-resize handle
+      // side — all three flip correctly just from this one prop (side-
+      // panel.tsx), no other changes needed inside `SidePanel` itself.
+      side="right"
       open={open}
       pinned={pinned}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      headerTitle={customerName ?? "Customer"}
-      headerSubhead={recordId}
+      // Static "Customer Information" now (was the customer's own name +
+      // record id, `headerSubhead={recordId}` below) — per explicit
+      // request. The name/id already show again in the page header above
+      // this panel (see `PageHeader`'s own `title`/`subtitle` at the
+      // record header render site) and in this panel's own Overview tab,
+      // so this header no longer needs to repeat them a third time.
+      headerTitle="Customer Information"
       // `PanelLeftClose`-iconed `PanelPinButton`, standing in for
       // `SidePanel`'s own default `Pin`-iconed one (suppressed by leaving
       // `onPinToggle` unset above) — same shared atom, just a different
@@ -8653,7 +8898,12 @@ function CustomerInformationSidePanel({
             <PanelPinButton
               pinned={false}
               onToggle={onClose}
-              icon={<PanelLeftClose className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
+              // `PanelRightClose` (was `PanelLeftClose`) — matches the
+              // panel's own new right-side dock (see `SidePanel`'s own
+              // `side="right"` above); the glyph itself depicts which edge
+              // the panel collapses toward, so it needs to flip along with
+              // the panel's actual position.
+              icon={<PanelRightClose className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
               pinnedLabel="Close Customer Information"
               unpinnedLabel="Close Customer Information"
             />
@@ -8696,9 +8946,17 @@ function CustomerInformationSidePanel({
       // side-panel.tsx), so it's already outside the scroll region and
       // naturally stays fixed to the bottom without any extra CSS.
       // Temporarily hidden — see `SHOW_CUSTOMER_INFO_AI_INPUT`'s own doc
-      // comment.
+      // comment. Copilot's own `CopilotSearchFooter` (per explicit request)
+      // uses this exact same "shrink-0 sibling after PanelContent" mechanism
+      // for its own fixed-to-bottom placement, checked FIRST since it's not
+      // gated behind `SHOW_CUSTOMER_INFO_AI_INPUT` — see
+      // `CopilotTabContent`'s own doc comment.
       footer={
-        SHOW_CUSTOMER_INFO_AI_INPUT && activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") ? (
+        activeTab === CUSTOMER_PANEL_TABS.indexOf("Copilot") ? (
+          <PanelFooter className="justify-start">
+            <CopilotSearchFooter />
+          </PanelFooter>
+        ) : SHOW_CUSTOMER_INFO_AI_INPUT && activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") ? (
           <PanelFooter className="relative justify-start">
             {/* Soft fade instead of a hard border-top — same treatment as
                 `InteractionComposer`'s transcript-to-composer transition
@@ -8722,6 +8980,7 @@ function CustomerInformationSidePanel({
         fields={fields}
         latestInteraction={latestInteraction}
         latestNote={latestNote}
+        copilotSummary={copilotSummary}
         recordId={recordId}
         channels={channels}
         onOpenConversation={onOpenHistoryConversation}
@@ -8824,6 +9083,7 @@ function CustomerRowInfoPanel({
   const fields = useMemo(() => buildCustomerInfoFields(customerName, recordId, []), [customerName, recordId]);
   const latestInteraction = useMemo(() => buildLatestInteraction(customerName, recordId), [customerName, recordId]);
   const latestNote = useMemo(() => buildLatestNote(customerName, recordId), [customerName, recordId]);
+  const copilotSummary = useMemo(() => buildCopilotSummary(customerName, recordId), [customerName, recordId]);
 
   // Refresh/Delete — no `onClick` (no-op stubs), matching this exact
   // prototype's existing precedent for these two actions: the Customers
@@ -8936,6 +9196,7 @@ function CustomerRowInfoPanel({
         fields={fields}
         latestInteraction={latestInteraction}
         latestNote={latestNote}
+        copilotSummary={copilotSummary}
         onViewAllInteractions={() => setActiveTab(CUSTOMER_PANEL_TABS.indexOf("Interactions"))}
       />
     </InteriorPanel>
@@ -9689,21 +9950,63 @@ export function AgentNextGenPage({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  // Record-header row's Customer Information toggle button collapses to
-  // icon-only below 480px — reuses `sidePanelContainerWidth` above rather
-  // than a dedicated `ResizeObserver` on the row itself: that row only
-  // ever renders while the panel is CLOSED (`showPanelToggle`), and
-  // `containerRef`'s own doc comment confirms its measured width doesn't
-  // shift based on the panel's pinned/floating state — so whenever this
-  // button is on screen, the panel isn't rendered at all and
-  // `sidePanelContainerWidth` already equals this row's own available
-  // width. A prior standalone `customerInfoToggleRowRef` measurement of
-  // the row itself was tried here and reported not collapsing reliably —
-  // that row's box sits several flex levels deep and nests a `TabList`
-  // whose own `.lyra-tab-overflow-wrap` carries `container-type:
-  // inline-size` (tabs.tsx), so reusing this already-working, much
-  // higher-level measurement sidesteps that whole chain instead of
-  // debugging it further.
+  // Record header's own measured width — drives the Add Channel/Customer
+  // Information buttons' icon-only collapse (`recordHeaderWidth < 768`,
+  // render site further down). Used to just reuse `sidePanelContainerWidth`
+  // (`containerRef` above) instead of a dedicated measurement here — see
+  // that old reasoning in git history — but that only held up while the
+  // Customer Information toggle button was gated to the panel being
+  // CLOSED (`showPanelToggle`), so `containerRef` (the docked panel's own
+  // sibling) never had the panel competing with it for width whenever the
+  // button was actually on screen. Once the button moved into `PageHeader`
+  // and started rendering unconditionally (open or closed, per explicit
+  // request), that assumption broke: `containerRef` spans BOTH the main
+  // content column and the docked panel, so dragging the panel wider
+  // visibly squeezes this header (and its buttons) while
+  // `sidePanelContainerWidth` — measuring the pair's combined width, which
+  // the drag doesn't change — stays flat, letting the buttons run out of
+  // real room well before the (never-firing) breakpoint. Confirmed live:
+  // resizing the docked panel wider shifted the header's own buttons left
+  // with no icon-collapse ever kicking in. A dedicated measurement of just
+  // the header itself (via `PageHeader`'s own forwarded ref, no extra
+  // wrapper div needed) reacts to the ACTUAL space this row has, docked
+  // panel or not. Safe to measure directly now, unlike the row this button
+  // used to live in (see that old attempt's own note about a nested
+  // `TabList`'s `container-type: inline-size` interfering) — the channel
+  // tabs live in their own separate row below `PageHeader` now, so this
+  // one has no such nested container query to fight.
+  // A callback ref (not `useRef` + a mount-once `useEffect`, like
+  // `containerRef`/`bodyContainerRef` above) — this is deliberate, not a
+  // stylistic swap: those two both measure elements that exist for the
+  // entire lifetime of this component, so a `[]`-deps effect reading
+  // `.current` once on mount always finds them already attached.
+  // `PageHeader` itself only exists conditionally (`showPageHeader &&
+  // activeInteraction && ...`, several branches deep) — on any render
+  // where it isn't mounted yet (e.g. the agent's on the Desk dashboard
+  // when this component first mounts), that same mount-once effect would
+  // find `recordHeaderRef.current` still `null`, bail out via its own
+  // early return, and never run again (empty deps array), permanently
+  // leaving `recordHeaderWidth` stuck at its initial `9999` — confirmed
+  // live as exactly this: the buttons never collapsed at all, no matter
+  // how narrow the header actually got, because the `ResizeObserver` never
+  // got attached to the real element in the first place. A callback ref
+  // fires on every actual mount/unmount of the node it's attached to,
+  // however many times that happens over this component's lifetime, so
+  // the observer below gets (re)attached correctly the moment `PageHeader`
+  // itself first mounts, not just once at this component's own mount.
+  const [recordHeaderNode, setRecordHeaderNode] = useState<HTMLDivElement | null>(null);
+  const recordHeaderRef = useCallback((node: HTMLDivElement | null) => {
+    setRecordHeaderNode(node);
+  }, []);
+  const [recordHeaderWidth, setRecordHeaderWidth] = useState(9999);
+  useEffect(() => {
+    const el = recordHeaderNode;
+    if (!el) return;
+    setRecordHeaderWidth(el.getBoundingClientRect().width);
+    const ro = new ResizeObserver(([entry]) => setRecordHeaderWidth(entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [recordHeaderNode]);
   const panelFloatLeft = useRef<number | null>(null);
   const panelFloatTop  = useRef<number | null>(null);
   const panelRef       = useRef<HTMLDivElement>(null);
@@ -9827,7 +10130,12 @@ export function AgentNextGenPage({
   // defaults — it stays OPEN though, just no longer docked. See that
   // guard's own doc comment.
   const [sidePanelOpen,     setSidePanelOpen]     = useState(true);
-  const [sidePanelPinned,   setSidePanelPinned]   = useState(true);
+  // No setter — always pinned. `onPinToggle` is deliberately left unset on
+  // the real `SidePanel` below (see its own doc comment), so there's no
+  // path that ever actually unpins this; kept as `useState` rather than a
+  // plain `const` only so a future unpin path can be wired back in without
+  // re-threading every `sidePanelPinned` read site.
+  const [sidePanelPinned] = useState(true);
   const [sidePanelResizing, setSidePanelResizing] = useState(false);
   // 340 — explicit starting width for the SidePanel version (was 425,
   // matching the old InteriorPanel's `maxWidth` default) — per explicit
@@ -9841,6 +10149,41 @@ export function AgentNextGenPage({
   // explicitly closed (`handleSidePanelClose` below) — a freshly reopened
   // panel shouldn't silently reopen full-screen from a previous session.
   const [sidePanelFullScreen, setSidePanelFullScreen] = useState(false);
+  // Bumps `CustomerInformationSidePanel` over to its Copilot tab — per
+  // explicit request, fired whenever a customer reply lands
+  // (`handleSendMessage`'s simulated customer-reply timeout, below) for
+  // whichever interaction's panel is currently on screen. Keyed by
+  // `interactionId` (not just a bare nonce) so the panel's own
+  // `copilotFocusSignal` prop (see that prop's own doc comment) can be wired
+  // to only react when it's actually the CURRENTLY OPEN interaction's own
+  // reply that just landed — a reply on some other, not-currently-viewed
+  // interaction shouldn't yank the agent's already-open panel over to a
+  // different tab out from under them.
+  const [copilotFocusRequest, setCopilotFocusRequest] = useState<{ interactionId: string; nonce: number } | null>(
+    null
+  );
+  // Auto-opens the panel when a customer reply triggers the Copilot jump
+  // above — per explicit request: "if the customer info panel is closed,
+  // open it." Only for the CURRENTLY ACTIVE interaction, same gate the
+  // render site uses to decide whether to forward `copilotFocusRequest`
+  // down to `CustomerInformationSidePanel` at all — a reply on some other,
+  // not-currently-viewed interaction shouldn't pop this panel open out from
+  // under the agent. An effect (not inlined into `handleSendMessage`'s own
+  // `setCopilotFocusRequest` call) specifically so it reads `activeInteractionId`
+  // FRESH at the moment this actually fires, 2.5s later — reading it
+  // directly inside that timeout's closure would risk a stale value if the
+  // agent switched interactions in between (same class of bug
+  // `clockTickRef` exists to avoid for `lastCustomerMessageTick`, just
+  // solved here with an effect instead of a ref since there's already a
+  // value — `copilotFocusRequest` — to key it off of). Deliberately does
+  // NOT touch `lastSidePanelOpenChoice` — that ref tracks the agent's own
+  // EXPLICIT open/close choice (see its own doc comment), and this is an
+  // automatic system action, not one.
+  useEffect(() => {
+    if (!copilotFocusRequest) return;
+    if (copilotFocusRequest.interactionId !== activeInteractionId) return;
+    setSidePanelOpen(true);
+  }, [copilotFocusRequest, activeInteractionId]);
   const sidePanelHoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Header icon's hover preview (`CustomerInfoHoverPreview`, only rendered
   // while the real panel is closed — see the render site) — same
@@ -9932,36 +10275,6 @@ export function AgentNextGenPage({
   // and force-reopened for every new one. Only an explicit close (the
   // panel's own close button, or the header icon toggle while pinned)
   // changes it now.
-
-  // Delayed reveal for the record header's "Customer Information" toggle
-  // button + divider (`showPanelToggle && ...` at the render site below,
-  // only ever shown while the panel is closed). `sidePanelOpen` itself
-  // still drives the real panel's own `open` prop directly (so its own
-  // close animation timing is unaffected) — but rendering the button off
-  // a plain `!sidePanelOpen` made it pop into the header the INSTANT the
-  // panel started closing, while `SidePanel`'s own 250ms width-collapse
-  // (side-panel.tsx) was still visibly playing — a button inviting the
-  // agent to reopen a panel that hadn't actually finished closing yet,
-  // confirmed live as a jarring flash/glitch. This mirrors `sidePanelOpen`
-  // but with a short delay on the "reveal" edge only (closing → show
-  // button) — the "hide" edge (opening → hide button) stays instant, since
-  // there's no equivalent glitch in hiding something the moment it's no
-  // longer true. 100ms (started at 250ms, matching the panel's own full
-  // close transition exactly, then trimmed to 150ms, then this — both per
-  // explicit follow-up request) — short enough the button no longer reads
-  // as visibly lagging behind the rest of the collapse, while still
-  // clearing the worst of the original flash/glitch.
-  const [sidePanelToggleVisible, setSidePanelToggleVisible] = useState(!sidePanelOpen);
-  const sidePanelToggleRevealTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
-    clearTimeout(sidePanelToggleRevealTimer.current);
-    if (sidePanelOpen) {
-      setSidePanelToggleVisible(false);
-    } else {
-      sidePanelToggleRevealTimer.current = setTimeout(() => setSidePanelToggleVisible(true), 100);
-    }
-    return () => clearTimeout(sidePanelToggleRevealTimer.current);
-  }, [sidePanelOpen]);
 
   // Hover-preview handlers — guarded on `sidePanelPinned` (not the
   // narrow-adjusted `effectiveSidePanelPinned`): once pinned, hover does
@@ -10110,19 +10423,63 @@ export function AgentNextGenPage({
   // to the other keeps it open — see that component's own doc comment for
   // why the preview needs to re-arm this itself too.
   const openCustomerInfoPreview = () => {
+    // The trigger button is only ever meant to be hovered/focused while the
+    // real panel is closed (it's a preview of what opening would show) —
+    // but per this component's own doc comment, the button and its
+    // `Popover` actually stay MOUNTED the whole time (just visually
+    // collapsed to a 0-width `overflow-hidden` track while the panel is
+    // open, not unmounted), so a stray/residual `mouseenter`/`focus` can
+    // still reach it. Confirmed live as a real bug — reported as the
+    // preview popping up over the already-open real panel after navigating
+    // away and back. This guard is the actual fix: never even schedule the
+    // preview open while `sidePanelOpen` is true, no matter what fired this.
+    if (sidePanelOpen) return;
     clearTimeout(customerInfoPreviewTimer.current);
     setCustomerInfoPreviewOpen(true);
   };
-  const scheduleCloseCustomerInfoPreview = () => {
+  // Optional event param — this is wired to both a plain `onMouseLeave`
+  // (real `MouseEvent`) and `onBlur` (real `FocusEvent`), and also passed
+  // straight through as `CustomerInfoHoverPreview`'s own `onMouseLeave`
+  // prop (typed `() => void` there, but still actually CALLED with the
+  // real DOM event at runtime — TS prop types don't change what a native
+  // event handler is invoked with).
+  const scheduleCloseCustomerInfoPreview = (e?: React.MouseEvent<Element> | React.FocusEvent<Element>) => {
+    // Don't close if the pointer/focus is moving into a portaled overlay
+    // that visually/logically "belongs" to this preview but isn't a real
+    // DOM descendant of it — e.g. `CustomerInfoHoverPreview`'s own
+    // `TabList overflowMenu` ("N More") dropdown, which portals straight
+    // to `document.body` (tabs.tsx). React's mouseenter/mouseleave are
+    // computed from the actual DOM tree (via the native `mouseout`
+    // event's `relatedTarget`), not the React/portal tree, so moving the
+    // pointer from this preview's content onto that portaled dropdown —
+    // even though it's visually right on top of/beside the preview — always
+    // fires a real `mouseleave` here, scheduling this preview closed right
+    // out from under the dropdown the agent is still using. Confirmed
+    // live: clicking an "N More" tab closed the whole hover preview, even
+    // after fixing this same Popover's own `onInteractOutside` guard (that
+    // fix covers Radix's CLICK-based outside-dismiss; this timer-based
+    // hover-intent close is a separate mechanism with its own separate
+    // bug). Same `[data-radix-popper-content-wrapper]` marker that fix
+    // already relies on (see tabs.tsx's own doc comment on it) — reused
+    // here via `relatedTarget` instead of `event.target`.
+    const related = e?.relatedTarget as Element | null | undefined;
+    if (related?.closest?.("[data-radix-popper-content-wrapper]")) return;
     clearTimeout(customerInfoPreviewTimer.current);
     customerInfoPreviewTimer.current = setTimeout(() => setCustomerInfoPreviewOpen(false), 150);
   };
   // Guards against a stale `true` leaking into the next interaction this
   // icon renders for (e.g. switching interactions mid-hover, without ever
-  // moving the pointer far enough away to fire the close timer above).
+  // moving the pointer far enough away to fire the close timer above), AND
+  // against the real panel opening while the preview happened to be open —
+  // `sidePanelOpen` added to the deps for the same reason `open Customer-
+  // InfoPreview` above now guards itself: `Popover`'s own `onOpenChange` is
+  // wired directly to the raw `setCustomerInfoPreviewOpen` setter (see the
+  // render site), which bypasses that guard entirely if Radix's own
+  // focus-management ever decides to flip it — this effect is the backstop
+  // that un-does that regardless of what caused it.
   useEffect(() => {
     setCustomerInfoPreviewOpen(false);
-  }, [activeInteraction?.id]);
+  }, [activeInteraction?.id, sidePanelOpen]);
 
   // Track window width — still drives `isCompactHeader` below.
   useEffect(() => {
@@ -10781,6 +11138,14 @@ export function AgentNextGenPage({
             : interaction
         )
       );
+      // Jumps the Customer Information panel over to Copilot — per explicit
+      // request, "when a customer replies / starts a conversation with an
+      // agent" (the agent always sends first in this simulated flow, so
+      // this reply IS that customer's side of the conversation starting —
+      // see `copilotFocusRequest`'s own doc comment). `interactionId`-keyed
+      // so `CustomerInformationSidePanel`'s own consumer of this only
+      // reacts when it's actually showing THIS interaction right now.
+      setCopilotFocusRequest({ interactionId, nonce: Date.now() });
     }, 2500);
   };
 
@@ -10961,7 +11326,7 @@ export function AgentNextGenPage({
   // "Start Interaction" from this button silently logged instead of
   // actually opening a card, since `useOutboundAddButton`'s `getHeaderAction`
   // calls `outboundConfig.onStartCall?.(selection)` directly (create-new.tsx).
-  const { getHeaderAction } = useOutboundAddButton({ ...outboundConfig, onStartCall: handleStartCall });
+  const { getHeaderAction, getAvailableChannels } = useOutboundAddButton({ ...outboundConfig, onStartCall: handleStartCall });
 
   /* Welcome modal — shown once on page load; "Go Available" flips the agent
      to Available, "Start Unavailable" keeps them Unavailable (the default
@@ -12493,136 +12858,6 @@ export function AgentNextGenPage({
                 stay OUTSIDE the panel's reach — only the column to its
                 right stacks vertically. */}
             <div className="flex flex-1 overflow-hidden min-h-0">
-              {showPanelToggle && activeInteraction && (
-                // `key`ed on the assignment's own id, same "force a full
-                // remount on every genuine switch" technique the content
-                // column further down already uses (see that div's own
-                // `animate-in fade-in-0 duration-200 delay-150 fill-mode-
-                // backwards` doc comment for the full explanation) —
-                // applied here too per explicit follow-up report: an
-                // earlier fix suppressed `SidePanel`'s own width/opacity
-                // transition instead (a briefly-toggled `!important` CSS
-                // class), which stopped it sliding open/shut but replaced
-                // that with a different problem — the panel then just
-                // snapped into view with no animation at all while the
-                // content column beside it was still doing its own soft
-                // fade, so the two read as out of sync ("not fading, just
-                // appearing").
-                //
-                // Remounting fixes both at once: a freshly-inserted DOM
-                // node has no PRIOR width/opacity value on that same node
-                // for `SidePanel`'s own `transition` to animate FROM, so
-                // its width-slide never plays (no suppression hack
-                // needed) — but a CSS *animation* (unlike a *transition*)
-                // still runs from its keyframes at mount regardless, which
-                // is exactly what `animate-in fade-in-0` on this wrapper
-                // is, so the panel now genuinely fades in, on the same
-                // `duration-200 delay-150` timing as the content column,
-                // instead of either sliding open or hard-cutting into
-                // place.
-                //
-                // Side effect, expected rather than a regression: this
-                // panel's own internal `activeTab` (Overview/Interactions/
-                // Detail/Directory — `CustomerInformationSidePanel`'s own
-                // `useState(0)`), and the Interactions tab's own
-                // `selectedHistoryIndex` (`CustomerInformationPanelBody`),
-                // now reset to their defaults on every genuine assignment
-                // switch too, since remounting discards them along with
-                // everything else in the subtree. Landing on a different
-                // customer's Overview tab first, rather than wherever the
-                // PREVIOUS customer's panel happened to be left, matches the
-                // same "genuinely new context should start from the top"
-                // reasoning the outer interaction detail page's own
-                // `key={`interaction-${id}`}` remount already establishes.
-                //
-                // `z-[5]` here (on THIS wrapper, not just relying on
-                // `SidePanel`'s own internal `z-[5]`) — per explicit
-                // follow-up report: a full-screen restore (this panel
-                // unpinned/`position: absolute`, meant to overlay the
-                // whole content column) briefly flashed with the
-                // transcript visible on top instead of properly
-                // underneath. Root cause is a well-known CSS gotcha: ANY
-                // element with a live `animation-name` (which `animate-in`
-                // sets, permanently, for as long as the class stays on the
-                // element — not just while actually mid-play) forms its
-                // OWN stacking context, same as `opacity`/`transform`/
-                // `filter` do. Before this wrapper existed, `SidePanel`'s
-                // own `position: absolute; z-index: 5` sat DIRECTLY in
-                // `Container`'s stacking context, at the same explicit-
-                // positive-z-index tier as the record header's sticky
-                // separator (`z-[1]`), `InteriorPanel` (`z-[3]`), and the
-                // shared panel's fullscreen overlay (`z-[9]`) — see those
-                // components' own doc comments for this whole tier system.
-                // Once wrapped, `z-[5]` on `SidePanel` only orders things
-                // INSIDE this new stacking context (nothing else is in
-                // here to compete with) — this wrapper itself, having NO
-                // z-index of its own, instead got silently pushed down to
-                // the plain "z-index: auto" tier alongside the content
-                // column sibling next to it, so the two started competing
-                // by DOM ORDER instead of by their intended z-index
-                // values, and the content column (which happens to come
-                // second in the JSX) could paint on top. Setting `z-[5]`
-                // explicitly on this wrapper (a flex item of the
-                // `flex flex-1 overflow-hidden min-h-0` row above — z-index
-                // applies to flex items without needing `position` set)
-                // restores the exact same tier this whole subtree occupied
-                // before the wrapper was introduced.
-                <div
-                  key={`side-panel-${activeInteraction.id}`}
-                  // `h-full` — explicit, not left to this flex item's own
-                  // default cross-axis `align-items: stretch` from its
-                  // parent row (`flex flex-1 overflow-hidden min-h-0`,
-                  // "Row: Customer Information panel + everything else"
-                  // above) — confirmed live as the actual root cause of
-                  // the docked panel's own internal scrolling never
-                  // engaging (while full-screen/unpinned mode, which
-                  // reaches its height via `position: absolute` against
-                  // `Container` instead — an unambiguous MAIN-axis
-                  // flex-grow box, not cross-axis stretch — worked fine
-                  // the whole time). Mirrored one level down on
-                  // `SidePanel`'s own pinned-branch outer div
-                  // (side-panel.tsx), which had the identical gap.
-                  className="shrink-0 h-full z-[5] animate-in fade-in-0 duration-200 delay-150 fill-mode-backwards"
-                >
-                <CustomerInformationSidePanel
-                  open={sidePanelOpen}
-                  // Always unpinned (floating overlay) while full-screen —
-                  // per explicit request this should overlay the parent
-                  // Container, not push the tab row/transcript column over
-                  // via docked mode.
-                  pinned={sidePanelFullScreen ? false : effectiveSidePanelPinned}
-                  // Always shown, even in the narrow-container overlay mode
-                  // — per explicit request, an agent who's opened it as a
-                  // floating overlay still needs a way to close it again
-                  // from inside the panel itself, not just the (now-hidden
-                  // while open) header toggle icon.
-                  onClose={handleSidePanelClose}
-                  fullScreen={sidePanelFullScreen}
-                  // Hidden below 350px of container width — see
-                  // `isSidePanelAtMinimalThreshold`'s own doc comment.
-                  onToggleFullScreen={
-                    isSidePanelAtMinimalThreshold ? undefined : () => setSidePanelFullScreen((v) => !v)
-                  }
-                  onMouseEnter={onSidePanelHoverStart}
-                  onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
-                  customerName={activeInteraction.customerName}
-                  recordId={activeInteraction.recordId}
-                  channels={activeInteraction.channels}
-                  onOpenHistoryConversation={(entry) =>
-                    setHistoryConversationTab({ interactionId: activeInteraction.id, entry, active: true })
-                  }
-                  // Full-screen substitutes the parent Container's own
-                  // measured width (`sidePanelContainerWidth` — already
-                  // tracked for the narrow-container guard) for the normal
-                  // drag-resized width, so the panel's unpinned/absolute
-                  // rendering covers the whole container edge to edge.
-                  width={sidePanelFullScreen ? sidePanelContainerWidth : sidePanelWidth}
-                  containerWidth={sidePanelContainerWidth}
-                  onWidthChange={setSidePanelWidth}
-                  onResizeStateChange={setSidePanelResizing}
-                />
-                </div>
-              )}
               <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
 
                 {/* Below 768px with a docked panel open: a second tab
@@ -12728,166 +12963,145 @@ export function AgentNextGenPage({
                 // fade takes once it begins.
                 <div key={`interaction-${activeInteraction.id}`} className="flex flex-1 flex-col min-w-0 overflow-hidden animate-in fade-in-0 duration-200 delay-150 fill-mode-backwards">
                   {showPageHeader && (
-                    // ── Record header, replaced with a tab bar ──
-                    // Per explicit request: the old `PageHeader` (customer
-                    // name/id title + a `ChannelToggleGroup` pill cluster in
-                    // `titleSuffix`) is gone entirely — the name/id already
-                    // live in the pinned Customer Information `SidePanel`'s
-                    // own header now, so repeating them here was redundant.
-                    // This row is just: the Customer Information toggle
-                    // icon, a divider, then a single `TabList` holding one
-                    // tab per open channel, replacing `ChannelToggleGroup`'s
-                    // job of switching between them — real `Tab`s now, not
-                    // toggle pills. (Used to also hold a separate
-                    // "Customer History" tab here, mutually exclusive with
-                    // the channel tabs — moved into the Customer Information
-                    // panel itself as an "Interactions" tab per explicit
-                    // request, see `CUSTOMER_PANEL_TABS`.) `ChannelTab`/
-                    // `TabList` are safe to bring back
-                    // here (this row's ONLY content, not squeezed into a
-                    // `titleSuffix` slot alongside a title block) — it
-                    // doesn't have the "no real width to fill" problem that
-                    // sank the earlier `ChannelTab`/`TabList` attempt (see
-                    // git history/CONTRIBUTING.md): that one was cramming
-                    // the exact same tabs into `PageHeader`'s slim
-                    // `titleSuffix` slot, not replacing the header outright.
-                    // Back to `items-center` (per explicit follow-up —
-                    // `items-end` threw off the icon button/divider's
-                    // vertical centering relative to the tab labels).
-                    // `TabList` alone opts OUT of that centering via its own
-                    // `self-stretch` below, so it's still the one child that
-                    // fills this row's full height — `Tab`'s own internal
-                    // `items-center` (tabs.tsx) keeps each label/icon
-                    // centered within its now-taller box either way, so
-                    // nothing looks squished. That's what lets `TabList`'s
-                    // (suppressed) own border coincide with this row's own
-                    // `border-b` below, without needing to sacrifice the
-                    // icon button/divider's normal centered look to get it.
-                    //
-                    // This row's own collapse threshold is driven by
-                    // `sidePanelContainerWidth` (declared above, alongside
-                    // `containerRef`) rather than a dedicated measurement of
-                    // this row — see that state's own doc comment for why
-                    // it's already an accurate stand-in whenever this row is
-                    // actually on screen.
-                    // `min-w-0` — without it, this row's own children (the
-                    // TabList's un-wrapped tab labels especially) can force
-                    // its ACTUAL rendered box wider than the real available
-                    // space (a flex item's default `min-width: auto`
-                    // "automatic minimum size" floor), so `getBoundingClientRect()`
-                    // just reports that inflated size back — a real layout
-                    // bug independent of how the width is measured, so this
-                    // is needed here regardless of the `@container`-vs-
-                    // `ResizeObserver` approach.
-                    <div className="flex min-w-0 items-center gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6 pt-2">
-                      {/* Only shown while the panel itself is closed — once
-                          it's open, this same icon would just sit there
-                          doing nothing useful next to a panel that's
-                          already visible (the panel's own close button is
-                          the way to act on it once open); per explicit
-                          request. Its own divider goes with it — a lone
-                          divider with nothing to its left would just look
-                          like a stray line at the start of the row.
+                    <>
+                    {/* ── Record header ──
+                        `PageHeader` is back (per explicit follow-up
+                        request — it had been removed entirely in favor of
+                        just this row's own tab bar; see this file's git
+                        history for that earlier removal's own reasoning),
+                        now as its own row ABOVE the channel tabs instead of
+                        the tabs being this whole area's only content.
+                        Title/subtitle show the customer's name/id
+                        (`recordId`) directly again — no longer only
+                        reachable via the Customer Information panel's own
+                        header — with an "Active"/"Closed" status badge
+                        alongside, mirroring `activeInteraction.closed`.
 
-                          Stays MOUNTED whenever `showPanelToggle` is true
-                          (gated only on `sidePanelToggleVisible` below, via
-                          a `grid-template-columns` 0fr↔1fr track — same
-                          trick this file's own collapsible channel list
-                          already uses for an analogous "unknown/auto
-                          content size but needs to animate smoothly"
-                          problem, just on the width axis here instead of
-                          height) rather than conditionally rendered — a
-                          CSS *transition* needs a PRIOR value on the same
-                          DOM node to animate from, so a freshly-mounted
-                          node (which conditional rendering would produce
-                          every time this reappears) never animates; only
-                          re-flowing an already-mounted node does. Per
-                          explicit follow-up request: animate the REVEAL
-                          (closing → button grows in) but not the hide
-                          (opening → button should still vanish instantly,
-                          same as before) — `transition-[grid-template-
-                          columns]` only appears in the `sidePanelToggleVisible`
-                          branch below, so collapsing back to `0fr` has no
-                          transition property active and snaps instantly,
-                          while expanding to `1fr` picks the transition up
-                          and animates — same asymmetric "only transition
-                          in one direction" idiom `SidePanel`'s own
-                          `widthTransition` (`isResizing ? "none" : "width
-                          250ms ..."`) already establishes in lyra-ui. */}
-                      {showPanelToggle && (
-                        <div
-                          className={cn(
-                            "grid overflow-hidden",
-                            sidePanelToggleVisible
-                              ? "grid-cols-[1fr] transition-[grid-template-columns] duration-200 ease-out"
-                              : "grid-cols-[0fr]"
+                        `actions` holds the header-level buttons, per
+                        explicit request: at full width, one small outline
+                        icon button PER channel this contact can still add
+                        (Call/Email/SMS/…, via `getAvailableChannels` below)
+                        instead of a single combined "Add Channel" trigger —
+                        each one is still the exact same `OutboundAddButton`
+                        every other "+" in this app uses (`getHeaderAction`,
+                        create-new.tsx), just locked to one channel via its
+                        new `initialChannel` option (skips straight to the
+                        phone/skill picker, no redundant "Select Channel"
+                        step) and wearing that channel's own icon via
+                        `icon` instead of the default "+". Below the
+                        `recordHeaderWidth < 768` breakpoint, this whole row
+                        collapses down to the single combined "+" trigger
+                        instead (the original, unrestricted `getHeaderAction`
+                        call — every channel back in one "Select Channel"
+                        picker) — there isn't room for one button per
+                        channel once the header itself gets this tight.
+                        Customer Information is deliberately LAST in
+                        `actions` — a plain flex row, so whichever child
+                        renders last just naturally lands at the far right
+                        of it, no extra positioning prop needed.
+
+                        Customer Information collapses to icon-only at the
+                        SAME `recordHeaderWidth < 768` breakpoint (per
+                        explicit follow-up request) — drops its "Customer
+                        Information" label down to a bare id-card glyph
+                        exactly when the channel buttons above collapse to
+                        their own single icon trigger, so the whole row
+                        changes shape together instead of one side
+                        collapsing before the other.
+                        `ref={recordHeaderRef}` — a dedicated measurement of
+                        THIS header's own width (see that ref's own doc
+                        comment for why `sidePanelContainerWidth` stopped
+                        being a safe stand-in for it once this button
+                        started rendering unconditionally, not just while
+                        the docked panel is closed). */}
+                    <PageHeader
+                      ref={recordHeaderRef}
+                      title={activeInteraction.customerName ?? "Customer"}
+                      subtitle={activeInteraction.recordId}
+                      badge={activeInteraction.closed ? "Closed" : "Active"}
+                      badgeColor={activeInteraction.closed ? "slate" : "green"}
+                      actions={
+                        <>
+                          {recordHeaderWidth >= 768 ? (
+                            // One icon button per still-addable channel —
+                            // same bordered/outline look Customer
+                            // Information's own icon-collapsed state uses
+                            // (`border-lyra-border-default`/
+                            // `bg-lyra-bg-control`/`text-lyra-fg-action`,
+                            // button.tsx's own `outline` variant tokens),
+                            // not the solid primary blue this "Add Channel"
+                            // slot used to be — a whole row of solid blue
+                            // buttons reads as louder than a set of
+                            // equally-weighted quick actions should.
+                            getAvailableChannels(activeInteraction.id).map((channel) => (
+                              <React.Fragment key={channel.id}>
+                                {getHeaderAction(
+                                  activeInteraction.id,
+                                  "h-8 w-8 border border-lyra-border-default bg-lyra-bg-control text-lyra-fg-action hover:bg-lyra-state-hover active:bg-lyra-state-pressed",
+                                  {
+                                    label: channel.label,
+                                    showLabel: false,
+                                    icon: channel.icon,
+                                    initialChannel: channel.id,
+                                  }
+                                )}
+                              </React.Fragment>
+                            ))
+                          ) : (
+                            getHeaderAction(
+                              activeInteraction.id,
+                              "h-8 w-8 px-0 bg-lyra-bg-primary text-lyra-fg-on-primary hover:bg-lyra-state-hover-primary active:bg-lyra-state-pressed-primary",
+                              { label: "Add Channel", showLabel: false }
+                            )
                           )}
-                        >
-                        <div className="flex min-w-0 items-center gap-3 overflow-hidden">
-                          {/* Plain outlined icon `Button`, not a
-                              `PanelPinButton` — per explicit request, this
-                              needs a bordered "outline" look with no
-                              persistent active/selected background at all
-                              (`PanelPinButton` has no outline variant, and
-                              always paints a selected bg once `pinned` and a
-                              custom `icon` are both set — see its own doc
-                              comment). Plain `onClick`, unchanged.
-
-                              Wrapped in a `Popover` showing
-                              `CustomerInfoHoverPreview` on hover (per
-                              explicit request) — replaces the plain
-                              text `Tooltip` `Button` auto-wraps a `title`
-                              prop in (see button.tsx) with a richer
-                              preview of the very panel this icon opens,
-                              since hover-to-preview only matters while
-                              the panel might already be showing... except
-                              it's exactly the opposite here: this button
-                              only renders while the panel is CLOSED (see
-                              the gate above), which is precisely when a
-                              quick glance at the customer without a full
-                              click is most useful. `title` is dropped in
-                              favor of a plain `aria-label` so `Button`
-                              doesn't also auto-wrap its own competing
-                              `Tooltip` around the same trigger (its
-                              `isIconVariant && title` branch — button.tsx).
-                              `onFocus`/`onBlur` mirror the mouse handlers
-                              for keyboard parity, same as every other
-                              hover-preview in this app.
-
-                              `CustomerInfoHoverPreview` already supplies its
-                              own complete chrome (border/background/shadow/
-                              rounded corners, sized to fit — see its own
-                              doc comment), so this `Popover`'s own default
-                              framing is stripped down to a bare, invisible
-                              frame around it — same "let the real content
-                              supply its own chrome" convention
-                              `InteractionNavItem`'s compact-rail hover
-                              preview uses for the exact same reason
-                              (interaction-nav-item.tsx).
-
-                              `onOpenAutoFocus`/`onCloseAutoFocus` both
-                              guarded — hover-opened content shouldn't steal
-                              focus the instant the pointer happens to land
-                              here (`onOpenAutoFocus`), and Radix's default
-                              on close is to return focus to the trigger
-                              (this `Button`), which — left unguarded — fires
-                              its own `onFocus` right back (wired above for
-                              keyboard parity) and reopens the very popover
-                              that just closed, an infinite open/close flash
-                              confirmed live. Same fix already established
-                              for `InteractionNavItem`'s own hover-preview
-                              Popover (interaction-nav-item.tsx) for the
-                              exact same reason. */}
+                          {/* Same hover-preview `Popover` + toggle `Button`
+                              this row used to have before the tab row (see
+                              git history) — moved here unchanged apart from
+                              no longer being conditionally hidden while the
+                              real panel is open. Nothing else needed to
+                              change to support always showing it:
+                              `openCustomerInfoPreview`'s own guard already
+                              refuses to open this preview while
+                              `sidePanelOpen` is true (see that function's
+                              own doc comment), and `handleSidePanelIconToggle`
+                              already TOGGLES `sidePanelOpen` rather than
+                              only ever opening it — so this same click
+                              handler correctly closes the panel too now
+                              that the button stays on screen either way. */}
                           <Popover
-                            open={customerInfoPreviewOpen}
+                            open={customerInfoPreviewOpen && !sidePanelOpen}
                             onOpenChange={setCustomerInfoPreviewOpen}
                             placement="bottom"
-                            align="start"
+                            align="end"
                             showArrow={false}
                             bodyPadding={false}
                             className="border-0 bg-transparent p-0 shadow-none"
                             onOpenAutoFocus={(e) => e.preventDefault()}
                             onCloseAutoFocus={(e) => e.preventDefault()}
+                            // `CustomerInfoHoverPreview` below renders its
+                            // own `TabList overflowMenu` ("8 More"), whose
+                            // dropdown portals straight to `document.body`
+                            // — outside this Popover's own content subtree
+                            // — same as every Radix Popper-based primitive.
+                            // Radix's own outside-interaction detection has
+                            // no way to know that dropdown "belongs" to
+                            // this popover, so clicking one of its overflow
+                            // tabs registered as an interaction outside
+                            // *this* popover's content and closed the whole
+                            // preview out from under it — confirmed live.
+                            // Same fix as `InteractionNavItem`'s own nested
+                            // kebab-menu guard (interaction-nav-item.tsx):
+                            // tabs.tsx's overflow portal is now marked with
+                            // the same `data-radix-popper-content-wrapper`
+                            // attribute every genuine Radix Popper Content
+                            // gets, so this one `closest()` check catches
+                            // both real Radix overlays and this hand-rolled
+                            // one.
+                            onInteractOutside={(e) => {
+                              if ((e.target as Element)?.closest?.("[data-radix-popper-content-wrapper]")) {
+                                e.preventDefault();
+                              }
+                            }}
                             content={
                               <CustomerInfoHoverPreview
                                 customerName={activeInteraction.customerName}
@@ -12901,30 +13115,88 @@ export function AgentNextGenPage({
                             <Button
                               variant="outline"
                               size="md"
-                              // Collapses this button's own label/padding
-                              // down to a square icon-button footprint
-                              // below 768px, driven by `sidePanelContainerWidth`
-                              // (`ResizeObserver`-measured — see that
-                              // state's own doc comment above for why it's
-                              // an accurate stand-in for this row's own
-                              // width) — no effect above that threshold.
-                              className={cn("shrink-0", sidePanelContainerWidth < 768 && "w-8 gap-0 px-0")}
+                              // Collapses to icon-only below 768px — now
+                              // measured off the header itself
+                              // (`recordHeaderRef`/`recordHeaderWidth`, see
+                              // that ref's own doc comment), not
+                              // `sidePanelContainerWidth` (stopped being an
+                              // accurate stand-in once this button started
+                              // rendering unconditionally, docked panel
+                              // open or closed).
+                              //
+                              // `PANEL_BUTTON_SELECTED_CLASS` while
+                              // `sidePanelOpen` — same "active" treatment
+                              // (`bg-lyra-bg-active-moderate` +
+                              // `text-lyra-fg-active-strong`) `PanelPinButton`/
+                              // `LeftNav`/`Tabs`/the AppHeader panel buttons
+                              // already use elsewhere (see that constant's
+                              // own doc comment), not a plain hover tint —
+                              // per explicit request, this button now shows
+                              // it's the one that opened the docked panel,
+                              // the same way those already do for theirs.
+                              // Last in `cn()` so it overrides the plain
+                              // `outline` variant's own resting background/
+                              // text color while open.
+                              className={cn(
+                                "shrink-0",
+                                recordHeaderWidth < 768 && "w-8 gap-0 px-0",
+                                sidePanelOpen && PANEL_BUTTON_SELECTED_CLASS
+                              )}
+                              aria-pressed={sidePanelOpen}
                               onClick={handleSidePanelIconToggle}
                               onMouseEnter={openCustomerInfoPreview}
                               onMouseLeave={scheduleCloseCustomerInfoPreview}
                               onFocus={openCustomerInfoPreview}
                               onBlur={scheduleCloseCustomerInfoPreview}
-                              aria-label={sidePanelToggleLabel ?? "Open Customer Information"}
+                              // Dynamic now that this button is an always-
+                              // visible open/close TOGGLE rather than an
+                              // "open" trigger that vanished once the panel
+                              // was open — `sidePanelToggleLabel` (a static
+                              // override prop, defaults to "Customer
+                              // Information") only ever covers the "open"
+                              // half of that on its own.
+                              aria-label={
+                                sidePanelOpen
+                                  ? "Close Customer Information"
+                                  : sidePanelToggleLabel ?? "Open Customer Information"
+                              }
                             >
-                              <User className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
-                              {sidePanelContainerWidth >= 768 && <span>Customer Information</span>}
+                              {/* `IdCard` — per explicit request, was the
+                                  plain `User` silhouette; a badge/id-card
+                                  glyph reads more specifically as "customer
+                                  record" than a generic person icon does. */}
+                              <IdCard className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
+                              {recordHeaderWidth >= 768 && <span>Customer Information</span>}
                             </Button>
                           </Popover>
-                          <div className="h-8 w-px bg-lyra-border-subtle shrink-0" aria-hidden="true" />
-                        </div>
-                        </div>
-                      )}
-                      {/* `border-b-0` — cancels TabList's own default
+                        </>
+                      }
+                    />
+                    {/* This row's own collapse threshold is driven by
+                        `sidePanelContainerWidth` (declared above, alongside
+                        `containerRef`) rather than a dedicated measurement of
+                        this row — see that state's own doc comment for why
+                        it's already an accurate stand-in whenever this row is
+                        actually on screen.
+                        `min-w-0` — without it, this row's own children (the
+                        TabList's un-wrapped tab labels especially) can force
+                        its ACTUAL rendered box wider than the real available
+                        space (a flex item's default `min-width: auto`
+                        "automatic minimum size" floor), so `getBoundingClientRect()`
+                        just reports that inflated size back — a real layout
+                        bug independent of how the width is measured, so this
+                        is needed here regardless of the `@container`-vs-
+                        `ResizeObserver` approach. */}
+                    <div className="flex min-w-0 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6">
+                      {/* Now just the channel `TabList` on its own — the
+                          Customer Information toggle icon/divider that used
+                          to sit before it (and the "+" Add Channel button
+                          that used to sit after it) both moved up into the
+                          new `PageHeader` above, per explicit request. Kept
+                          as a `flex min-w-0` wrapper (not a plain block) so
+                          `TabList`'s own `self-stretch` below still has a
+                          flex context to size against.
+                          `border-b-0` — cancels TabList's own default
                           bottom border (which only ever spans its own box,
                           not this whole row) so the row's own full-width
                           `border-b` above is the single, sole underline,
@@ -12940,17 +13212,17 @@ export function AgentNextGenPage({
                           (tabs.tsx) keeps each tab's label/icon centered
                           within its now-taller box, so nothing looks
                           squished by this. */}
-                      {/* `growToFillRow` — this row sits alongside the icon
-                          button + divider before it and the "+" button
-                          after it, so it needs to actually claim the rest of
-                          that horizontal row instead of sizing to its own
-                          near-content-less width (which was reading as
-                          narrow enough to collapse the `overflowMenu`
-                          breakpoint early even with plenty of real room
-                          available — see that prop's own doc comment in
-                          tabs.tsx). `className`'s own `flex-1 min-w-0` still
-                          lands on the inner tab row itself (unrelated,
-                          unaffected by this prop). */}
+                      {/* `growToFillRow` — even as this row's only child now
+                          (the icon button/divider/"+" button that used to
+                          flank it moved up into `PageHeader`, above), a bare
+                          `TabList` still sizes to its own near-content-less
+                          width by default rather than claiming the row's
+                          full available space, which reads as narrow enough
+                          to collapse the `overflowMenu` breakpoint early
+                          even with plenty of real room available — see that
+                          prop's own doc comment in tabs.tsx. `className`'s
+                          own `flex-1 min-w-0` still lands on the inner tab
+                          row itself (unrelated, unaffected by this prop). */}
                       {/* `overflowBreakpoint="compact"` — per explicit
                           follow-up report: the default "wide" mode
                           collapses via a fixed CSS `@container (max-width:
@@ -12958,8 +13230,9 @@ export function AgentNextGenPage({
                           (tabs.tsx), a pixel threshold with no relationship
                           to whatever ELSE is sharing this row (the Customer
                           Information toggle button, its own separate
-                          `sidePanelContainerWidth < 768` icon-only
-                          breakpoint above) — once that button's own
+                          `recordHeaderWidth < 768` icon-only breakpoint,
+                          now up in `PageHeader` above this row rather than
+                          sharing it directly) — once that button's own
                           threshold meant this row could never actually get
                           much narrower than ~768px, the tabs' still-fixed
                           400px trigger point produced scroll/chevron
@@ -13158,24 +13431,8 @@ export function AgentNextGenPage({
                           </Tab>
                         )}
                       </TabList>
-                      {/* Same Add Channel control every `InteractionNavItem`
-                          card already has (`getHeaderAction`) — sitting
-                          after the tab row instead of embedded inside
-                          `ChannelToggleGroup`'s own bordered shell (there's
-                          no such shell here to embed it in anymore). Sized
-                          up to a medium outline icon button (`Button`'s own
-                          `variant="outline"`/`size="icon-md"` tokens: h-8
-                          w-8, bordered, `bg-lyra-bg-control`) via the
-                          className override `getHeaderAction` exposes for
-                          exactly this — `OutboundAddButton`'s own default is
-                          a small (h-6 w-6) borderless ghost icon, meant for
-                          the tight space inside an `InteractionNavItem`
-                          card row, not a standalone header action. */}
-                      {getHeaderAction(
-                        activeInteraction.id,
-                        "h-8 w-8 border border-lyra-border-default bg-lyra-bg-control text-lyra-fg-action"
-                      )}
                     </div>
+                    </>
                   )}
                   {/* Body row: transcript+composer column. Customer
                       Information now renders as a `SidePanel` docked left of
@@ -13759,6 +14016,156 @@ export function AgentNextGenPage({
             )}
 
               </div>
+              {/* Customer Information now docks on the RIGHT of the main
+                  content column (per explicit request — was on the left) —
+                  this block itself is unchanged from its old position
+                  (still this exact same conditional/wrapper/`SidePanel`
+                  usage), just moved to render AFTER the content column
+                  instead of before it, so it's the row's LAST flex child
+                  instead of its first. `SidePanel`'s own `side="right"`
+                  prop (set on the `SidePanel` inside
+                  `CustomerInformationSidePanel` itself, not here) is what
+                  actually flips its border/resize-handle/slide-direction to
+                  match — this DOM move alone only changes which edge of the
+                  ROW it renders against. */}
+              {showPanelToggle && activeInteraction && (
+                // `key`ed on the assignment's own id, same "force a full
+                // remount on every genuine switch" technique the content
+                // column further down already uses (see that div's own
+                // `animate-in fade-in-0 duration-200 delay-150 fill-mode-
+                // backwards` doc comment for the full explanation) —
+                // applied here too per explicit follow-up report: an
+                // earlier fix suppressed `SidePanel`'s own width/opacity
+                // transition instead (a briefly-toggled `!important` CSS
+                // class), which stopped it sliding open/shut but replaced
+                // that with a different problem — the panel then just
+                // snapped into view with no animation at all while the
+                // content column beside it was still doing its own soft
+                // fade, so the two read as out of sync ("not fading, just
+                // appearing").
+                //
+                // Remounting fixes both at once: a freshly-inserted DOM
+                // node has no PRIOR width/opacity value on that same node
+                // for `SidePanel`'s own `transition` to animate FROM, so
+                // its width-slide never plays (no suppression hack
+                // needed) — but a CSS *animation* (unlike a *transition*)
+                // still runs from its keyframes at mount regardless, which
+                // is exactly what `animate-in fade-in-0` on this wrapper
+                // is, so the panel now genuinely fades in, on the same
+                // `duration-200 delay-150` timing as the content column,
+                // instead of either sliding open or hard-cutting into
+                // place.
+                //
+                // Side effect, expected rather than a regression: this
+                // panel's own internal `activeTab` (Overview/Interactions/
+                // Detail/Directory — `CustomerInformationSidePanel`'s own
+                // `useState(0)`), and the Interactions tab's own
+                // `selectedHistoryIndex` (`CustomerInformationPanelBody`),
+                // now reset to their defaults on every genuine assignment
+                // switch too, since remounting discards them along with
+                // everything else in the subtree. Landing on a different
+                // customer's Overview tab first, rather than wherever the
+                // PREVIOUS customer's panel happened to be left, matches the
+                // same "genuinely new context should start from the top"
+                // reasoning the outer interaction detail page's own
+                // `key={`interaction-${id}`}` remount already establishes.
+                //
+                // `z-[5]` here (on THIS wrapper, not just relying on
+                // `SidePanel`'s own internal `z-[5]`) — per explicit
+                // follow-up report: a full-screen restore (this panel
+                // unpinned/`position: absolute`, meant to overlay the
+                // whole content column) briefly flashed with the
+                // transcript visible on top instead of properly
+                // underneath. Root cause is a well-known CSS gotcha: ANY
+                // element with a live `animation-name` (which `animate-in`
+                // sets, permanently, for as long as the class stays on the
+                // element — not just while actually mid-play) forms its
+                // OWN stacking context, same as `opacity`/`transform`/
+                // `filter` do. Before this wrapper existed, `SidePanel`'s
+                // own `position: absolute; z-index: 5` sat DIRECTLY in
+                // `Container`'s stacking context, at the same explicit-
+                // positive-z-index tier as the record header's sticky
+                // separator (`z-[1]`), `InteriorPanel` (`z-[3]`), and the
+                // shared panel's fullscreen overlay (`z-[9]`) — see those
+                // components' own doc comments for this whole tier system.
+                // Once wrapped, `z-[5]` on `SidePanel` only orders things
+                // INSIDE this new stacking context (nothing else is in
+                // here to compete with) — this wrapper itself, having NO
+                // z-index of its own, instead got silently pushed down to
+                // the plain "z-index: auto" tier alongside the content
+                // column sibling next to it, so the two started competing
+                // by DOM ORDER instead of by their intended z-index
+                // values. Setting `z-[5]` explicitly on this wrapper (a
+                // flex item of the `flex flex-1 overflow-hidden min-h-0`
+                // row above — z-index applies to flex items without
+                // needing `position` set) restores the exact same tier
+                // this whole subtree occupied before the wrapper was
+                // introduced.
+                <div
+                  key={`side-panel-${activeInteraction.id}`}
+                  // `h-full` — explicit, not left to this flex item's own
+                  // default cross-axis `align-items: stretch` from its
+                  // parent row (`flex flex-1 overflow-hidden min-h-0`,
+                  // "Row: Customer Information panel + everything else"
+                  // above) — confirmed live as the actual root cause of
+                  // the docked panel's own internal scrolling never
+                  // engaging (while full-screen/unpinned mode, which
+                  // reaches its height via `position: absolute` against
+                  // `Container` instead — an unambiguous MAIN-axis
+                  // flex-grow box, not cross-axis stretch — worked fine
+                  // the whole time). Mirrored one level down on
+                  // `SidePanel`'s own pinned-branch outer div
+                  // (side-panel.tsx), which had the identical gap.
+                  className="shrink-0 h-full z-[5] animate-in fade-in-0 duration-200 delay-150 fill-mode-backwards"
+                >
+                <CustomerInformationSidePanel
+                  open={sidePanelOpen}
+                  // Always unpinned (floating overlay) while full-screen —
+                  // per explicit request this should overlay the parent
+                  // Container, not push the tab row/transcript column over
+                  // via docked mode.
+                  pinned={sidePanelFullScreen ? false : effectiveSidePanelPinned}
+                  // Always shown, even in the narrow-container overlay mode
+                  // — per explicit request, an agent who's opened it as a
+                  // floating overlay still needs a way to close it again
+                  // from inside the panel itself, not just the (now-hidden
+                  // while open) header toggle icon.
+                  onClose={handleSidePanelClose}
+                  fullScreen={sidePanelFullScreen}
+                  // Hidden below 350px of container width — see
+                  // `isSidePanelAtMinimalThreshold`'s own doc comment.
+                  onToggleFullScreen={
+                    isSidePanelAtMinimalThreshold ? undefined : () => setSidePanelFullScreen((v) => !v)
+                  }
+                  onMouseEnter={onSidePanelHoverStart}
+                  onMouseLeave={sidePanelResizing ? undefined : onSidePanelHoverEnd}
+                  customerName={activeInteraction.customerName}
+                  recordId={activeInteraction.recordId}
+                  channels={activeInteraction.channels}
+                  onOpenHistoryConversation={(entry) =>
+                    setHistoryConversationTab({ interactionId: activeInteraction.id, entry, active: true })
+                  }
+                  // Full-screen substitutes the parent Container's own
+                  // measured width (`sidePanelContainerWidth` — already
+                  // tracked for the narrow-container guard) for the normal
+                  // drag-resized width, so the panel's unpinned/absolute
+                  // rendering covers the whole container edge to edge.
+                  width={sidePanelFullScreen ? sidePanelContainerWidth : sidePanelWidth}
+                  containerWidth={sidePanelContainerWidth}
+                  onWidthChange={setSidePanelWidth}
+                  onResizeStateChange={setSidePanelResizing}
+                  // Only passed through when the pending request is actually
+                  // FOR this interaction — see `copilotFocusRequest`'s own
+                  // doc comment for why a reply on some other interaction
+                  // shouldn't yank this panel to a different tab.
+                  copilotFocusSignal={
+                    copilotFocusRequest?.interactionId === activeInteraction.id
+                      ? copilotFocusRequest.nonce
+                      : undefined
+                  }
+                />
+                </div>
+              )}
             </div>
 
           </Container>
