@@ -73,6 +73,8 @@ import {
   ToastContainer,
   useToast,
   Select,
+  DispositionSelect,
+  type DispositionOption,
   Checkbox,
   DatePicker,
   EmailInput,
@@ -3516,27 +3518,65 @@ const OUTCOME_TAG_OPTIONS: TagPickerOption[] = [
   { label: "VIP", variant: "critical" },
 ];
 
-const OUTCOME_DISPOSITION_OPTIONS: SelectOption[] = [
-  { value: "Issue Resolved", label: "Issue Resolved" },
-  { value: "Follow-Up Required", label: "Follow-Up Required" },
-  { value: "Transferred", label: "Transferred" },
-  { value: "Customer Callback", label: "Customer Callback" },
-  { value: "No Resolution", label: "No Resolution" },
+// Widened from 5 flat entries to 25, grouped into named sections
+// (`category`) — real contact-center ACD/QM disposition-code vocabulary,
+// per explicit request (own follow-up to the 15 agent-status "reason
+// codes" stress test above: same idea, applied to the Outcome popover's
+// Disposition field instead). `DispositionSelect` (disposition-select.tsx)
+// is what actually renders these as collapsible sections with a
+// per-row favorite star, replacing the flat searchable `Select` this field
+// used before — see that component's own doc comment for why `Select`
+// itself can't do sections. Category order here is section order there
+// (first-seen, not alphabetical).
+const OUTCOME_DISPOSITION_OPTIONS: DispositionOption[] = [
+  // Resolution
+  { value: "Issue Resolved", label: "Issue Resolved", category: "Resolution" },
+  { value: "First Contact Resolution", label: "First Contact Resolution", category: "Resolution" },
+  { value: "Resolved - Self-Service", label: "Resolved - Self-Service", category: "Resolution" },
+  { value: "Resolved - Knowledge Base Article", label: "Resolved - Knowledge Base Article", category: "Resolution" },
+  // Escalation
+  { value: "Escalated to Tier 2", label: "Escalated to Tier 2", category: "Escalation" },
+  { value: "Escalated to Supervisor", label: "Escalated to Supervisor", category: "Escalation" },
+  { value: "Escalated to Specialist Team", label: "Escalated to Specialist Team", category: "Escalation" },
+  // Follow-Up
+  { value: "Follow-Up Required", label: "Follow-Up Required", category: "Follow-Up" },
+  { value: "Customer Callback Scheduled", label: "Customer Callback Scheduled", category: "Follow-Up" },
+  { value: "Pending Customer Response", label: "Pending Customer Response", category: "Follow-Up" },
+  { value: "Awaiting Parts / Inventory", label: "Awaiting Parts / Inventory", category: "Follow-Up" },
+  // Transfer
+  { value: "Transferred - Billing", label: "Transferred - Billing", category: "Transfer" },
+  { value: "Transferred - Technical Support", label: "Transferred - Technical Support", category: "Transfer" },
+  { value: "Transferred - Sales", label: "Transferred - Sales", category: "Transfer" },
+  { value: "Transferred - Other Department", label: "Transferred - Other Department", category: "Transfer" },
+  // No Resolution
+  { value: "No Resolution", label: "No Resolution", category: "No Resolution" },
+  { value: "Unable to Resolve", label: "Unable to Resolve", category: "No Resolution" },
+  { value: "Duplicate Contact", label: "Duplicate Contact", category: "No Resolution" },
+  { value: "Customer Disconnected", label: "Customer Disconnected", category: "No Resolution" },
+  { value: "Abandoned Call", label: "Abandoned Call", category: "No Resolution" },
+  // Account & Billing
+  { value: "Billing Dispute Resolved", label: "Billing Dispute Resolved", category: "Account & Billing" },
+  { value: "Refund Processed", label: "Refund Processed", category: "Account & Billing" },
+  { value: "Account Information Updated", label: "Account Information Updated", category: "Account & Billing" },
+  // Other
+  { value: "Information Provided", label: "Information Provided", category: "Other" },
+  { value: "Complaint Logged", label: "Complaint Logged", category: "Other" },
 ];
 
 const OUTCOME_DEFAULT_SUMMARY =
   "Interaction with davidbauerjr@gmail.com — customer concern reviewed and resolved. Agent provided clear guidance and confirmed next steps. Follow-up actions logged where applicable.";
 
-/** Client/device metadata captured off a text-channel session's own chat
- *  widget (OS/Browser/Language/Device Type/Application Type) — shown as a
- *  single "chat fingerprint" line in that session's `TranscriptSessionDetails`
+/** Client/device metadata captured off a session's own originating client
+ *  (OS/Browser/Language/Device Type/Application Type) — shown as a single
+ *  "chat fingerprint" line in that session's `TranscriptSessionDetails`
  *  footer (per explicit request/reference screenshot). Optional on
- *  `TranscriptSession` and only ever populated for chat/SMS/WhatsApp
- *  sessions, same "text channels only" convention `messageCount`
- *  (`TranscriptSessionSeparator`) already establishes — a phone call or an
- *  email has no browser/device to fingerprint, so `TRANSCRIPT_SESSIONS_VOICE`/
- *  `_EMAIL` below simply omit this field and the footer doesn't render at
- *  all for those, rather than showing something invented. */
+ *  `TranscriptSession`; every channel now populates one (see the three
+ *  `TRANSCRIPT_SESSION_FINGERPRINT*` consts right below — chat/SMS/WhatsApp
+ *  share one shape, Voice and Email each get their own since "Browser"/
+ *  "Application Type" mean something different for a WebRTC call or a
+ *  webmail client than for a chat widget), so the footer now renders for
+ *  every channel type rather than only text channels — per an explicit
+ *  follow-up request after the original "text channels only" scoping. */
 interface TranscriptSessionFingerprint {
   os: string;
   browser: string;
@@ -3545,17 +3585,41 @@ interface TranscriptSessionFingerprint {
   applicationType: string;
 }
 
-// One shared, reused mock fingerprint (per the reference screenshot) rather
-// than inventing slightly different device info per session — same "one
-// plausible example, reused" pattern `OUTCOME_DEFAULT_SUMMARY` above already
-// uses; there's no real per-session client telemetry anywhere in this app's
-// data for it to vary by.
+// One shared, reused mock fingerprint per channel family (per the reference
+// screenshot) rather than inventing slightly different device info per
+// session — same "one plausible example, reused" pattern
+// `OUTCOME_DEFAULT_SUMMARY` above already uses; there's no real per-session
+// client telemetry anywhere in this app's data for it to vary by.
 const TRANSCRIPT_SESSION_FINGERPRINT: TranscriptSessionFingerprint = {
   os: "Windows 10",
   browser: "Edge v.150.0.0.0",
   language: "en-US",
   deviceType: "Desktop",
   applicationType: "Browser",
+};
+
+// Voice's own fingerprint — this app's Voice channel is a browser-based
+// WebRTC call (not a plain PSTN handset), so a real OS/browser fingerprint
+// still applies; "Application Type" reads "WebRTC Call" instead of "Browser"
+// to reflect that it's the softphone leg of the browser session, not a
+// regular page.
+const TRANSCRIPT_SESSION_FINGERPRINT_VOICE: TranscriptSessionFingerprint = {
+  os: "macOS Sonoma",
+  browser: "Chrome v.128.0.0.0",
+  language: "en-US",
+  deviceType: "Desktop",
+  applicationType: "WebRTC Call",
+};
+
+// Email's own fingerprint — captured off the webmail client the customer
+// replied from, hence "Application Type" reading "Webmail" rather than
+// "Browser" (the browser row still names the specific webmail client).
+const TRANSCRIPT_SESSION_FINGERPRINT_EMAIL: TranscriptSessionFingerprint = {
+  os: "Windows 11",
+  browser: "Outlook Web Access",
+  language: "en-US",
+  deviceType: "Desktop",
+  applicationType: "Webmail",
 };
 
 interface TranscriptSession {
@@ -3736,6 +3800,7 @@ const TRANSCRIPT_SESSIONS_VOICE: TranscriptSession[] = [
     skill: "Voice Support",
     agent: "John Smith",
     status: "Resolved",
+    fingerprint: TRANSCRIPT_SESSION_FINGERPRINT_VOICE,
     messages: [],
   },
 ];
@@ -3753,6 +3818,7 @@ const TRANSCRIPT_SESSIONS_EMAIL: TranscriptSession[] = [
     skill: "Email Support",
     agent: "John Smith",
     status: "Resolved",
+    fingerprint: TRANSCRIPT_SESSION_FINGERPRINT_EMAIL,
     messages: [],
   },
 ];
@@ -3831,6 +3897,7 @@ function TranscriptMessageBubble({
   onRemoveTag,
   onClearTags,
   onCopy,
+  narrow = false,
 }: {
   message: TranscriptMessage;
   tagPickerOpen: boolean;
@@ -3839,14 +3906,20 @@ function TranscriptMessageBubble({
   onRemoveTag: (tagId: string) => void;
   onClearTags: () => void;
   onCopy: () => void;
+  /** True below 400px of the transcript's own rendered width — see
+   *  `InteractionTranscript`'s own `transcriptNarrow` state (its
+   *  `ResizeObserver`) for how this is measured. Drops the sender avatar
+   *  and grows the bubble from 70% to the full available width. */
+  narrow?: boolean;
 }) {
   const isCustomer = message.sender === "customer";
   return (
     <div className={cn("flex flex-col", isCustomer ? "items-start" : "items-end")}>
-      <div className={cn("flex max-w-[70%] items-start gap-2", isCustomer ? "flex-row" : "flex-row-reverse")}>
+      <div className={cn("flex items-start gap-2", narrow ? "max-w-full" : "max-w-[70%]", isCustomer ? "flex-row" : "flex-row-reverse")}>
+        {!narrow && (
         <span
           className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full lyra-body-sm-emphasis lyra-transcript-avatar",
+            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full lyra-body-sm-emphasis",
             isCustomer
               ? "bg-lyra-accent-green-soft text-lyra-accent-green-strong"
               : "bg-lyra-bg-primary text-lyra-fg-on-primary"
@@ -3855,6 +3928,7 @@ function TranscriptMessageBubble({
         >
           {message.initials}
         </span>
+        )}
         <div className="flex min-w-0 flex-col gap-1">
           <span className={cn("lyra-body-sm text-lyra-fg-secondary px-1", !isCustomer && "text-right")}>
             {message.name}
@@ -4010,8 +4084,10 @@ function TranscriptSessionDetails({ session }: { session: TranscriptSession }) {
     ["Agent", session.agent, "Status", session.status],
   ];
   // "Chat fingerprint" footer (per explicit request/reference screenshot) —
-  // see `TranscriptSessionFingerprint`'s own doc comment for why this is
-  // `undefined` (and so this whole footer omitted) for Voice/Email.
+  // `session.fingerprint` is populated for every channel now (see
+  // `TranscriptSessionFingerprint`'s own doc comment), so this only reads
+  // `undefined`/omits the footer for a session with no fingerprint data at
+  // all (there currently isn't one, but the guard stays defensive).
   const fingerprintFields: Array<[string, string]> | undefined = session.fingerprint
     ? [
         ["OS", session.fingerprint.os],
@@ -4022,44 +4098,55 @@ function TranscriptSessionDetails({ session }: { session: TranscriptSession }) {
       ]
     : undefined;
   return (
-    <div className="flex flex-col gap-3 rounded-lyra-md border border-lyra-border-subtle bg-lyra-bg-control-subtle p-4 lyra-form-grid-wrap">
-      <h3 className="lyra-body-md-emphasis text-lyra-fg-default">Session Details</h3>
-      {rows.map(([label1, value1, label2, value2]) => (
-        <div key={label1} className="lyra-form-grid">
-          <div className="flex items-center justify-between gap-4">
-            <Label label={label1} />
-            <span className="lyra-body-md text-lyra-fg-secondary">
-              {value1}
-            </span>
+    // Per explicit request, capped to 225px with its own internal scroll
+    // once content overflows that. Scroll/height live on THIS outer div,
+    // deliberately kept separate from the inner `lyra-form-grid-wrap` div
+    // below (rather than merged onto one element) — `lyra-form-grid-wrap`
+    // sets `container-type: inline-size` (lyra-tokens.css) to drive the
+    // `.lyra-form-grid` two-column container-query breakpoints, and
+    // combining that containment context with `overflow-y-auto`/
+    // `max-height` on the SAME element was clipping the fingerprint
+    // footer (the row after `.map`) even while scrolled — a container-type
+    // element establishes its own containment/formatting context, which
+    // doesn't play well stacked with scroll-clipping on that exact box.
+    // Two plain, single-purpose boxes avoids the interaction entirely.
+    <div className="max-h-[225px] overflow-y-auto rounded-lyra-md border border-lyra-border-subtle bg-lyra-bg-control-subtle">
+      <div className="flex flex-col gap-3 p-4 lyra-form-grid-wrap">
+        <h3 className="lyra-body-md-emphasis text-lyra-fg-default">Session Details</h3>
+        {rows.map(([label1, value1, label2, value2]) => (
+          <div key={label1} className="lyra-form-grid">
+            <div className="flex items-center justify-between gap-4">
+              <Label label={label1} />
+              <span className="lyra-body-md text-lyra-fg-secondary">
+                {value1}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <Label label={label2} />
+              <span className="lyra-body-md text-lyra-fg-secondary">{value2}</span>
+            </div>
           </div>
-          <div className="flex items-center justify-between gap-4">
-            <Label label={label2} />
-            <span className="lyra-body-md text-lyra-fg-secondary">{value2}</span>
-          </div>
-        </div>
-      ))}
-      {fingerprintFields && (
-        // Per explicit request: one single row, not the two-per-row grid
-        // the fields above use — `truncate` (Tailwind's overflow:hidden +
-        // text-overflow:ellipsis + white-space:nowrap in one) rather than
-        // `flex-wrap`, so narrowing this card's own container collapses
-        // the line down to an ellipsis instead of reflowing onto a second
-        // line. Plain inline content (no `flex` on this element itself) is
-        // what actually makes `truncate` behave this way here — a flex row
-        // of individually-truncating children wouldn't collapse as one
-        // unit the way a single inline text flow does. `border-t` sets
-        // this apart as the card's own footer, same divider treatment
-        // `Popover`'s own footer slot elsewhere in this file already uses
-        // between body content and a trailing row.
-        <p className="truncate border-t border-lyra-border-subtle pt-3 lyra-body-sm text-lyra-fg-secondary">
-          {fingerprintFields.map(([label, value], i) => (
-            <React.Fragment key={label}>
-              {i > 0 && <span aria-hidden="true"> | </span>}
-              <span className="lyra-body-sm-emphasis text-lyra-fg-default">{label}</span> {value}
-            </React.Fragment>
-          ))}
-        </p>
-      )}
+        ))}
+        {fingerprintFields && (
+          // Per explicit request: one single inline text flow, not the
+          // two-per-row grid the fields above use — but wraps onto
+          // additional lines rather than truncating to an ellipsis when it
+          // doesn't fit on one line (an earlier version used `truncate`
+          // here; per explicit follow-up request that hid fields when the
+          // card narrowed, so this now just lets it wrap like normal text).
+          // `border-t` sets this apart as the card's own footer, same
+          // divider treatment `Popover`'s own footer slot elsewhere in this
+          // file already uses between body content and a trailing row.
+          <p className="border-t border-lyra-border-subtle pt-3 lyra-body-sm text-lyra-fg-secondary">
+            {fingerprintFields.map(([label, value], i) => (
+              <React.Fragment key={label}>
+                {i > 0 && <span aria-hidden="true"> | </span>}
+                <span className="lyra-body-sm-emphasis text-lyra-fg-default">{label}</span> {value}
+              </React.Fragment>
+            ))}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -4160,6 +4247,7 @@ function TranscriptSessionSeparator({
   session,
   open,
   onToggle,
+  customerName,
   statusMenuOpen,
   statusMenuView,
   onStatusMenuOpenChange,
@@ -4174,6 +4262,14 @@ function TranscriptSessionSeparator({
   session: TranscriptSession;
   open: boolean;
   onToggle: () => void;
+  /** Shown at the far left of this row, ahead of "# caseId · date" — see
+   *  `InteractionTranscript`'s own `showCustomerNameInSessionRow` doc
+   *  comment for why this is passed conditionally (only while the Customer
+   *  Information panel is closed) rather than unconditionally the way it
+   *  originally was, and why an earlier explicit request dropped it from
+   *  here at all before this follow-up report reinstated it. `undefined`
+   *  renders nothing, same as before this prop existed. */
+  customerName?: string;
   /** This session's own message (chat bubble) count — shown as "{n}
    *  Messages | " right before "# caseId · date", same "Messages | #id"
    *  format `ChannelTab`'s own tooltip line already uses (channel-row.tsx)
@@ -4281,6 +4377,20 @@ function TranscriptSessionSeparator({
               reason — it now left-aligns under this cluster once wrapped,
               rather than floating to the far right on its own line. */}
           <div className="flex flex-wrap items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
+            {/* Customer name — only present at all while the Customer
+                Information panel is closed (`customerName`'s own doc
+                comment above); a plain `<span>`, not part of the "# caseId
+                · date" `Button` below, since it's not itself a toggle
+                control. `lyra-body-sm-emphasis` (vs. the row's own plain
+                `lyra-body-sm`) so it reads as the one piece of real
+                identifying information here, not just more metadata
+                alongside the case id/date. */}
+            {customerName && (
+              <>
+                <span className="lyra-body-sm-emphasis text-lyra-fg-primary">{customerName}</span>
+                <span aria-hidden="true">|</span>
+              </>
+            )}
             {/* "# caseId · date" + the expand/collapse chevron — per
                 explicit request, stays a real, always-toggleable `Button`
                 regardless of `isClosed`: a closed session's own Session
@@ -4524,9 +4634,8 @@ function TranscriptSessionSeparator({
                         </div>
                       )}
                     </div>
-                    <Select
+                    <DispositionSelect
                       label="Disposition code"
-                      searchable
                       options={outcome.dispositionOptions}
                       value={outcome.dispositionCode}
                       onValueChange={outcome.onDispositionChange}
@@ -4713,6 +4822,7 @@ function TranscriptSessionSeparator({
 function InteractionTranscript({
   channelType,
   customerName,
+  showCustomerNameInSessionRow,
   recordId,
   skillLabel,
   isFreshLaunch,
@@ -4745,6 +4855,18 @@ function InteractionTranscript({
    *  request, as redundant with the record-header tab/Customer Information
    *  panel; this message-substitution use is unaffected.) */
   customerName?: string;
+  /** Shows `customerName` again at the start of every session row
+   *  (`TranscriptSessionSeparator`'s own `customerName` prop) — per
+   *  explicit follow-up report: with the Customer Information panel
+   *  closed, there was no longer any visible indication of who the
+   *  customer even was (the record-header tab shows the channel address,
+   *  not the name, and the panel that carried it is hidden). Pass
+   *  `!sidePanelOpen` from the call site — while the panel's open, the
+   *  name's already on screen there, and showing it again here would be
+   *  exactly the redundant repetition the earlier explicit request
+   *  dropped this row's own copy for in the first place (see
+   *  `customerName`'s own doc comment above). */
+  showCustomerNameInSessionRow?: boolean;
   /** This interaction's own record id — used as the synthetic "just
    *  launched" session's Contact ID (see `isFreshLaunch` below). */
   recordId: string;
@@ -5201,6 +5323,24 @@ function InteractionTranscript({
     if (el) el.scrollTop = el.scrollHeight;
   }, []);
 
+  // Below 400px of this transcript's own rendered width: drop each
+  // message's sender avatar, and let the bubble itself grow from 70% to
+  // 80% of that width — per explicit request. Measured directly off this
+  // same scroll container via `ResizeObserver`, same pattern
+  // `ScheduleToolbar`'s own `containerRef`/`isWide`/`isCompact` already
+  // uses for its Add/Day/Week collapse (SchedulePanel.tsx) — a CSS
+  // `@container` query here stopped firing reliably for the agent
+  // live-testing it, even after several rounds of review/hardening.
+  const [transcriptNarrow, setTranscriptNarrow] = useState(false);
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    setTranscriptNarrow(el.getBoundingClientRect().width < 400);
+    const ro = new ResizeObserver(([entry]) => setTranscriptNarrow(entry.contentRect.width < 400));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // Total message count across every session — the one number that tells us
   // whether "new" messages have shown up since the agent last looked at the
   // bottom of the transcript. Flattened rather than tracked per-session
@@ -5301,7 +5441,19 @@ function InteractionTranscript({
   const displayInitials = initialsFor(displayName);
 
   return (
-    <div className="relative flex-1 min-h-0">
+    // `min-w-0` here — this ROOT div is a flex item of its own
+    // `flex flex-1 flex-col min-w-0 overflow-hidden` parent (the record
+    // body column, this component's own call site) and was missing
+    // `min-w-0` itself. A flex item's default `min-width: auto` applies
+    // the browser's "automatic minimum size" floor — the width of
+    // whatever's widest UN-WRAPPABLE content anywhere in this subtree —
+    // to ANY auto-sized box, not just main-axis flex-grow/shrink
+    // distribution; a column-direction parent's cross-axis
+    // `align-items: stretch` still respects that floor. Found while
+    // chasing a reported width-collapse regression; a real, independent
+    // correctness fix kept regardless of how `transcriptNarrow` below
+    // ended up being measured.
+    <div className="relative flex-1 min-h-0 min-w-0">
       <div
         ref={scrollContainerRef}
         onScroll={handleTranscriptScroll}
@@ -5393,6 +5545,18 @@ function InteractionTranscript({
                   // Same "current session only" gate as `outcome` above —
                   // see `onDismissChannel`'s own doc comment for why.
                   onDismiss={session.id === lastSessionId ? onDismissChannel : undefined}
+                  // Reinstated per explicit follow-up report: with the
+                  // Customer Information panel closed, there was no longer
+                  // ANY place on screen showing the customer's name — the
+                  // record-header tab shows the channel address (a phone
+                  // number, say), not the name, and the panel that used to
+                  // carry it is hidden. Only passed while that panel is
+                  // actually closed (`showCustomerNameInSessionRow`, this
+                  // component's own prop) — the moment it's open again, the
+                  // name is back on screen there and this would just be the
+                  // same redundant repetition the earlier explicit request
+                  // removed this for in the first place.
+                  customerName={showCustomerNameInSessionRow ? customerName : undefined}
                   // Same "whole conversation is read-only" signal `dimmed`
                   // (this component's own prop, see its doc comment) already
                   // is — reused as-is rather than re-derived, so Consult/
@@ -5406,35 +5570,13 @@ function InteractionTranscript({
                     bubbles, the Voice/Email placeholder) is what actually
                     dims — see `sessionContentDimmed`'s own doc comment
                     above for why this moved off the whole per-session
-                    wrapper. Plain wrapper div, not `lyra-transcript-wrap`
-                    itself (that container-type still lives on the messages
-                    block right below, unchanged) and not an ancestor of
+                    wrapper. Plain wrapper div, not an ancestor of
                     `TranscriptSessionSeparator` above (a SIBLING of this
                     div, same as before) — so its own `sticky top-0` keeps
                     working exactly as already documented there. */}
                 <div className={cn(sessionContentDimmed && "opacity-50 transition-opacity")}>
                 {messages.length > 0 && (
-                  // `lyra-transcript-wrap` (container-type: inline-size,
-                  // lyra-tokens.css — drives the avatar-collapse breakpoint
-                  // below 400px) lives here, scoped to just this session's
-                  // own messages — NOT on any ancestor of
-                  // `TranscriptSessionSeparator` above (this div is that
-                  // separator's SIBLING, not its parent). Two earlier
-                  // placements both silently broke the separator's own
-                  // `sticky top-0` ("we lost that at some point"): first the
-                  // padded/centered column one level up from here, then
-                  // (when moving it out to fix that) the scroll container
-                  // itself — `container-type` implies CSS containment
-                  // wherever it sits, and turns out ANY contained ancestor
-                  // between a sticky element and its real scrolling
-                  // ancestor stops that element from sticking at all, even
-                  // the scrolling ancestor itself. This is the one spot
-                  // that measures every message's avatar (still a
-                  // descendant of THIS div) without being an ancestor of
-                  // the sticky separator at all — confirmed against a live
-                  // screenshot after the first fix didn't actually resolve
-                  // it.
-                  <div className="flex flex-col gap-5 py-4 lyra-transcript-wrap">
+                  <div className="flex min-w-0 flex-col gap-5 py-4">
                     {messages.map((message) => (
                       <TranscriptMessageBubble
                         key={message.id}
@@ -5449,6 +5591,7 @@ function InteractionTranscript({
                         onRemoveTag={(tagId) => removeTag(session.id, message.id, tagId)}
                         onClearTags={() => clearTags(session.id, message.id)}
                         onCopy={() => copyMessage(message.text)}
+                        narrow={transcriptNarrow}
                       />
                     ))}
                   </div>
@@ -5522,6 +5665,7 @@ function InteractionTranscript({
                             onRemoveTag={(tagId) => removeLiveTag(message.id, tagId)}
                             onClearTags={() => clearLiveTags(message.id)}
                             onCopy={() => copyMessage(message.text)}
+                            narrow={transcriptNarrow}
                           />
                         ))}
                       </div>
@@ -8809,6 +8953,57 @@ type Page = "agent-workspace" | "agent" | "outbound" | "login";
 // `Draggable`) has been removed from this app.
 const SHARED_PANEL_DEFAULT_WIDTH = 360;
 
+// The true, VISUAL minimum content width the interaction record's own main
+// content column (`containerRef`) and the docked shared panel (Notifications/
+// AI/Apps/etc., `Draggable`'s own `minWidth`) should both deliver at their
+// respective floors — per explicit request, so the two sit at the same
+// on-screen size at minimum, not just the same raw CSS number. The two
+// consumers read this differently because only ONE of them pays a padding
+// tax on the way there (see `INTERACTION_MAIN_CONTENT_MIN_WIDTH`, just below,
+// for why): the docked panel's own outer box has no padding of its own, so it
+// passes this value straight through as its literal `minWidth` prop; the main
+// content column needs to add its own padding back on top (that's exactly
+// what `INTERACTION_MAIN_CONTENT_MIN_WIDTH` is for).
+const SHARED_CONTENT_MIN_VISUAL_WIDTH = 362;
+
+// The interaction record's own main content column (record-header tab row +
+// transcript + composer, `containerRef`'s div) — never renders narrower
+// than this, even with a docked shared panel (Notifications/AI/Apps/etc.)
+// open and LeftNav expanded. Below this, the record-header tab's own
+// address/name label, the transcript bubbles, and the composer all started
+// cramping/wrapping (confirmed live — the exact report that prompted this
+// constant). Paired with `dockedPanelRenderWidth`'s own clamp (this docked
+// panel's own render block, further down) rather than left as a plain CSS
+// `min-w-[…]` floor on its own: a bare CSS floor with nothing else giving up
+// space just pushes the WHOLE row past the viewport once every sibling's
+// combined width exceeds what's actually available (confirmed live as an
+// earlier, simpler attempt's actual failure mode) — the docked panel has to
+// be the one that shrinks to make room, since it's the only sibling here
+// with a size that's a preference (a drag-resized width) rather than a
+// genuine floor of its own.
+//
+// `containerRef`'s own div is `border-box` sized (Tailwind's preflight
+// default), so its `pr-3` (12px) right padding is CARVED OUT of a plain
+// `min-w-[350px]` rather than added on top of it, leaving only 338px of
+// actual usable content width for the record-header row/transcript/composer
+// inside — confirmed live as the reason the row was still measurably
+// narrower than intended even though the floor was technically "holding" at
+// 350. This is `SHARED_CONTENT_MIN_VISUAL_WIDTH` (the real, usable-content
+// target both this column and the docked panel should match) + 12 (this same
+// `pr-3`), so the CONTENT area itself — not the padded border-box — never
+// drops below `SHARED_CONTENT_MIN_VISUAL_WIDTH`. The docked panel does NOT
+// need this same `+ 12` treatment — its own outer box carries no equivalent
+// padding, so `SHARED_CONTENT_MIN_VISUAL_WIDTH` alone already lands it at the
+// same real visual width as this column's floor.
+//
+// Two call sites read this: the plain CSS floor itself is a literal
+// `min-w-[374px]` on `containerRef`'s own div (Tailwind's arbitrary-value
+// classes need a literal string at build time, same reason
+// `CUSTOMER_INFO_COLUMN_MINWIDTHS` above pairs each column's own
+// `min-w-[…]` string with a plain numeric `minWidthPx` for JS math) — keep
+// that literal in sync with this constant by hand if it ever changes.
+const INTERACTION_MAIN_CONTENT_MIN_WIDTH = SHARED_CONTENT_MIN_VISUAL_WIDTH + 12;
+
 // Screen Pop — visual mock of an external app's login screen, shown in
 // place of a real embed. Real screen-pop targets like Salesforce/Zendesk
 // send clickjack-protection headers (X-Frame-Options / CSP frame-ancestors)
@@ -9494,6 +9689,21 @@ export function AgentNextGenPage({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // Record-header row's Customer Information toggle button collapses to
+  // icon-only below 480px — reuses `sidePanelContainerWidth` above rather
+  // than a dedicated `ResizeObserver` on the row itself: that row only
+  // ever renders while the panel is CLOSED (`showPanelToggle`), and
+  // `containerRef`'s own doc comment confirms its measured width doesn't
+  // shift based on the panel's pinned/floating state — so whenever this
+  // button is on screen, the panel isn't rendered at all and
+  // `sidePanelContainerWidth` already equals this row's own available
+  // width. A prior standalone `customerInfoToggleRowRef` measurement of
+  // the row itself was tried here and reported not collapsing reliably —
+  // that row's box sits several flex levels deep and nests a `TabList`
+  // whose own `.lyra-tab-overflow-wrap` carries `container-type:
+  // inline-size` (tabs.tsx), so reusing this already-working, much
+  // higher-level measurement sidesteps that whole chain instead of
+  // debugging it further.
   const panelFloatLeft = useRef<number | null>(null);
   const panelFloatTop  = useRef<number | null>(null);
   const panelRef       = useRef<HTMLDivElement>(null);
@@ -11399,6 +11609,26 @@ export function AgentNextGenPage({
   );
   const showHeaderIcon = (key: PanelKey) => pinnedKeys[key] && !responsivelyHiddenKeys.has(key);
 
+  // How much room the DOCKED shared panel can actually claim without
+  // pushing `containerRef`'s own `min-w-[374px]` floor (and so the whole
+  // row) past the viewport — see `INTERACTION_MAIN_CONTENT_MIN_WIDTH`'s own
+  // doc comment for the full reasoning. Computed here (not just down at the
+  // docked-panel render block that actually uses it) so it can ALSO feed
+  // `Draggable`'s own `maxWidth` prop below — per explicit follow-up
+  // report, capping only the RENDERED width (this file's own earlier
+  // attempt) still let an active drag visually run the panel off the right
+  // edge of the screen while dragging, since that render-width clamp used
+  // to explicitly bypass itself while `panelIsResizing`. `Draggable` itself
+  // already re-reads `maxWidth` live on every pointer-move during a drag
+  // (`draggable.tsx`'s own resize handlers), so feeding it this same,
+  // per-render-fresh boundary stops the drag handle itself right at the
+  // wall instead of only clipping the box after the fact.
+  const leftNavRenderWidth = isNavNarrow ? 0 : navOpen ? 256 : 60;
+  const maxDockedWidthForMainFloor = Math.max(
+    0,
+    bodyContainerWidth - leftNavRenderWidth - INTERACTION_MAIN_CONTENT_MIN_WIDTH - 12
+  );
+
   // The one shared `Draggable` — its header (icon/actions/title) and body
   // swap to whichever button's content is active; the container itself
   // (variant/width/position) never does.
@@ -11408,8 +11638,41 @@ export function AgentNextGenPage({
       variant={panelVariant}
       defaultWidth={panelWidth}
       defaultHeight={panelHeight}
-      minWidth={280}
-      maxWidth={SHARED_PANEL_MAX_WIDTH}
+      // Shares `containerRef`'s own tested VISUAL content floor
+      // (`SHARED_CONTENT_MIN_VISUAL_WIDTH`) rather than a separate,
+      // never-validated 280px default — per explicit request to give the
+      // main content column and the docked shared panel the same real
+      // on-screen minimum size. Deliberately NOT
+      // `INTERACTION_MAIN_CONTENT_MIN_WIDTH` (374) — that number already has
+      // `containerRef`'s own `pr-3` padding baked in (see that constant's own
+      // doc comment), but this outer box carries no equivalent padding of
+      // its own, so adding it here would make the panel's floor render 12px
+      // WIDER than `containerRef`'s, not the same. Below this the panel's
+      // own content (list rows, labels, actions) gets just as cramped as the
+      // main column would.
+      minWidth={SHARED_CONTENT_MIN_VISUAL_WIDTH}
+      // This instance already computes its own precise ceiling from real
+      // sibling layout (`maxDockedWidthForMainFloor`, above) — `Draggable`'s
+      // generic "below 1440px viewport, tighten to 800px" heuristic
+      // (`getResponsiveMaxWidth`) has no visibility into that and was
+      // capping the panel below 1024px even while `containerRef` sat
+      // comfortably above its own floor with room to spare. Opting out lets
+      // the floor-aware ceiling be the only cap, matching the explicit
+      // requirement: resizable up to `SHARED_PANEL_MAX_WIDTH` OR until
+      // `containerRef` hits its floor, whichever is smaller — nothing else.
+      disableResponsiveMaxWidth
+      // Deliberately NOT unified with `containerRef`'s max — main stays
+      // uncapped (grows to fill whatever's left via `flex-1`) per explicit
+      // request; only the DOCKED panel is capped here, to stop it from
+      // squeezing `containerRef` under its own floor (see
+      // `maxDockedWidthForMainFloor`'s own doc comment just above). No
+      // effect on the FLOAT variant (an undocked/dragged float panel
+      // doesn't claim any of `containerRef`'s layout space to begin with).
+      // Fullscreen bypasses `Draggable` entirely (see
+      // `sharedPanelFullScreenOverlay`) and is already uncapped — it fills
+      // whatever `containerRef` itself measures, with no width cap of its
+      // own, so "uncapped when full screen" falls out for free here.
+      maxWidth={panelVariant === "docked" ? Math.min(SHARED_PANEL_MAX_WIDTH, maxDockedWidthForMainFloor) : SHARED_PANEL_MAX_WIDTH}
       minHeight={400}
       onVariantChange={handlePanelVariantChange}
       onWidthChange={setPanelWidth}
@@ -12205,9 +12468,14 @@ export function AgentNextGenPage({
           }
         />
 
-        {/* Content area — flex-1 shrinks to give space to docked panels.
-            ref used to position float panels. */}
-        <div ref={containerRef} className="relative flex flex-1 min-w-0 overflow-hidden pr-3 pb-3">
+        {/* Content area — flex-1 shrinks to give space to docked panels,
+            down to `INTERACTION_MAIN_CONTENT_MIN_WIDTH` (350px) — below
+            that, the docked shared panel's own render width clamps down
+            instead (see `dockedPanelRenderWidth`'s own doc comment,
+            further down) so THIS floor never has to fight it for space and
+            push the whole row past the viewport. ref used to position
+            float panels. */}
+        <div ref={containerRef} className="relative flex flex-1 min-w-[374px] overflow-hidden pr-3 pb-3">
 
           {/* Main Container — flex column so `isCombinedPanelMode`'s tab row
               can stack above the content instead of sitting beside it. The
@@ -12496,14 +12764,22 @@ export function AgentNextGenPage({
                     // `border-b` below, without needing to sacrifice the
                     // icon button/divider's normal centered look to get it.
                     //
-                    // `lyra-customer-info-toggle-wrap` — establishes the
-                    // container-query boundary the Customer Information
-                    // toggle button collapses against below 991px (see
-                    // index.css). Goes on this row (not the button's own
-                    // wrapper) since this row is what actually has real,
-                    // stretched width to measure — see that CSS rule's own
-                    // doc comment.
-                    <div className="flex items-center gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6 pt-2 lyra-customer-info-toggle-wrap">
+                    // This row's own collapse threshold is driven by
+                    // `sidePanelContainerWidth` (declared above, alongside
+                    // `containerRef`) rather than a dedicated measurement of
+                    // this row — see that state's own doc comment for why
+                    // it's already an accurate stand-in whenever this row is
+                    // actually on screen.
+                    // `min-w-0` — without it, this row's own children (the
+                    // TabList's un-wrapped tab labels especially) can force
+                    // its ACTUAL rendered box wider than the real available
+                    // space (a flex item's default `min-width: auto`
+                    // "automatic minimum size" floor), so `getBoundingClientRect()`
+                    // just reports that inflated size back — a real layout
+                    // bug independent of how the width is measured, so this
+                    // is needed here regardless of the `@container`-vs-
+                    // `ResizeObserver` approach.
+                    <div className="flex min-w-0 items-center gap-3 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6 pt-2">
                       {/* Only shown while the panel itself is closed — once
                           it's open, this same icon would just sit there
                           doing nothing useful next to a panel that's
@@ -12625,12 +12901,14 @@ export function AgentNextGenPage({
                             <Button
                               variant="outline"
                               size="md"
-                              // `lyra-customer-info-toggle-btn` — collapses
-                              // this button's own label/padding down to a
-                              // square icon-button footprint below 991px
-                              // of the row's width (see index.css); no
-                              // effect above that threshold.
-                              className="shrink-0 lyra-customer-info-toggle-btn"
+                              // Collapses this button's own label/padding
+                              // down to a square icon-button footprint
+                              // below 768px, driven by `sidePanelContainerWidth`
+                              // (`ResizeObserver`-measured — see that
+                              // state's own doc comment above for why it's
+                              // an accurate stand-in for this row's own
+                              // width) — no effect above that threshold.
+                              className={cn("shrink-0", sidePanelContainerWidth < 768 && "w-8 gap-0 px-0")}
                               onClick={handleSidePanelIconToggle}
                               onMouseEnter={openCustomerInfoPreview}
                               onMouseLeave={scheduleCloseCustomerInfoPreview}
@@ -12639,11 +12917,7 @@ export function AgentNextGenPage({
                               aria-label={sidePanelToggleLabel ?? "Open Customer Information"}
                             >
                               <User className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
-                              {/* `lyra-customer-info-toggle-label` — hidden
-                                  by the same container query once the row
-                                  drops below 991px, leaving just the icon
-                                  above. */}
-                              <span className="lyra-customer-info-toggle-label">Customer Information</span>
+                              {sidePanelContainerWidth >= 768 && <span>Customer Information</span>}
                             </Button>
                           </Popover>
                           <div className="h-8 w-px bg-lyra-border-subtle shrink-0" aria-hidden="true" />
@@ -12677,7 +12951,35 @@ export function AgentNextGenPage({
                           tabs.tsx). `className`'s own `flex-1 min-w-0` still
                           lands on the inner tab row itself (unrelated,
                           unaffected by this prop). */}
-                      <TabList overflowMenu growToFillRow className="flex-1 min-w-0 self-stretch border-b-0">
+                      {/* `overflowBreakpoint="compact"` — per explicit
+                          follow-up report: the default "wide" mode
+                          collapses via a fixed CSS `@container (max-width:
+                          400px)` query on this `TabList`'s own wrapper
+                          (tabs.tsx), a pixel threshold with no relationship
+                          to whatever ELSE is sharing this row (the Customer
+                          Information toggle button, its own separate
+                          `sidePanelContainerWidth < 768` icon-only
+                          breakpoint above) — once that button's own
+                          threshold meant this row could never actually get
+                          much narrower than ~768px, the tabs' still-fixed
+                          400px trigger point produced scroll/chevron
+                          behavior that read as arbitrary, disconnected from
+                          anything actually changing on screen. "compact"
+                          mode (tabs.tsx) collapses off a real measurement
+                          instead — a hidden clone's true unconstrained
+                          content width vs. this wrapper's actual rendered
+                          width (`compactMeasureRef`/`compactWrapRef`) — so
+                          it only ever reacts to the tabs themselves
+                          genuinely running out of room, at whatever width
+                          that happens to be, rather than a second,
+                          unrelated fixed number. Also never scrolls at all
+                          (stretches ≤2 tabs, `compactStretch`; collapses to
+                          "active tab + N More" at 3+, `collapsedRowEl`) —
+                          in keeping with this row's tabs already dropping
+                          the chevron/scroll treatment entirely for the
+                          common 1-tab case (`hasScrollableOverflow`,
+                          tabs.tsx). */}
+                      <TabList overflowMenu overflowBreakpoint="compact" growToFillRow className="flex-1 min-w-0 self-stretch border-b-0">
                         {activeInteraction.channels.map((c) => {
                           const key = c.id ?? c.type;
                           // Same `${interactionId}:${channelKey}` scheme the
@@ -12959,6 +13261,11 @@ export function AgentNextGenPage({
                         <InteractionTranscript
                           channelType={activeChannelType}
                           customerName={activeInteraction.customerName}
+                          // See this prop's own doc comment — only shown in
+                          // the session row while the Customer Information
+                          // panel (this component's own `sidePanelOpen`
+                          // state) is actually closed.
+                          showCustomerNameInSessionRow={!sidePanelOpen}
                           recordId={activeInteraction.recordId}
                           skillLabel={activeChannel?.preview}
                           isFreshLaunch={!!activeInteraction.startedFresh}
@@ -13499,10 +13806,40 @@ export function AgentNextGenPage({
             separate docked-width column beside it. Also skipped while
             `panelFullScreen` is on — `sharedPanelFullScreenOverlay` (an
             `absolute inset-0` overlay rendered as `containerRef`'s own last
-            child, just above) takes over instead. */}
-        {panelVariant === "docked" && !isCombinedPanelMode && !panelFullScreen && (
-          <div className="flex h-full pb-3" style={{
-            width: panelState === "open" ? panelWidth : 0,
+            child, just above) takes over instead.
+
+            `dockedPanelRenderWidth` (below), not the raw `panelWidth`
+            state, drives this block's own two `width` styles —
+            `maxDockedWidthForMainFloor` (computed once, alongside
+            `sharedPanel` above, so `Draggable`'s own `maxWidth` prop there
+            can use the exact same boundary) is `containerRef`'s own
+            `min-w-[374px]` floor's other half: without SOMETHING here
+            actively shrinking to make room, that floor has nowhere to
+            borrow space from on its own — once this panel's width plus
+            that floor plus LeftNav's own width exceed what
+            `bodyContainerWidth` actually has, plain CSS has no way to
+            shrink one flex sibling to free up room for another's min-width,
+            so the ROW just grows past the viewport instead (confirmed live
+            as the actual failure mode of an earlier, simpler attempt at
+            this same min-width — and, separately, of an even earlier
+            version of THIS fix that only capped the render width while
+            NOT actively dragging, which still let a live drag visually run
+            the panel off the right edge of the screen; feeding the same
+            boundary into `Draggable`'s own `maxWidth` above closes that
+            gap too, so this now applies unconditionally, drag or not).
+            `panelWidth` itself (the drag-resized value `Draggable`'s own
+            `onWidthChange` writes) is left untouched everywhere else —
+            float-mode sizing, `Draggable`'s own `defaultWidth`, the
+            reset-on-close effect, etc. — so this only clamps what actually
+            PAINTS while docked; the size the agent actually dragged to is
+            still exactly what they get back the moment there's room for it
+            again (window widened, LeftNav collapsed, panel re-opened after
+            being closed). */}
+        {panelVariant === "docked" && !isCombinedPanelMode && !panelFullScreen && (() => {
+          const dockedPanelRenderWidth = Math.min(panelWidth, maxDockedWidthForMainFloor);
+          return (
+        <div className="flex h-full pb-3" style={{
+            width: panelState === "open" ? dockedPanelRenderWidth : 0,
             height: "100%",
             marginRight: panelState === "open" ? 12 : 0,
             overflow: "hidden",
@@ -13512,15 +13849,16 @@ export function AgentNextGenPage({
             <div
               className="flex flex-col h-full animate-in fade-in-0 duration-150"
               style={{
-                width: panelWidth,
+                width: dockedPanelRenderWidth,
                 height: "100%",
                 display: panelState === "open" ? "flex" : "none",
               }}
             >
               {sharedPanel}
             </div>
-          </div>
-        )}
+        </div>
+          );
+        })()}
 
       </div>
 
@@ -13613,7 +13951,18 @@ export function AgentNextGenPage({
         )}
         <ToastContainer className="static bottom-auto right-auto z-auto">
           {toasts.map((t) => (
-            <Toast key={t.id} variant={t.variant} title={t.title} duration={t.duration} onDismiss={() => dismissToast(t.id)}>
+            <Toast
+              key={t.id}
+              variant={t.variant}
+              title={t.title}
+              duration={t.duration}
+              // Set by `dismissAllToasts` (toast.tsx) on every toast at
+              // once, so clicking "Dismiss All" plays every toast's own
+              // exit animation simultaneously instead of them vanishing
+              // instantly — see `Toast`'s own `forceClosed` doc comment.
+              forceClosed={t.closing}
+              onDismiss={() => dismissToast(t.id)}
+            >
               {t.message}
             </Toast>
           ))}

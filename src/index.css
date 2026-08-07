@@ -42,43 +42,14 @@ body {
   border-radius: 3px;
 }
 
-/* ── Customer Information toggle collapse (CSS container query) ──
-   The record header's "Customer Information" panel-toggle button
-   (AgentNextGenPage.tsx) is a normal outline button with a leading `User`
-   icon and a "Customer Information" label — but that label is the first
-   thing to give up its spot once the row it shares with the channel
-   TabList gets tight, collapsing to a plain square icon button below
-   991px of the ROW's own width (not the viewport — same "react to this
-   component's own available space" rationale as every other family in
-   lyra-tokens.css, e.g. `.lyra-tab-overflow-wrap`/
-   `.lyra-page-header-breadcrumb-wrap`).
-
-   App-level (not lyra-ui core) since this toggle button/row is specific to
-   AgentNextGenPage's own record-header layout, not a reusable design
-   -system component — same "family" pattern those lyra-ui rules document,
-   just declared here instead.
-
-   `.lyra-customer-info-toggle-wrap` goes on the outer row div (a
-   column-flex child that gets a real, stretched width from its parent —
-   NOT the button's own shrink-to-fit wrapper, which would collapse to
-   ~0 and permanently match the narrow rule regardless of actual room;
-   see `.lyra-page-header-breadcrumb-wrap`'s own doc comment in
-   lyra-tokens.css for the full explanation of that trap).
-   `.lyra-customer-info-toggle-label` wraps the button's text node;
-   `.lyra-customer-info-toggle-btn` goes on the button itself (drops its
-   horizontal label padding/gap down to a square icon-button footprint
-   once collapsed) — one real trigger element throughout, just like the
-   filter-chip family above, not a duplicated/swapped node, since
-   duplicating an interactive trigger risks the same "two live copies"
-   class of bug already hit and fixed in TabList's overflow menu. */
-@container (max-width: 991px) {
-  .lyra-customer-info-toggle-wrap .lyra-customer-info-toggle-label {
-    display: none;
-  }
-  .lyra-customer-info-toggle-wrap .lyra-customer-info-toggle-btn {
-    width: 2rem;
-    padding-left: 0;
-    padding-right: 0;
-    gap: 0;
-  }
-}
+/* The record header's "Customer Information" panel-toggle button's
+   label-collapse below 400px used to live here as a CSS `@container`
+   query (`.lyra-customer-info-toggle-wrap`/`-btn`/`-label`) — per
+   explicit report it stopped firing reliably, even after several rounds
+   of review/hardening. Replaced with a plain `ResizeObserver` reading on
+   the row itself (`customerInfoToggleRowRef`/`customerInfoToggleRowWidth`,
+   AgentNextGenPage.tsx), the same pattern `ScheduleToolbar`'s own
+   `containerRef`/`isWide`/`isCompact` already uses for its Add/Day/Week
+   collapse (SchedulePanel.tsx) — an established, working precedent in
+   this exact codebase for "a component collapses based on its own
+   rendered width," not a one-off workaround. */
