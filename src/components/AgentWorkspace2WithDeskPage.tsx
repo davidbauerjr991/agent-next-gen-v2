@@ -1,3 +1,13 @@
+// AgentWorkspace2WithDeskPage — "Agent Workspace 2.0 With Desk" in the top-
+// left app menu (agent-next-gen-outbound-data.tsx's `buildAppMenuGroups`),
+// its own route at #/agent-with-desk (App.tsx). Per explicit request, this
+// started as a byte-for-byte duplicate of AgentNextGenPage.tsx (only the
+// exported component's own name was renamed) — a genuinely separate file/
+// component so edits to "Agent Workspace 2.0" (AgentNextGenPage.tsx) do NOT
+// affect this page, and vice versa. If the two are ever meant to converge
+// again, do that deliberately (e.g. re-extracting shared pieces into
+// agent-next-gen-shared-utils.ts or a new shared component) rather than by
+// accident — they are NOT kept in sync automatically.
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { cn } from "@/lib/utils";
@@ -47,7 +57,6 @@ import {
   type CreateNewOutboundContact,
   type InteractionChannel,
   type ChannelType,
-  type InteractionNavItemProps,
   type ChannelOutcomeConfig,
   type AgentStatus,
   type AgentNotification,
@@ -108,6 +117,8 @@ import {
   AGENTS_COUNT_BY_QUEUE,
   QUEUE_WAIT_BASE_SECONDS,
   LATEST_CONTACTS_STATIC,
+  type DeskTabKey,
+  DESK_TAB_LABELS,
   PERFORMANCE_DATA_BY_RANGE,
   PerformanceBreakdownCard,
   PerformanceSummaryCard,
@@ -126,15 +137,18 @@ import {
   type CustomerFilterKey,
   CustomersListView,
 } from "@/components/agent-next-gen-customers-table";
+import {
+  InteractionsListView,
+  type InteractionHistoryRecord,
+} from "@/components/agent-next-gen-interactions-table";
 import { useSearchPanelContent, type SearchPanelTabKey } from "@/components/agent-next-gen-search-panel";
-import { type InteractionHistoryRecord } from "@/components/agent-next-gen-interactions-table";
 import {
   type CustomerHistorySessionEntry,
   HistoryConversationView,
   CustomerInfoHoverPreview,
   CustomerInformationSidePanel,
   CustomerRowInfoPanel,
-  AGENT_WORKSPACE_CUSTOMER_PANEL_TABS,
+  CUSTOMER_PANEL_TABS,
   buildCustomerInfoFields,
   useCustomerRecordDraft,
 } from "@/components/agent-next-gen-customer-info-panel";
@@ -150,7 +164,7 @@ import {
   CheckCircle2,
   CircleDot,
   MinusCircle,
-  UserCog,
+  Gauge,
   LayoutGrid,
   CalendarDays,
   MonitorUp,
@@ -177,7 +191,7 @@ import {
 // renamed from `AI_PANEL_DEFAULT_WIDTH` now that Ask AI (its original sole
 // occupant, back when each of these was its own independently-sized
 // `Draggable`) has been removed from this app.
-// ── AgentNextGenPage ── (see agent-next-gen-shared-utils.ts and sibling
+// ── AgentWorkspace2WithDeskPage ── (see agent-next-gen-shared-utils.ts and sibling
 // agent-next-gen-*.ts(x) files for everything this component itself no
 // longer declares — split out once this file crossed Babel's 500KB
 // code-generator threshold)
@@ -312,73 +326,6 @@ function MockLoginCard({
   );
 }
 
-// Wraps a single `InteractionNavItem` (plus its collapsed-rail-only
-// `CollapsedChannelBadge` overlay) behind ONE stable top-level element,
-// rather than the `.map()` callback below returning two structurally
-// different shapes (a bare `InteractionNavItem` when expanded vs. a
-// wrapping `<div className="relative">` around it + the badge when
-// collapsed) depending on `navOpen`. That structural split is what broke
-// `LeftNav`'s own hover-to-expand overlay mode (left-nav.tsx's
-// `injectExpanded`) — per explicit bug report/screenshot: hovering the
-// collapsed rail open visibly widened it to the full 256px panel (New
-// Outbound's full label, "Assignments (N active)"'s full text — both
-// plain top-level children of `header`, correctly re-cloned with
-// `expanded={hoverOpen}`), but each interaction card stayed stuck as its
-// small collapsed avatar tile instead of also switching to the full card.
-// `injectExpanded` only clones `expanded` onto `header`'s own TOP-LEVEL
-// children — with the collapsed-mode wrapper div in the way, that clone
-// landed on a plain `<div>` (which just ignores an unknown `expanded`
-// prop) instead of ever reaching the real `InteractionNavItem` nested
-// inside it, which was left stuck on whatever `expanded={navOpen}` value
-// `AgentNextGenPage` had explicitly hardcoded onto it (the PINNED
-// open/closed state, not hover state) — so it never flipped along with
-// hovering, no matter how wide the rail visibly got.
-//
-// This component is the fix: the `.map()` below now always returns ONE
-// `<InteractionNavCard>` per card, unconditionally, so `injectExpanded`
-// always has a single real element to clone `expanded` onto. Internally,
-// THIS component (not the caller) decides whether to render the plain
-// expanded card or the collapsed tile + badge, based on whatever
-// `expanded` value it actually received — which is exactly the value
-// `injectExpanded` just overwrote when hovering open in overlay mode, so
-// the decision now correctly follows hover state, not just `navOpen`.
-interface InteractionNavCardProps extends InteractionNavItemProps {
-  /** This interaction's current channel type — only used for the
-   *  collapsed-rail badge (see `showChannelBadge` below); ignored once
-   *  `expanded` is true, since the expanded card already shows a per-
-   *  channel chip for each open channel. */
-  currentChannelType?: ChannelType;
-  /** Whether the collapsed-rail badge should render at all — false once a
-   *  card has more than one open channel, since `InteractionNavItem`
-   *  already renders its own multi-channel count badge in that exact same
-   *  corner (see `CollapsedChannelBadge`'s own doc comment for why the two
-   *  are mutually exclusive). */
-  showChannelBadge: boolean;
-  /** Same "success"/"warning"/"critical" SLA tier the expanded card's own
-   *  `awaitingSeverity` prop already resolves — passed straight through to
-   *  `CollapsedChannelBadge` so the collapsed badge escalates in lockstep
-   *  with the rest of the card. */
-  badgeSeverity?: "success" | "warning" | "critical";
-}
-function InteractionNavCard({
-  currentChannelType,
-  showChannelBadge,
-  badgeSeverity,
-  expanded,
-  ...itemProps
-}: InteractionNavCardProps) {
-  return !expanded ? (
-    <div className="relative">
-      <InteractionNavItem expanded={expanded} {...itemProps} />
-      {currentChannelType && showChannelBadge && (
-        <CollapsedChannelBadge type={currentChannelType} severity={badgeSeverity} />
-      )}
-    </div>
-  ) : (
-    <InteractionNavItem expanded={expanded} {...itemProps} />
-  );
-}
-
 // Screen Pop — external apps an agent can pop the current contact/record
 // into. Dummy list; wiring an actual screen-pop integration per app is out
 // of scope for now.
@@ -394,14 +341,12 @@ const SCREEN_POP_APPS: SelectOption[] = [
 ];
 
 // Search panel's own sub-tabs (`useSearchPanelContent`, agent-next-gen-
-// search-panel.tsx) — all 4 tabs, with "interactions" listed FIRST per
-// explicit request (was "customers" first, per an earlier explicit
-// request — reverted per this later one, "have Interactions be the first
-// tab visible" instead): that hook treats the first entry as both the
-// leftmost tab AND its own default active tab. `AgentWorkspace2WithDeskPage.tsx`
-// passes its own, shorter list (just Messages/Threads) to the same hook
-// instead of this constant — see that file's own call site.
-const SEARCH_PANEL_TABS: SearchPanelTabKey[] = ["interactions", "customers", "messages", "threads"];
+// search-panel.tsx) — just Messages/Threads here per explicit request
+// ("remove customers and Interactions, just have Messages and Threads").
+// `AgentNextGenPage.tsx` passes its own, longer list (all 4, Customers
+// first) to the same hook instead of this constant — see that file's own
+// call site.
+const WITH_DESK_SEARCH_PANEL_TABS: SearchPanelTabKey[] = ["messages", "threads"];
 
 // Builds a `tagOpenChannels` closure off of the given `interactions` — reads
 // each `TrackedChannel.type`/`.value` (skipping any channel the agent has
@@ -448,7 +393,7 @@ function buildOpenChannelTagger(interactions: ActiveInteraction[]) {
   };
 }
 
-export function AgentNextGenPage({
+export function AgentWorkspace2WithDeskPage({
   showPageHeader = false,
   showPanelToggle = false,
   showInteriorPanel = true,
@@ -779,25 +724,13 @@ export function AgentNextGenPage({
   const activeInteraction = interactions.find((i) => i.id === activeInteractionId) ?? null;
 
   // Single, shared Customer Overview/Detail/Directory draft for whichever
-  // interaction is currently active — owned HERE (not inside
-  // `CustomerInformationSidePanel`/`CustomerInfoHoverPreview` themselves,
-  // which used to each build their own independent instance) per explicit
-  // request: an agent who starts an edit, then hovers off the record
-  // header's hover preview (which unmounts its content every time the mouse
-  // leaves — Radix `Popover.Content` has no `forceMount`) or toggles the
-  // docked panel closed and back open, should still see that exact same
-  // pending edit rather than a freshly reset one. Passing this ONE instance
-  // to both consumers below also means an edit started in one shows up in
-  // the other, since they're now genuinely the same state rather than two
-  // disconnected copies of "the same customer's" data.
-  //
-  // `useCustomerRecordDraft` already resets itself whenever `recordId`
-  // changes (see that hook's own effect) — switching to a genuinely
-  // different active interaction (or having none at all) naturally starts a
-  // fresh draft, and dismissing an assignment removes it from `interactions`
-  // entirely, which is exactly the ONE thing per explicit request that
-  // should actually discard pending edits — not merely closing the panel or
-  // hovering away from it.
+  // interaction is currently active — see `AgentNextGenPage.tsx`'s
+  // identical declaration for the full doc comment (owned here rather than
+  // inside `CustomerInformationSidePanel`/`CustomerInfoHoverPreview`
+  // themselves, per explicit request, so pending edits survive hovering off
+  // the hover preview or toggling the docked panel closed and back open —
+  // only a genuine interaction switch or dismissing the assignment resets
+  // it).
   const activeCustomerFields = useMemo(
     () =>
       activeInteraction
@@ -810,8 +743,6 @@ export function AgentNextGenPage({
     activeInteraction?.customerName,
     activeInteraction?.recordId
   );
-  // Same lift as `activeCustomerRecordDraft` above, for the identical
-  // reason — see that state's own doc comment.
   const [activeCustomerOverviewEditing, setActiveCustomerOverviewEditing] = useState(false);
   useEffect(() => {
     setActiveCustomerOverviewEditing(false);
@@ -910,43 +841,22 @@ export function AgentNextGenPage({
   const activeChannelAwaitingSeverity: "success" | "warning" | "critical" | undefined = activeChannel?.awaitingResponse
     ? getAwaitingSeverity(clockTick - (activeChannel.lastCustomerMessageTick ?? activeChannel.startTick))
     : undefined;
-  // "interactions" removed from this page's own tab set — that content
-  // moved to the Search right panel instead (see `searchContent`'s own
-  // doc comment above). `DeskTabKey`/`DESK_TAB_LABELS` (shared,
-  // agent-next-gen-interaction-dashboard.tsx) still include `"interactions"`
-  // — untouched, since `AgentWorkspace2WithDeskPage.tsx` still uses it.
-  //
-  // The Home/Customers/Accounts/Tickets/WEM `TabList` row itself was
-  // removed from this page's dashboard entirely per a follow-up explicit
-  // request ("remove all of the tabs from the home page") — WEM moved to
-  // its own top-right app-header icon instead (see `PANEL_KEY_METADATA.wem`
-  // above), Customers already has its Search-panel Customers tab as a real
-  // alternative, and Accounts/Tickets never had real content built. With no
-  // `TabList` left to switch it, `activeDeskTab` can now only ever be
-  // "home" — a plain constant, not `useState`, since nothing sets it
-  // anymore (its own `setActiveDeskTab` setter, and the whole `deskTabOrder`
-  // reorder-state this file used to also need for that row's drag-to-
-  // reorder, are both gone for the same reason). The now-orphaned Customers/
-  // Accounts/Tickets/WEM per-tab render branches further down this file
-  // (the desk's own — separate from the Search panel's — `CustomersListView`
-  // instance, and the Accounts/Tickets/WEM "Coming soon" placeholder) are
-  // deliberately left in place rather than deleted, same "hide it, don't
-  // destroy it" convention `HIDDEN_FROM_APPS_MENU`/`OUTBOUND_GROUPS`'s own
-  // "Dial Pad" entry already follow elsewhere in this file — they simply
-  // can never be reached anymore now that `activeDeskTab` is pinned to
-  // "home".
-  //
-  // Still a `useState` (setter just never called/destructured anymore),
-  // NOT a plain `const activeDeskTab: SomeUnion = "home"` — TypeScript
-  // narrows a `const`'s later reads to its own literal initializer's type
-  // even under an explicit wider annotation (confirmed live: that version
-  // hit real `tsc` "no overlap" errors at every `activeDeskTab ===
-  // "customers"`-style comparison below). `useState<T>(initial)`'s return
-  // is typed as the explicit generic `T` itself, not narrowed from
-  // `initial`'s own literal type, which is what keeps those comparisons
-  // (and the "orphaned but not deleted" branches they gate) type-checking
-  // correctly with no runtime behavior change.
-  const [activeDeskTab] = useState<"home" | "customers" | "accounts" | "tickets" | "wem">("home");
+  const [activeDeskTab, setActiveDeskTab] = useState<"home" | "customers" | "accounts" | "tickets" | "wem" | "interactions">("home");
+  // Desk-tab display order — separate from `activeDeskTab` above (which
+  // one is selected), so the user can click-and-drag reorder the Home/
+  // Customers/Accounts/Tickets/WEM tabs (via `TabList`'s `reorderable`/
+  // `onReorder`, tabs.tsx) without that affecting which tab is currently
+  // active. `TabList` doesn't own this order itself — it only reports the
+  // result of a drag — so this array is the actual source of truth the
+  // tab row below is rendered from.
+  const [deskTabOrder, setDeskTabOrder] = useState<DeskTabKey[]>([
+    "home",
+    "customers",
+    "accounts",
+    "tickets",
+    "wem",
+    "interactions",
+  ]);
   /* Settings — a third top-level view alongside Desk/interaction-record,
      shown in place of both in the content column when the Settings rail
      item is clicked. Mutually exclusive with an active interaction: opening
@@ -1006,7 +916,7 @@ export function AgentNextGenPage({
   const appMenuGroups = buildAppMenuGroups((page) => {
     setAppMenuOpen(false);
     onNavigate?.(page);
-  }, "agent");
+  }, "agent-with-desk");
 
   /* Panel animation state machine — see AgentNextGenTemplate.stories.tsx for full comment */
   type PanelState = "closed" | "open" | "closing";
@@ -1244,6 +1154,7 @@ export function AgentNextGenPage({
   // Salesforce login instead of an empty picker the agent has to act on
   // first.
   const [screenPopApp, setScreenPopApp] = useState("salesforce");
+
   // "View All Apps" kebab menu — lists every app-header panel button
   // regardless of pinned state, with a `PanelPinButton` per row so any app
   // can be pinned/unpinned right from the menu. All nine start pinned
@@ -1253,18 +1164,12 @@ export function AgentNextGenPage({
   // icon would.
   // Default pinned set — header shows (right to left) Notifications,
   // Agent Chat, Search; Schedule/Customers/Accounts/Tickets/WEM/Screen Pop
-  // start unpinned. Customers/Accounts/Tickets are also filtered out of the
-  // "View All Apps" menu itself (see `HIDDEN_FROM_APPS_MENU` below), making
-  // them fully unreachable from the app header; Schedule/Screen Pop/WEM
-  // aren't in that list, so unpinning them just hides their header icon —
-  // all three stay reachable via "View All Apps". WEM starts unpinned again
-  // per a follow-up explicit request ("unpin WEM when the app loads") —
-  // still dropped from `HIDDEN_FROM_APPS_MENU` (unlike Customers/Accounts/
-  // Tickets), so it's a real, clickable row in "View All Apps" (with its
-  // own `PanelPinButton` to re-pin it) rather than fully unreachable like
-  // those three; it just no longer shows a persistent header icon BY
-  // DEFAULT on load — an agent can still pin it back from that menu, which
-  // then persists for the rest of the session same as any other app.
+  // start unpinned. Customers/Accounts/Tickets/WEM are also filtered out
+  // of the "View All Apps" menu itself (see `HIDDEN_FROM_APPS_MENU`
+  // below), making them fully unreachable from the app header; Schedule
+  // and Screen Pop aren't in that list, so unpinning them (Schedule per
+  // this follow-up request) just hides their header icon — both stay
+  // reachable via "View All Apps".
   const [pinnedKeys, setPinnedKeys] = useState<Record<PanelKey, boolean>>({
     notif: true,
     conversations: true,
@@ -1937,24 +1842,6 @@ export function AgentNextGenPage({
     // the agent's own last explicit choice (not hardcoded open) — per
     // explicit follow-up request.
     if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
-    // Closes `CustomerRowInfoPanel` (the Customers table's own row-detail
-    // flyout — a DIFFERENT panel from Customer Information/`setSidePanelOpen`
-    // just above, which is the active-interaction record's own panel) any
-    // time an interaction is actually launched from it — per explicit
-    // request, specifically reported against the Search right panel's own
-    // Customers tab: unlike the desk dashboard's Customers tab (which gets
-    // hidden entirely once the page navigates to the newly-started
-    // interaction), the Search panel is a persistent docked overlay that
-    // stays mounted and visible across that navigation, so its own
-    // `CustomerRowInfoPanel` — still showing whichever customer row was
-    // clicked to launch this call — would otherwise keep sitting open on
-    // top of the new interaction. Unconditional (not gated on
-    // `isNewInteraction`) and safe as a no-op when nothing was open —
-    // `setSelectedCustomerRow(null)` on an already-`null` value doesn't
-    // trigger a re-render. This is the SAME lifted `selectedCustomerRow`
-    // state the desk tab's own `CustomerRowInfoPanel` instance uses too, so
-    // starting a call from EITHER instance now closes both.
-    setSelectedCustomerRow(null);
   };
 
   // App-local only (per "changes to components should only happen locally
@@ -2168,10 +2055,10 @@ export function AgentNextGenPage({
     // History row, then clicking its still-enabled header Email/WhatsApp/
     // SMS button, opened a silent duplicate of the exact same channel
     // instead of disabling itself — `buildOpenChannelTagger`
-    // (AgentNextGenPage.tsx) only ever reads `TrackedChannel.value` to
-    // populate `openChannelAddresses`, never `addressLabel`, so a channel
-    // with no `value` set could never register as "already open" no matter
-    // how it displayed on its own tab.
+    // (AgentWorkspace2WithDeskPage.tsx) only ever reads `TrackedChannel.value`
+    // to populate `openChannelAddresses`, never `addressLabel`, so a
+    // channel with no `value` set could never register as "already open" no
+    // matter how it displayed on its own tab.
     const address = synthesizeChannelAddress(entry.channelType, entry.caseId, entry.name);
     const newChannel: TrackedChannel = {
       id: entry.channelType,
@@ -2543,30 +2430,6 @@ export function AgentNextGenPage({
     };
   }, [interactions, selectedOutboundTeamId]);
 
-  // `CONTACT_HISTORY_OUTBOUND_CONTACTS` (the 5 hand-authored rows) PLUS a
-  // live-rebuilt contact for every row in `dismissedContactHistory` (see
-  // `buildContactHistoryOutboundContacts`'s own doc comment for why the
-  // latter needs the exact same treatment — a freshly dismissed interaction
-  // logs its own brand-new `ContactHistoryEntry` with a fresh id, so it hits
-  // the identical "nothing registered under this synthetic id" gap the 5
-  // original rows had), all run through the exact same `buildOpenChannelTagger`
-  // as every group inside `outboundConfig` above — see that function's own
-  // doc comment for why these can't just be folded into `outboundConfig.groups`
-  // directly. Recomputed off `interactions`/`dismissedContactHistory` so a
-  // reopened/redialed Contact History card's already-open channels disable
-  // themselves the same way a real customer's would, re-enable the moment
-  // that interaction is dismissed, and a newly-dismissed customer's own
-  // card gets a working "+" (Add Channel) row the very next time it's
-  // reopened, not just the 5 rows that happened to be hand-authored ahead
-  // of time.
-  const contactHistoryOutboundContacts = useMemo(
-    () =>
-      [...CONTACT_HISTORY_OUTBOUND_CONTACTS, ...buildContactHistoryOutboundContacts(dismissedContactHistory)].map(
-        buildOpenChannelTagger(interactions)
-      ),
-    [interactions, dismissedContactHistory]
-  );
-
   // Every "Agent Next Gen" consumer (this app, AgentNextGenTemplate.
   // stories.tsx, LeftNav.stories.tsx's "Agent Next Gen Left Nav" story,
   // InteractionNavItem.stories.tsx) wants the exact same "+" behavior on
@@ -2595,6 +2458,30 @@ export function AgentNextGenPage({
   // actually opening a card, since `useOutboundAddButton`'s `getHeaderAction`
   // calls `outboundConfig.onStartCall?.(selection)` directly (create-new.tsx).
   //
+  // `CONTACT_HISTORY_OUTBOUND_CONTACTS` (the 5 hand-authored rows) PLUS a
+  // live-rebuilt contact for every row in `dismissedContactHistory` (see
+  // `buildContactHistoryOutboundContacts`'s own doc comment for why the
+  // latter needs the exact same treatment — a freshly dismissed interaction
+  // logs its own brand-new `ContactHistoryEntry` with a fresh id, so it hits
+  // the identical "nothing registered under this synthetic id" gap the 5
+  // original rows had), all run through the exact same `buildOpenChannelTagger`
+  // as every group inside `outboundConfig` above — see that function's own
+  // doc comment for why these can't just be folded into `outboundConfig.groups`
+  // directly. Recomputed off `interactions`/`dismissedContactHistory` so a
+  // reopened/redialed Contact History card's already-open channels disable
+  // themselves the same way a real customer's would, re-enable the moment
+  // that interaction is dismissed, and a newly-dismissed customer's own
+  // card gets a working "+" (Add Channel) row the very next time it's
+  // reopened, not just the 5 rows that happened to be hand-authored ahead
+  // of time.
+  const contactHistoryOutboundContacts = useMemo(
+    () =>
+      [...CONTACT_HISTORY_OUTBOUND_CONTACTS, ...buildContactHistoryOutboundContacts(dismissedContactHistory)].map(
+        buildOpenChannelTagger(interactions)
+      ),
+    [interactions, dismissedContactHistory]
+  );
+
   // `groups` gets one extra entry here, ON TOP OF `outboundConfig.groups` —
   // `contactHistoryOutboundContacts` (tagged copy of
   // `CONTACT_HISTORY_OUTBOUND_CONTACTS`, agent-next-gen-outbound-data.tsx,
@@ -2888,21 +2775,25 @@ export function AgentNextGenPage({
     setNotifications((prev) => prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n)));
   };
 
-  // Wired to the Search panel's Interactions tab (`InteractionsListView`'s
-  // own `onOpenInteraction`, via `useSearchPanelContent` below) — per
-  // explicit request, clicking a row there opens it as a real, active
-  // assignment in the left nav, same shape `handleOpenAssignmentFromNotification`
-  // just above already builds from a notification click: NOT `startedFresh`
-  // (a row in this table represents an already-existing, already-routed
-  // conversation with real prior history, not a blank-slate outbound
-  // interaction the agent is originating), wholesale-replaces `channels`/
-  // clears `liveMessages` when the same contact already has a card open
-  // (same reasoning as that handler's own comment on that branch). The
+  // Wired to this page's own desk-tab "Interactions" view
+  // (`InteractionsListView`'s own `onOpenInteraction`, see that component's
+  // own call site further down this file) — per explicit request, clicking
+  // a row there opens it as a real, active assignment in the left nav, same
+  // shape `handleOpenAssignmentFromNotification` just above already builds
+  // from a notification click: NOT `startedFresh` (a row in this table
+  // represents an already-existing, already-routed conversation with real
+  // prior history, not a blank-slate outbound interaction the agent is
+  // originating), wholesale-replaces `channels`/clears `liveMessages` when
+  // the same contact already has a card open (same reasoning as that
+  // handler's own comment on that branch). Mirrors `AgentNextGenPage.tsx`'s
+  // own copy of this exact handler — kept as a separate copy here rather
+  // than a shared export, same "each page owns its own interaction/left-nav
+  // state" decoupling every other handler in this file already follows. The
   // matching `CreateNewOutboundContact`/customer record is looked up by
-  // `record.caseId`, which `buildInteractionHistory` (this file — actually
-  // agent-next-gen-interactions-table.tsx) sets to that customer's own
-  // `customerId` in the first place, so this reliably finds the same
-  // record every row was built from without a second, parallel id scheme.
+  // `record.caseId`, which `buildInteractionHistory` (agent-next-gen-
+  // interactions-table.tsx) sets to that customer's own `customerId` in the
+  // first place, so this reliably finds the same record every row was
+  // built from without a second, parallel id scheme.
   const handleOpenInteractionRow = (record: InteractionHistoryRecord) => {
     const customer = CREATE_NEW_CUSTOMERS.find((c) => c.customerId === record.caseId) ?? CREATE_NEW_CUSTOMERS[0];
     const id = customer.id;
@@ -3062,87 +2953,24 @@ export function AgentNextGenPage({
         </div>
       ),
   };
-  // Search — per explicit request, the Interactions table (previously its
-  // own top-level desk tab, `InteractionsListView`, agent-next-gen-
-  // interactions-table.tsx) has been MOVED here as this panel's body,
-  // replacing the old blank "Nothing here yet" placeholder — not
-  // duplicated; the desk tab itself is gone (see `deskTabOrder`'s own
-  // initial array and the `activeDeskTab` render branch further down,
-  // both of which no longer include `"interactions"`).
+  // Search — built via the shared `useSearchPanelContent` hook (agent-
+  // next-gen-search-panel.tsx), same one `AgentNextGenPage.tsx` uses for
+  // its own Search panel, per explicit request ("wire the same
+  // functionality... make a new component... link it to both"). This page
+  // previously had its own separate, decoupled Search panel (a standalone
+  // `SearchInput` + blank body, no sub-tabs) — replaced outright, not kept
+  // alongside the new one.
   //
-  // Built via the shared `useSearchPanelContent` hook (agent-next-gen-
-  // search-panel.tsx) — per a follow-up explicit request, this Search
-  // panel's tab/content system is now shared with
-  // `AgentWorkspace2WithDeskPage.tsx` too (that page passes a trimmed
-  // `tabs` list — just Messages/Threads — and no `customers` bag, since it
-  // has no Customers concept in its own Search panel; see that file's own
-  // call site). This page passes all 4 tabs, with `"customers"` listed
-  // FIRST — per explicit request ("have Customers be the first tab
-  // visible") — which the hook treats as both the leftmost tab AND its own
-  // default active tab (see that hook's own `tabs[0]` initializer).
-  //
-  // Customers' body reuses the EXACT SAME lifted state the desk
-  // dashboard's own "Customers" tab already uses (`customerSortedRows`,
-  // `customerAddedFilterKeys`, `selectedCustomerRow`, etc. — all declared
-  // once, near this component's top, alongside that tab's own
-  // `<CustomersListView>` render call further down) rather than a second,
-  // independent copy — it's conceptually the SAME customer list/filters/
-  // sort/selection either way, just reachable from two different places
-  // in the UI, so both should always agree rather than silently drifting
-  // apart. `CustomersListView` itself is a fully controlled component (no
-  // internal state of its own — every prop is lifted, see its own props
-  // doc comments), so mounting a second instance of it here (inside the
-  // hook) with those same props/handlers is safe: both instances just
-  // render synced views of that one shared state, and acting on either
-  // updates it for both.
-  //
-  // The headerContent wrapper these 3 panel-render call sites already put
-  // around EVERY panel's `headerContent` (docked/fullscreen/combined-mode,
-  // all `<div className="shrink-0 px-4 pb-3 border-b ...">`) draws its own
-  // `border-b` right underneath regardless, so a `TabList` here — which
-  // already has its own `border-b` right under the tab row itself — showed
-  // two stacked horizontal lines: the tab row's own bottom border (the
-  // "tab separator", flush under the labels/active-indicator) AND that
-  // wrapper's (the "heading separator", a few pixels further down, below
-  // the wrapper's own `pb-3` padding). Per explicit request, it's the
-  // WRAPPER's border that's suppressed here (not the TabList's own) — see
-  // each of those 3 call sites' own `activePanelKey === "search"` check —
-  // so the single remaining divider is the tab row's own, flush underline,
-  // not the lower one.
-  const searchContent = useSearchPanelContent({
-    tabs: SEARCH_PANEL_TABS,
-    onAddToast: addToast,
-    onOpenInteraction: handleOpenInteractionRow,
-    customers: {
-      onStartInteraction: (contact, channel, phone, skillId) =>
-        handleStartCall({ contact, channel, phone, skillId }),
-      addedFilterKeys: customerAddedFilterKeys,
-      onAddedFilterKeysChange: setCustomerAddedFilterKeys,
-      filterValues: customerFilterValues,
-      onFilterValuesChange: setCustomerFilterValues,
-      // Per explicit request, clicking a customer row here (the Search
-      // panel's own Customers sub-tab) no longer opens `CustomerRowInfoPanel`
-      // either — a no-op, same as the desk-tab Customers table's own
-      // `onRowClick` above. `selectedCustomerRow` itself, `onCloseRow`/
-      // `onPreviousRow`/`onNextRow` below, and the panel's render below are
-      // all left in place unchanged — nothing else currently sets that
-      // state, so the panel now simply never opens from either row-click
-      // path.
-      onRowClick: () => {},
-      searchQuery: customerSearchQuery,
-      onSearchChange: setCustomerSearchQuery,
-      sortKey: customerSortKey,
-      sortDir: customerSortDir,
-      onSort: handleCustomerSort,
-      sortedRows: customerSortedRows,
-      selectedRow: selectedCustomerRow,
-      onCloseRow: () => setSelectedCustomerRow(null),
-      onPreviousRow: () => handleCustomerRowNav(-1),
-      onNextRow: () => handleCustomerRowNav(1),
-      hasPreviousRow: selectedCustomerIndex > 0,
-      hasNextRow: selectedCustomerIndex !== -1 && selectedCustomerIndex < customerSortedRows.length - 1,
-    },
-  });
+  // Only `"messages"`/`"threads"` here — per explicit request ("remove
+  // customers and Interactions, just have Messages and Threads") — unlike
+  // `AgentNextGenPage.tsx`'s own 4-tab list. This page keeps its own
+  // separate "Interactions" DESK tab (`activeDeskTab === "interactions"`,
+  // further down this file) untouched; it's the Search panel's row that
+  // drops Interactions/Customers here, not the desk dashboard. No
+  // `customers` bag or `onAddToast` is passed since neither tab needs
+  // them — both render the hook's own "Coming soon" placeholder, same as
+  // Messages/Threads already did on the Workspace 2.0 side before this.
+  const searchContent = useSearchPanelContent({ tabs: WITH_DESK_SEARCH_PANEL_TABS });
   const contentByPanelKey: Record<PanelKey, EmbeddablePanelContent> = {
     notif: notifContent,
     conversations: blankPanelContent("Agent Chat"),
@@ -3217,7 +3045,7 @@ export function AgentNextGenPage({
     customers: { label: "Customers", icon: Users },
     accounts: { label: "Accounts", icon: Building2 },
     tickets: { label: "Tickets", icon: Ticket },
-    wem: { label: "WEM", icon: UserCog },
+    wem: { label: "WEM", icon: Gauge },
     search: { label: "Search", icon: Search },
   };
   const PANEL_KEY_INITIAL_ORDER: PanelKey[] = [
@@ -3248,16 +3076,12 @@ export function AgentNextGenPage({
   // here to reorder it moves the same underlying `panelOrder` array the
   // header reads, and vice versa.
   //
-  // Customers/Accounts/Tickets are hidden from this menu specifically (per
-  // explicit request) — `panelOrder`/`pinnedKeys` themselves are untouched,
-  // so Accounts/Tickets (unpinned) simply have no way to open them anymore,
-  // since this menu was their only entry point; Customers (also unpinned)
-  // is the same, but has its Search-panel Customers tab as a real
-  // alternative entry point. WEM is deliberately NOT in this list (dropped
-  // per a follow-up explicit request, "Add WEM to the top right app area")
-  // — it's now pinned (see `pinnedKeys` above) AND listed here, a fully
-  // reachable, discoverable app like Notifications/Agent Chat/etc.
-  const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["customers", "accounts", "tickets"];
+  // Customers/Accounts/Tickets/WEM are hidden from this menu specifically
+  // (per explicit request) — `panelOrder`/`pinnedKeys` themselves are
+  // untouched, so Customers (already pinned) keeps its header icon; Accounts/
+  // Tickets/WEM (already unpinned) simply have no way to open them anymore,
+  // since this menu was their only entry point.
+  const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["customers", "accounts", "tickets", "wem"];
   const appsMenuItems: MenuEntry[] = panelOrder.filter((key: PanelKey) => !HIDDEN_FROM_APPS_MENU.includes(key)).map((key) => {
     const { label, icon: KeyIcon } = PANEL_KEY_METADATA[key];
     return {
@@ -3492,7 +3316,7 @@ export function AgentNextGenPage({
         // work here since Tailwind can't generate opacity-modified
         // utilities for our `var(--lyra-color-*)` tokens (same root cause
         // as the Modal backdrop's own `color-mix()` override, overlay.tsx/
-        // AgentNextGenPage.tsx doc comments), so `color-mix()` directly
+        // AgentWorkspace2WithDeskPage.tsx doc comments), so `color-mix()` directly
         // against the same `--lyra-color-bg-surface-base` variable the
         // plain utility itself resolves to (tailwind-preset.ts) is used
         // instead. Docked keeps the normal fully-opaque background.
@@ -3543,17 +3367,20 @@ export function AgentNextGenPage({
             onClose={() => setPanelOpen(false)}
           />
           {activePanelContent.headerContent && (
-            // `activePanelKey === "search"` skips this wrapper ENTIRELY
-            // (no padding, no border) for the Search panel's tabbed
-            // headerContent, per explicit request — its `TabList` is meant
-            // to sit flush against the panel's own edges (left/right/
-            // bottom), not inset like every other panel's headerContent
-            // (Screen Pop's Select, etc.), which still gets the padded,
-            // bordered wrapper as before. `TabList` already draws its own
-            // "tab separator" underline right under the tabs themselves
-            // regardless (see `searchContent`'s own doc comment), so
-            // there's still a real divider here even with the wrapper
-            // gone.
+            // `activePanelKey === "search"` skips this wrapper ENTIRELY (no
+            // padding, no border) for the Search panel's tabbed
+            // headerContent — same fix `AgentNextGenPage.tsx` already has at
+            // its own matching 3 call sites (mirrored here since this page's
+            // Search panel now renders the same `TabList`-based content via
+            // `useSearchPanelContent`, agent-next-gen-search-panel.tsx).
+            // This wrapper's own `border-b` draws a second, stacked
+            // "heading separator" line a few pixels below `TabList`'s own
+            // "tab separator" underline (right under the tab labels/active-
+            // indicator) — the WRAPPER's border is what's suppressed, not
+            // the TabList's own, so the single remaining divider is the tab
+            // row's own flush underline. Every other panel's headerContent
+            // (Screen Pop's Select, etc.) still gets the padded, bordered
+            // wrapper as before.
             activePanelKey === "search" ? (
               activePanelContent.headerContent
             ) : (
@@ -3707,8 +3534,8 @@ export function AgentNextGenPage({
             <PopoverPrimitive.Root open={appMenuOpen} onOpenChange={setAppMenuOpen}>
               <PopoverPrimitive.Trigger asChild>
                 <AppName
-                  icon={<img src={appIcon} alt="Agent Workspace 2.0" className="h-6 w-6" />}
-                  name="Agent Workspace 2.0"
+                  icon={<img src={appIcon} alt="Agent Workspace 2.0 With Desk" className="h-6 w-6" />}
+                  name="Agent Workspace 2.0 With Desk"
                   compact={isCompactHeader}
                   aria-expanded={appMenuOpen}
                 />
@@ -3724,7 +3551,7 @@ export function AgentNextGenPage({
                   <AppMenu
                     groups={appMenuGroups}
                     footer={<CXoneLogo />}
-                    header={isCompactHeader ? "Agent Workspace 2.0" : undefined}
+                    header={isCompactHeader ? "Agent Workspace 2.0 With Desk" : undefined}
                   />
                 </PopoverPrimitive.Content>
               </PopoverPrimitive.Portal>
@@ -3755,20 +3582,18 @@ export function AgentNextGenPage({
                 the left of Agent Chat, using lucide's `MonitorUp` (monitor +
                 up arrow) to match the requested icon exactly.
 
-                Customers/Accounts/Tickets/WEM all share the exact same
-                single-container panel every other button here does (see
-                `handlePanelButtonClick`/`contentByPanelKey` above) — each
-                just shows its own blank placeholder body, no bespoke
-                content yet since none of the four has a real data source
-                in this prototype. Search is the one exception — its body
-                is the real `InteractionsListView` (moved in from the old
-                "Interactions" desk tab) behind an Interactions/Messages/
-                Customers/Threads `TabList` in `headerContent` (see
-                `searchContent`'s own doc comment for the full story).
-                WEM = Workforce Engagement Management — `UserCog` (a
-                person + a settings/management gear) per explicit request
-                for "an appropriate Workforce management Lucide icon",
-                swapped in for the previous placeholder `Gauge`.
+                Search/Customers/Accounts/Tickets/WEM all share the exact
+                same single-container panel every other button here does
+                (see `handlePanelButtonClick`/`contentByPanelKey` above) —
+                each just shows its own blank placeholder body (Search gets
+                a `SearchInput` in `headerContent` too, same "fixed above
+                the divider" treatment Screen Pop's app-select uses), no
+                bespoke content yet since none of the five has a real data
+                source in this prototype. WEM = Workforce Engagement
+                Management — `Gauge` (already used elsewhere on the Desk
+                dashboard for a performance metric) reused here since it's
+                the closest existing icon to "workforce performance/
+                engagement" rather than importing a near-duplicate.
 
                 Trailing "View All Apps" kebab (after Notifications, before
                 the AgentProfile divider) lists all nine of these (via
@@ -4187,26 +4012,13 @@ export function AgentNextGenPage({
                 // channel this card's `currentChannelKey` prop below already
                 // resolves to — falls back to the most-recent channel when
                 // nothing's explicitly current yet, same fallback `currentId`
-                // itself uses. Only actually rendered by `InteractionNavCard`
-                // itself once collapsed — see that component's own doc
-                // comment (above `AgentNextGenPage`) for why this whole card
-                // is built through it now, rather than this `.map()`
-                // returning two structurally different shapes depending on
-                // `navOpen` the way it originally did.
+                // itself uses. Only actually rendered in the collapsed-rail
+                // branch further down.
                 const currentChannelType =
                   channels.find((c) => c.id === currentId)?.type ?? channels[channels.length - 1]?.type;
-                return (
-                  <InteractionNavCard
+                const navItem = (
+                  <InteractionNavItem
                     key={interaction.id}
-                    currentChannelType={currentChannelType}
-                    showChannelBadge={channels.length <= 1}
-                    // Same `cardAwaitingWaitSeconds`/`getAwaitingSeverity`
-                    // this card's own `awaitingSeverity` prop below already
-                    // resolves — reused, not recomputed, so a single-channel
-                    // card's collapsed badge escalates in lockstep with
-                    // everything else reading this card's severity (the
-                    // avatar/border, the elapsed timer, the corner dot).
-                    badgeSeverity={cardAwaitingWaitSeconds !== undefined ? getAwaitingSeverity(cardAwaitingWaitSeconds) : undefined}
                     customerName={interaction.customerName}
                     // `adhoc:`-prefixed ids are lyra-ui's own "Continue
                     // with" ad-hoc flow (`buildAdHocSearchContact`, create-
@@ -4274,6 +4086,39 @@ export function AgentNextGenPage({
                     currentChannelKey={currentId}
                     onCurrentChannelChange={(key) => handleChannelSelect(interaction.id, key)}
                   />
+                );
+                // Collapsed rail only (`!navOpen`) — the expanded card has
+                // its own per-channel chips already showing type, so the
+                // badge would be redundant there. `relative` wrapper is only
+                // needed in this branch since the badge is absolutely
+                // positioned against it. Also skipped once a card has more
+                // than one open channel: `InteractionNavItem` itself already
+                // renders its own count badge (the "2") in that exact same
+                // top-left corner (see its own `channelCount > 1` branch,
+                // interaction-nav-item.tsx) — showing a single channel's
+                // icon on top of/behind it would both collide visually and
+                // misrepresent a multi-channel card as single-channel.
+                return !navOpen ? (
+                  <div key={interaction.id} className="relative">
+                    {navItem}
+                    {currentChannelType && channels.length <= 1 && (
+                      <CollapsedChannelBadge
+                        type={currentChannelType}
+                        // Same `cardAwaitingWaitSeconds`/`getAwaitingSeverity`
+                        // this card's own `InteractionNavItem
+                        // awaitingSeverity` prop above already resolves —
+                        // reused, not recomputed, so a single-channel card's
+                        // badge escalates in lockstep with everything else
+                        // reading this card's severity (the avatar/border,
+                        // the elapsed timer, the corner dot).
+                        severity={
+                          cardAwaitingWaitSeconds !== undefined ? getAwaitingSeverity(cardAwaitingWaitSeconds) : undefined
+                        }
+                      />
+                    )}
+                  </div>
+                ) : (
+                  navItem
                 );
               })}
             </>
@@ -4577,7 +4422,7 @@ export function AgentNextGenPage({
                                 recordId={activeInteraction.recordId}
                                 channels={activeInteraction.channels}
                                 startedFresh={activeInteraction.startedFresh}
-                                tabs={AGENT_WORKSPACE_CUSTOMER_PANEL_TABS}
+                                tabs={CUSTOMER_PANEL_TABS}
                                 onMouseEnter={openCustomerInfoPreview}
                                 onMouseLeave={scheduleCloseCustomerInfoPreview}
                                 onAddToast={addToast}
@@ -5064,37 +4909,48 @@ export function AgentNextGenPage({
               ) : (
                 <div key="dashboard" className="flex flex-1 flex-col min-w-0 overflow-hidden animate-in fade-in-0 duration-200">
                   {showPageHeader && (
-                    // Page header — main title is the same time-of-day
-                    // greeting the dashboard body used to render by hand
-                    // (`lyra-heading-2xl` "Good {period}, {name}").
-                    //
-                    // `actions` holds a `Badge` reading the "today"
-                    // Assignments Resolved count straight off
-                    // `PerformanceSummaryCard`'s own data source
-                    // (`PERFORMANCE_DATA_BY_RANGE.today.casesResolved`) so
-                    // the two numbers can't drift out of sync — hardcoded
-                    // to the "today" range regardless of whatever range
-                    // that card's own `DateFilterChip` currently has
-                    // selected, since this badge's copy is always
-                    // "resolved today", not date-filterable itself. Floats
-                    // to the header's right side the same way the "New
-                    // Outbound" `CreateNew` trigger it replaced did —
-                    // `actions` is always the right-hand slot in
-                    // `PageHeader`'s own title/actions row.
-                    //
-                    // The Home/Customers/Accounts/Tickets/WEM `TabList` row
-                    // that used to sit directly below this (and the `<>...
-                    // </>` fragment wrapping the two together) is gone —
-                    // see `activeDeskTab`'s own doc comment, above, for why.
-                    <PageHeader
-                      title={`Good ${getGreetingPeriod()}, ${CURRENT_AGENT_FIRST_NAME}`}
-                      subtitle={formatHeaderDateTime()}
-                      actions={
-                        <Badge color="green" variant="subtle">
-                          {PERFORMANCE_DATA_BY_RANGE.today.casesResolved} Assignments resolved today
-                        </Badge>
-                      }
-                    />
+                    <>
+                      {/* Page header — main title is the same time-of-day
+                          greeting the dashboard body used to render by hand
+                          (`lyra-heading-2xl` "Good {period}, {name}"), now a
+                          real `PageHeader` sitting above the tab row instead
+                          of below it.
+
+                          `actions` holds a `Badge` reading the "today"
+                          Assignments Resolved count straight off
+                          `PerformanceSummaryCard`'s own data source
+                          (`PERFORMANCE_DATA_BY_RANGE.today.casesResolved`)
+                          so the two numbers can't drift out of sync —
+                          hardcoded to the "today" range regardless of
+                          whatever range that card's own `DateFilterChip`
+                          currently has selected, since this badge's copy is
+                          always "resolved today", not date-filterable
+                          itself. Floats to the header's right side the same
+                          way the "New Outbound" `CreateNew` trigger it
+                          replaced did — `actions` is always the right-hand
+                          slot in `PageHeader`'s own title/actions row. */}
+                      <PageHeader
+                        title={`Good ${getGreetingPeriod()}, ${CURRENT_AGENT_FIRST_NAME}`}
+                        subtitle={formatHeaderDateTime()}
+                        actions={
+                          <Badge color="green" variant="subtle">
+                            {PERFORMANCE_DATA_BY_RANGE.today.casesResolved} Assignments resolved today
+                          </Badge>
+                        }
+                      />
+                      <TabList
+                        overflowMenu
+                        reorderable
+                        onReorder={(order) => setDeskTabOrder(order as DeskTabKey[])}
+                        className="px-6 bg-lyra-bg-surface-base shrink-0"
+                      >
+                        {deskTabOrder.map((key) => (
+                          <Tab key={key} active={activeDeskTab === key} onClick={() => setActiveDeskTab(key)}>
+                            {DESK_TAB_LABELS[key]}
+                          </Tab>
+                        ))}
+                      </TabList>
+                    </>
                   )}
               {/* Body row: main content + interior panel */}
               <div className="relative flex flex-1 overflow-hidden">
@@ -5197,16 +5053,14 @@ export function AgentNextGenPage({
                   onAddedFilterKeysChange={setCustomerAddedFilterKeys}
                   filterValues={customerFilterValues}
                   onFilterValuesChange={setCustomerFilterValues}
-                  // Per explicit request, clicking a row in this (Agent
-                  // Workspace 2.0's own, non-"With Desk") Customers table no
-                  // longer opens `CustomerRowInfoPanel` — a no-op. The panel
-                  // itself, `selectedCustomerRow`, and `openRowId` below are
-                  // all left in place unchanged (still driven by other
-                  // sources of the same shared state, e.g. the Search
-                  // panel's own Customers sub-tab — see `searchContent`'s
-                  // own `onRowClick` further up) — this only disables the
-                  // click affordance on THIS table's own rows.
-                  onRowClick={() => {}}
+                  // Clicking the row that's already open (highlighted via
+                  // `openRowId`) closes `CustomerRowInfoPanel` instead of
+                  // just re-opening the same row it's already showing.
+                  onRowClick={(row) =>
+                    setSelectedCustomerRow((prev) =>
+                      prev?.contactNumber === row.contactNumber ? null : row
+                    )
+                  }
                   searchQuery={customerSearchQuery}
                   onSearchChange={setCustomerSearchQuery}
                   sortKey={customerSortKey}
@@ -5225,11 +5079,27 @@ export function AgentNextGenPage({
                   onStartInteraction={(contact, channel, phone, skillId) =>
                     handleStartCall({ contact, channel, phone, skillId })
                   }
-                  tabs={AGENT_WORKSPACE_CUSTOMER_PANEL_TABS}
+                  tabs={CUSTOMER_PANEL_TABS}
                   onAddToast={addToast}
                 />
               </div>
-              {activeDeskTab !== "customers" && (activeDeskTab !== "home" ? (
+              {activeDeskTab !== "customers" && (activeDeskTab === "interactions" ? (
+                // Interactions — a real view (InteractionsListView, see
+                // agent-next-gen-interactions-table.tsx), not the "Coming
+                // soon" placeholder Accounts/Tickets/WEM still fall through
+                // to below. Simple conditional mount (not the elaborate
+                // always-mounted/opacity-0/inert treatment the "customers"
+                // block above uses) is fine here — that treatment exists
+                // specifically to protect `CustomerRowInfoPanel`'s own
+                // `ResizeObserver`-driven interior panel from a remount
+                // flicker (see that block's own long doc comment); this
+                // view has no such nested docked panel, so it's safe to
+                // unmount/remount on every tab switch like every other
+                // non-Customers tab already does.
+                <div key={activeDeskTab} className="flex flex-1 min-w-0 overflow-hidden animate-in fade-in-0 duration-200">
+                  <InteractionsListView onAddToast={addToast} onOpenInteraction={handleOpenInteractionRow} />
+                </div>
+              ) : activeDeskTab !== "home" ? (
                 // Accounts/Tickets/WEM — no content built yet; same
                 // "Coming soon" placeholder treatment used elsewhere in
                 // this file for in-progress tabs (e.g. the Customer
@@ -5240,10 +5110,7 @@ export function AgentNextGenPage({
                 // otherwise reuse this exact same element/position and
                 // never replay `animate-in`) — same reasoning as the
                 // top-level Settings/interaction/dashboard branches' own
-                // `key`s above. "Interactions" no longer has its own
-                // branch here — that content moved to the Search right
-                // panel (see `searchContent`'s own doc comment), so this
-                // page's `activeDeskTab` union no longer offers it at all.
+                // `key`s above.
                 <div key={activeDeskTab} className="flex flex-1 items-center justify-center p-4 animate-in fade-in-0 duration-200">
                   <p className="lyra-body-md text-lyra-fg-disabled text-center">Coming soon</p>
                 </div>
@@ -5691,7 +5558,7 @@ export function AgentNextGenPage({
                   recordId={activeInteraction.recordId}
                   channels={activeInteraction.channels}
                   startedFresh={activeInteraction.startedFresh}
-                  tabs={AGENT_WORKSPACE_CUSTOMER_PANEL_TABS}
+                  tabs={CUSTOMER_PANEL_TABS}
                   onOpenHistoryConversation={(entry) =>
                     setHistoryConversationTab({ interactionId: activeInteraction.id, entry, active: true })
                   }
@@ -5904,17 +5771,12 @@ export function AgentNextGenPage({
           toast stack, per explicit request, rather than needing a second,
           separately-measured `fixed` element trying to track the first
           toast's ever-changing position by hand. */}
-      {/* `z-[9999]` — same top-most tier `AppHeader`'s own menus reserve
-          (see the floated-panel `zIndex: 40` cap's own doc comment a few
-          hundred lines up) — was `z-50`, which sat comfortably above a
-          normal docked/full-screen `CustomerInformationSidePanel` (`z-[5]`/
-          `z-[9]`) but still lost to it visually once confirmed live (a
-          save-confirmation toast peeking out from BEHIND the panel's own
-          edit-mode content, not floating above it) — per explicit request,
-          a toast should never be hidden behind ANY panel, so this jumps
-          straight to the same reserved top tier menus use rather than
-          guessing at some smaller number still under whatever the panel's
-          own effective stacking context turns out to be. */}
+      {/* `z-[9999]` — same top-most tier reserved for `AppHeader`'s own
+          menus (see `AgentNextGenPage.tsx`'s identical toast wrapper for the
+          full doc comment) — was `z-50`, confirmed live to lose to a
+          `CustomerInformationSidePanel` in edit mode (toast rendering
+          BEHIND the panel's own content instead of above it); per explicit
+          request, a toast should never be hidden behind any panel. */}
       <div className="fixed bottom-4 right-4 z-[9999] flex flex-col items-end gap-2">
         {/* Only once there's more than one toast actually stacked up —
             with just one (or zero) on screen, its own "×" is already the

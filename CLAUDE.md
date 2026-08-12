@@ -13,8 +13,13 @@ This app consumes the shared `lyra-ui` design system via a live source alias (`@
 - Every modal's outer card uses `Container variant="modal"`, never a hand-rolled div.
 - Use the shared `assets/app-icon.svg` mark for the app logo/smiley — never `CXoneSmiley` or a one-off hand-rolled SVG.
 - Before reaching for a raw Tailwind utility value (spacing, sizing, radius, etc.), check other lyra-ui components/stories first for the established token.
+- **Any `Popover` whose `content` is a `Menu`/listbox needs `bodyPadding={false}`.** `Popover`'s default `bodyPadding` adds its own 20px inset, which stacks on top of `Menu`'s own `p-1` row padding — the result renders, but reads as an over-padded, shrunken list (caught from a screenshot on the Interactions tab's bulk-actions "Change Status"/"Assign to Others" pickers, both `<Menu items={...} bare />` inside a `Popover`). See `../lyra-ui/CLAUDE.md`'s "Panels, menus & overlays" section for the general rule.
 
 Full rationale, worked examples, and the "why" behind each of these live in `../lyra-ui/PROJECT_SUMMARY.md` (see Important Patterns, Scope Rules, and the Post-layout QA checklist) — read that file before making non-trivial UI changes here.
+
+## File organization — new self-contained features get their own file
+
+`AgentNextGenPage.tsx` grew to 779KB/14,380 lines before being split (Aug 2026) into `agent-next-gen-shared-utils.ts` plus one file per major feature area (transcript, outbound data, interaction dashboard, contact history, customers table, customer info panel) once it crossed Babel's 500KB code-generator threshold. Don't let it happen again: when adding a new, reasonably self-contained table/panel/card (e.g. an Accounts table, a Tickets table), build it in its own `src/components/*.tsx` file from the start and import it into `AgentNextGenPage.tsx` rather than adding another few hundred lines inline. Shared helpers (formatting, id/phone synthesis, etc.) belong in `agent-next-gen-shared-utils.ts` so new files can import from there instead of duplicating logic. Only keep something inline in the main file if it's small or is genuinely coupled to that component's own internal state/closures (in which case a clean split would require lifting state into context or heavy prop-drilling — flag that tradeoff rather than forcing it).
 
 ## Sync check (do this first, every session)
 

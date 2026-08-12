@@ -3,17 +3,23 @@ import { Header } from "@/components/Header";
 import { Sidebar } from "@/components/Sidebar";
 import { DesktopDesignsPage } from "@/components/DesktopDesignsPage";
 import { AgentNextGenPage } from "@/components/AgentNextGenPage";
+import { AgentWorkspace2WithDeskPage } from "@/components/AgentWorkspace2WithDeskPage";
 import { OutboundEngagementPage } from "@/components/OutboundEngagementPage";
 import { LoginPage } from "@/components/LoginPage";
 
-type Page = "agent-workspace" | "agent" | "outbound" | "login";
+type Page = "agent-workspace" | "agent" | "agent-with-desk" | "outbound" | "login";
 
 /* ── Hash-based routing ──
    "login" is now the home/root page (empty hash) — "agent" (the Desk page)
    moved off root onto its own "#/agent" hash so it's still directly
-   linkable/bookmarkable. */
+   linkable/bookmarkable. "agent-with-desk" ("Agent Workspace 2.0 With Desk"
+   in the app menu) is its own separate route/component
+   (AgentWorkspace2WithDeskPage.tsx — a deliberate duplicate of
+   AgentNextGenPage.tsx, see that file's own top-of-file note) rather than
+   reusing "agent"'s page, per explicit request. */
 const PAGE_HASH: Record<Page, string> = {
   "agent":           "#/agent",
+  "agent-with-desk": "#/agent-with-desk",
   "agent-workspace": "#/agentworkspacepremium",
   "outbound":        "#/outboundengagement",
   "login":           "",
@@ -22,6 +28,7 @@ const PAGE_HASH: Record<Page, string> = {
 function pageFromHash(): Page {
   const hash = window.location.hash;
   if (hash === "#/agent") return "agent";
+  if (hash === "#/agent-with-desk") return "agent-with-desk";
   if (hash === "#/agentworkspacepremium") return "agent-workspace";
   if (hash === "#/outboundengagement") return "outbound";
   return "login";
@@ -310,6 +317,10 @@ function App() {
 
   if (page === "agent") {
     return <AgentNextGenPage showPageHeader showPanelToggle showInteriorPanel onNavigate={setPage} />;
+  }
+
+  if (page === "agent-with-desk") {
+    return <AgentWorkspace2WithDeskPage showPageHeader showPanelToggle showInteriorPanel onNavigate={setPage} />;
   }
 
   if (page === "login") {
