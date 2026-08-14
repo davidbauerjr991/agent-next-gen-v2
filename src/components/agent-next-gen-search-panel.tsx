@@ -100,7 +100,7 @@ export interface UseSearchPanelContentOptions {
    *  through to `InteractionsListView`'s own `onOpenInteraction`. Per
    *  explicit request, clicking a row here opens it as a real, active
    *  assignment in the left nav; each consumer wires this to its own copy
-   *  of the same "build an `ActiveInteraction` from this row and switch to
+   *  of the same "build an `Interaction` from this row and switch to
    *  it" handler `AgentNextGenPage.tsx`/`AgentWorkspace2WithDeskPage.tsx`
    *  already use for `handleOpenAssignmentFromNotification`. */
   onOpenInteraction?: (record: InteractionHistoryRecord) => void;
@@ -161,12 +161,16 @@ export function useSearchPanelContent({
             hasPrevious={customers.hasPreviousRow}
             hasNext={customers.hasNextRow}
             onStartInteraction={customers.onStartInteraction}
-            // Only `AgentNextGenPage.tsx` (Agent Workspace 2.0) ever
-            // configures `tabs` to include `"customers"` — With Desk's own
-            // `tabs` list omits it entirely (see `WITH_DESK_SEARCH_PANEL_TABS`
-            // at that page's own call site), so this branch never renders
-            // there and hard-coding Workspace 2.0's own reduced tab set here
-            // is safe rather than needing to also thread this through
+            // Only `AgentWorkspaceAdvancedPage.tsx` (Agent Workspace
+            // Advanced) ever configures `tabs` to include `"customers"` —
+            // basic Agent Workspace 2.0 agents don't have customer-database
+            // access (per explicit request, removed from `AgentNextGenPage.
+            // tsx`'s own `SEARCH_PANEL_TABS`), and Agent Workspace 2.0
+            // Premium's own `tabs` list omits it entirely too (see
+            // `WITH_DESK_SEARCH_PANEL_TABS` at that page's own call site),
+            // so this branch only ever renders from the Advanced page, and
+            // hard-coding this reduced tab set here is safe rather than
+            // needing to also thread this through
             // `UseSearchPanelContentOptions`.
             tabs={AGENT_WORKSPACE_CUSTOMER_PANEL_TABS}
             onAddToast={onAddToast}

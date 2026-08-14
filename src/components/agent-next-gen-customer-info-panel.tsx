@@ -40,8 +40,10 @@ import {
   type MenuEntry,
   KebabMenuButton,
   type ToastItem,
+  SearchInput,
 } from "@nicecxone/lyra-ui";
-import { type TrackedChannel } from "@/components/agent-next-gen-interaction-dashboard";
+import { type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
+import { type Thread } from "@/components/agent-next-gen-interaction-dashboard";
 import {
   splitCustomerName,
   hashSeed,
@@ -82,6 +84,7 @@ import {
   Trash2,
   MoreVertical,
   Pencil,
+  ArrowLeft,
 } from "lucide-react";
 
 /* ── InteractionTranscript ──
@@ -113,7 +116,7 @@ import {
    rather than one flat message list, per explicit request: a single
    interaction can span more than one contact record (a follow-up thread
    days later, a callback), and each one needs its own separator that
-   expands in place to a "Session Details" summary (`TranscriptSession
+   expands in place to a "Session Details" summary (`Contact
    Details`) without disturbing the others. Each separator is `sticky
    top-0`, so scrolling through a session keeps its separator pinned at the
    top until the next session's own separator reaches the top and takes
@@ -186,7 +189,7 @@ export const CUSTOMER_INFO_CITY_STATE: { city: string; state: string }[] = [
  *  synthesized filler: `recordId` (the same id already shown in the panel's
  *  own header subhead) becomes "Contact #", and "Phone #"/"Email" read the
  *  real address a voice/email channel was actually opened on
- *  (`TrackedChannel.addressLabel`/`value` — see that field's own doc
+ *  (`Thread.addressLabel`/`value` — see that field's own doc
  *  comment) when one exists, since that's genuine data particular to this
  *  interaction, not invented. Everything else (balance, street address,
  *  city/state/zip) has no real source anywhere in this app's data — see the
@@ -197,7 +200,7 @@ export const CUSTOMER_INFO_CITY_STATE: { city: string; state: string }[] = [
 export function buildCustomerInfoFields(
   customerName: string | undefined,
   recordId: string,
-  channels: TrackedChannel[]
+  channels: Thread[]
 ): CustomerInfoField[] {
   const name = customerName ?? "Customer";
   const { firstName, lastName } = splitCustomerName(customerName);
@@ -407,10 +410,14 @@ export function buildCopilotSummary(customerName: string | undefined, recordId: 
 // see `CustomerHistoryTabContent`'s own doc comment) moved in here per
 // explicit request, so it's now just another tab of this same panel like
 // Detail/Directory/etc., not a separate top-level control. "Copilot" (per
-// explicit follow-up request) sits right after Overview — the panel still
-// opens on Overview by default everywhere; `activeTab` is only ever jumped
-// to Copilot explicitly, when a customer reply/new conversation comes in
-// (see `copilotFocusSignal` on `CustomerInformationSidePanel`).
+// explicit follow-up request) sits right after Overview in this list —
+// though per a LATER explicit follow-up request, it's currently hidden
+// entirely everywhere (`copilotAvailable` hardcoded `false` on
+// `CustomerInformationSidePanel`/`CustomerInfoHoverPreview` — see that
+// const's own doc comment on each), including the "jump to Copilot when
+// the customer replies" behavior this list's ordering used to set up for
+// (that auto-jump wiring — `copilotFocusSignal`/`copilotFocusRequest` — has
+// been removed from this component and all 3 page files, not just hidden).
 export const CUSTOMER_PANEL_TABS = ["Overview", "Copilot", "Interactions", "Detail", "Directory", "Tasks", "Notes", "Accounts", "Tickets"] as const;
 export type CustomerPanelTabLabel = (typeof CUSTOMER_PANEL_TABS)[number];
 
@@ -420,11 +427,12 @@ export type CustomerPanelTabLabel = (typeof CUSTOMER_PANEL_TABS)[number];
 // Interactions tab in that app; Directory/Tasks/Accounts/Tickets have no
 // real content behind them, same "not ready to show yet" reasoning other
 // stubbed surfaces in this app already follow). "Copilot" is still listed
-// here — its own ADDITIONAL gating (hidden until the customer actually
-// responds — see `copilotAvailable` on `CustomerInformationSidePanel`/
-// `CustomerInfoHoverPreview` below) is separate from which tabs a given
-// consumer supports at all. Agent Workspace 2.0 With Desk is unaffected —
-// its own call sites pass the full `CUSTOMER_PANEL_TABS` list unchanged.
+// here — its own ADDITIONAL gating (currently hidden entirely, hardcoded
+// via `copilotAvailable` on `CustomerInformationSidePanel`/
+// `CustomerInfoHoverPreview` below — see that const's own doc comment) is
+// separate from which tabs a given consumer supports at all. Agent
+// Workspace 2.0 With Desk is unaffected — its own call sites pass the full
+// `CUSTOMER_PANEL_TABS` list unchanged.
 export const AGENT_WORKSPACE_CUSTOMER_PANEL_TABS: CustomerPanelTabLabel[] = ["Overview", "Copilot", "Detail", "Notes"];
 
 // Temporarily hides the Overview tab's "Ask about this customer..."
@@ -500,7 +508,7 @@ export interface CustomerHistorySessionEntry {
   /** Only ever set for `channelType === "voice"` (see the reference
    *  screenshots — SMS/email rows never carry one); undefined most of the
    *  time even for voice, same "not every field is always present" shape
-   *  `TrackedChannel.addressLabel` etc. already have elsewhere. */
+   *  `Thread.addressLabel` etc. already have elsewhere. */
   statusLabel?: string;
   callCenter: string;
   customerUsername: string;
@@ -652,7 +660,7 @@ export const CUSTOMER_HISTORY_ENTRY_COUNT = 8;
 export function buildCustomerHistoryEntries(
   customerName: string | undefined,
   recordId: string,
-  channels: TrackedChannel[]
+  channels: Thread[]
 ): CustomerHistorySessionEntry[] {
   const fields = buildCustomerInfoFields(customerName, recordId, channels);
   const phone = getFieldValue(fields, "Phone #");
@@ -1469,7 +1477,7 @@ export interface CustomerDirectoryPhoneState {
    state slots in the parent needing hand-rolled per-index update
    functions for every field. Same "Call Attempts Today/Total" read-only
    stat pair for every row (there's no live call-attempt tracking in this
-   demo, same static-`0` status as `TrackedChannel.messageCount`
+   demo, same static-`0` status as `Thread.messageCount`
    elsewhere) — plain text, not `Metric`/`DashboardCardMetric`, since those
    render a large headline figure + caption meant for a dashboard card,
    not a compact inline stat under a phone field.
@@ -2033,7 +2041,7 @@ export function CustomerInformationPanelBody({
   /** Supplied by every real consumer of this body — `CustomerInformationSidePanel`
    *  and `CustomerInfoHoverPreview` pass a real active interaction's own
    *  `recordId`/`channels`; `CustomerRowInfoPanel` (Customers-table row, no
-   *  actually-open `TrackedChannel[]` of its own — a row was never opened
+   *  actually-open `Thread[]` of its own — a row was never opened
    *  as a real interaction) passes its own `recordId` with `channels={[]}`,
    *  which `buildCustomerHistoryEntries` already treats as "synthesize
    *  everything, nothing to prefer" — per explicit request, ALL THREE now
@@ -2043,7 +2051,7 @@ export function CustomerInformationPanelBody({
    *  Interactions-tab branch below, which still gates on `recordId` being
    *  falsy specifically (not on `channels`) for exactly that case. */
   recordId?: string;
-  channels?: TrackedChannel[];
+  channels?: Thread[];
   /** Detail/Directory tabs' controlled draft — from the caller's own
    *  `useCustomerRecordDraft(fields, customerName, recordId)` (see that
    *  hook's own doc comment). Threaded straight through to
@@ -2363,9 +2371,32 @@ export function CustomerInformationPanelBody({
                                 />
                               )
                             ) : (
-                              <div className="flex items-center justify-between gap-4">
-                                <Label label={field.label} />
-                                <span className="lyra-body-md text-lyra-fg-secondary whitespace-nowrap">
+                              // `whitespace-nowrap` (previously on the value
+                              // span below) was a real, shipped bug — lyra-ui's
+                              // own reference for this exact row shape
+                              // (Input.stories.tsx's "Label Horizontal With
+                              // Separator") has no such override and wraps a
+                              // long value fine by default; this app-level
+                              // copy added `whitespace-nowrap` on top of it,
+                              // which forced even a normal multi-word value
+                              // onto one line and let it silently overflow
+                              // past the panel's own right edge. Removed, plus
+                              // `break-words` (wraps a value with no spaces at
+                              // all to break too, e.g. a long email address —
+                              // default word-wrapping alone only breaks at
+                              // space boundaries, which a single unbroken
+                              // string like an email has none of) and
+                              // `min-w-0` on the value span (a flex item's
+                              // default `min-width: auto` refuses to shrink
+                              // below its own unwrapped content width no
+                              // matter what wrapping rule is set, which would
+                              // silently defeat `break-words` on its own).
+                              // `<Label>` gets `flex-shrink-0` so it keeps its
+                              // own natural single-line width and only the
+                              // value column ever wraps.
+                              <div className="flex items-start justify-between gap-4">
+                                <Label label={field.label} className="flex-shrink-0" />
+                                <span className="lyra-body-md text-lyra-fg-secondary break-words min-w-0">
                                   {field.value}
                                 </span>
                               </div>
@@ -2712,7 +2743,13 @@ export function CustomerInfoHoverPreview({
   customerName,
   recordId,
   channels,
-  startedFresh,
+  // `startedFresh` deliberately NOT destructured here (though every caller
+  // still passes it, and it stays in the type below) — it was only ever
+  // read for `copilotAvailable`'s now-hardcoded-`false` computation (see
+  // that const's own doc comment); destructuring an unused prop trips
+  // `@typescript-eslint/no-unused-vars`, whereas an undestructured type
+  // property doesn't, and this way re-enabling Copilot later needs no
+  // signature changes at any call site.
   tabs,
   onMouseEnter,
   onMouseLeave,
@@ -2720,10 +2757,11 @@ export function CustomerInfoHoverPreview({
   recordDraft,
   overviewEditing,
   onOverviewEditingChange,
+  matchState,
 }: {
   customerName?: string;
   recordId: string;
-  channels: TrackedChannel[];
+  channels: Thread[];
   /** Same "has this conversation actually started yet" signal
    *  `CustomerInformationSidePanel` uses for its own `copilotAvailable` —
    *  see that prop's own doc comment. Mirrors the exact real panel this
@@ -2761,6 +2799,24 @@ export function CustomerInfoHoverPreview({
    *  prop's own doc comment. */
   overviewEditing: boolean;
   onOverviewEditingChange: (editing: boolean) => void;
+  /** Per explicit request: this hover preview must show the SAME
+   *  information the docked open panel does, for the exact same
+   *  interaction — so it needs the exact same `matchState` prop
+   *  `CustomerInformationSidePanel` accepts (see that prop's own doc
+   *  comment for what each piece does), not just the same `tabs`/
+   *  `recordDraft`. `undefined` for a real-customer interaction, same as
+   *  the docked panel. */
+  matchState?: {
+    step: "search" | "create";
+    query: string;
+    onQueryChange: (query: string) => void;
+    possibleMatches: CreateNewCustomerRecord[];
+    searchResults: CreateNewCustomerRecord[];
+    onLinkRecord: (customer: CreateNewCustomerRecord) => void;
+    onStartCreate: () => void;
+    onBackToSearch: () => void;
+    onSaveNewCustomer: () => void;
+  };
 }) {
   const [activeTab, setActiveTab] = useState(0);
   const latestInteraction = useMemo(
@@ -2769,12 +2825,22 @@ export function CustomerInfoHoverPreview({
   );
   const latestNote = useMemo(() => buildLatestNote(customerName, recordId), [customerName, recordId]);
   const copilotSummary = useMemo(() => buildCopilotSummary(customerName, recordId), [customerName, recordId]);
-  // See `CustomerInformationSidePanel`'s own `copilotAvailable`/
-  // `visibleTabs` doc comments — identical computation, kept local to each
-  // component rather than a shared helper since it's a two-line derivation
-  // from props each one already has in scope.
-  const copilotAvailable = !startedFresh || channels.some((c) => c.lastCustomerMessageTick !== undefined);
+  // Per explicit follow-up request: the Copilot tab is hidden entirely for
+  // now, everywhere — the "launch it automatically once the customer
+  // replies" behavior this was gating (see `CustomerInformationSidePanel`'s
+  // now-removed `copilotFocusSignal` prop) was reported as annoying.
+  // Hardcoded `false` rather than removing the tab from `CUSTOMER_PANEL_TABS`/
+  // `AGENT_WORKSPACE_CUSTOMER_PANEL_TABS` outright, so re-enabling later is a
+  // one-line revert instead of re-plumbing the tab back in from scratch.
+  const copilotAvailable = false;
   const visibleTabs = tabs.filter((t) => t !== "Copilot" || copilotAvailable);
+  // See `buildCustomerMatchSubhead`'s own doc comment — shared with
+  // `CustomerInformationSidePanel` so the docked panel and this hover
+  // preview never disagree on the match count/wording or which list is
+  // showing, for the exact same interaction.
+  const { subhead: matchSubhead, visibleList: matchVisibleList } = matchState
+    ? buildCustomerMatchSubhead(matchState.query, matchState.possibleMatches, matchState.searchResults)
+    : { subhead: "", visibleList: [] };
 
   return (
     <div
@@ -2799,8 +2865,28 @@ export function CustomerInfoHoverPreview({
         // name + record id) — per explicit request, this hover preview's
         // header no longer doubles as an identity readout; the name/id
         // are still available via the Overview tab's own fields below.
-        title="Customer Information"
+        //
+        // While `matchState` is set (see that prop's own doc comment),
+        // this reads "Create New Customer" (create step, with a back-arrow
+        // `icon` ahead of it) or keeps "Customer Information" (search
+        // step) with the possible-matches/search-results count as
+        // `subhead` — same header treatment
+        // `CustomerInformationSidePanel` uses for the docked panel, per
+        // explicit request that the two never show different information
+        // for the same interaction.
+        title={matchState?.step === "create" ? "Create New Customer" : "Customer Information"}
+        subhead={matchState && matchState.step === "search" ? matchSubhead : undefined}
+        icon={
+          matchState?.step === "create" ? (
+            <ActionIconButton aria-label="Back to search" title="Back" onClick={matchState.onBackToSearch}>
+              <ArrowLeft className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+            </ActionIconButton>
+          ) : undefined
+        }
+        // `undefined` entirely while `matchState` is set — neither match
+        // step has a tab list, same as the docked panel.
         tabs={
+          matchState ? undefined : (
           <TabList className="px-4" overflowMenu>
             {visibleTabs.map((label) => (
               <Tab
@@ -2812,50 +2898,93 @@ export function CustomerInfoHoverPreview({
               </Tab>
             ))}
           </TabList>
+          )
         }
       />
       <div className="flex-1 overflow-y-auto">
-        <CustomerInformationPanelBody
-          activeTab={activeTab}
-          customerName={customerName}
-          latestInteraction={latestInteraction}
-          latestNote={latestNote}
-          copilotSummary={copilotSummary}
-          // Was left unwired (Interactions rendered nothing here, same
-          // stub treatment as Tasks/Notes/Accounts/Tickets) — but unlike
-          // those genuinely-unimplemented tabs, this data is already
-          // sitting right here in scope (this component's own required
-          // `recordId`/`channels` props), so there's no real reason not to
-          // show it. Per explicit follow-up request.
-          recordId={recordId}
-          channels={channels}
-          // `undefined` (no button at all) when "Interactions" isn't one of
-          // this preview's configured `tabs` — see `visibleTabs`'s own doc
-          // comment on `CustomerInformationSidePanel` for why: without this
-          // gate, Overview's "View All Interactions" button would jump
-          // `activeTab` to a tab that isn't in the header at all.
-          onViewAllInteractions={
-            tabs.includes("Interactions")
-              ? () => setActiveTab(CUSTOMER_PANEL_TABS.indexOf("Interactions"))
-              : undefined
-          }
-          draft={recordDraft.draft}
-          onDraftChange={recordDraft.updateDraft}
-          onPhoneChange={recordDraft.updatePhone}
-          onOverviewFieldChange={recordDraft.updateOverviewField}
-          allowOverviewEdit
-          overviewEditing={overviewEditing}
-          onOverviewEditingChange={onOverviewEditingChange}
-        />
+        {matchState ? (
+          matchState.step === "search" ? (
+            <CustomerMatchSearchBody
+              query={matchState.query}
+              onQueryChange={matchState.onQueryChange}
+              matches={matchVisibleList}
+              onLinkRecord={matchState.onLinkRecord}
+            />
+          ) : (
+            // Same "reuse the Detail tab's own draft/form" approach as
+            // `CustomerInformationSidePanel`'s identical branch — see that
+            // render call site's own doc comment.
+            <CustomerDetailTabContent
+              fields={recordDraft.draft.overviewFields}
+              draft={recordDraft.draft}
+              onDraftChange={recordDraft.updateDraft}
+            />
+          )
+        ) : (
+          <CustomerInformationPanelBody
+            activeTab={activeTab}
+            customerName={customerName}
+            latestInteraction={latestInteraction}
+            latestNote={latestNote}
+            copilotSummary={copilotSummary}
+            // Was left unwired (Interactions rendered nothing here, same
+            // stub treatment as Tasks/Notes/Accounts/Tickets) — but unlike
+            // those genuinely-unimplemented tabs, this data is already
+            // sitting right here in scope (this component's own required
+            // `recordId`/`channels` props), so there's no real reason not to
+            // show it. Per explicit follow-up request.
+            recordId={recordId}
+            channels={channels}
+            // `undefined` (no button at all) when "Interactions" isn't one of
+            // this preview's configured `tabs` — see `visibleTabs`'s own doc
+            // comment on `CustomerInformationSidePanel` for why: without this
+            // gate, Overview's "View All Interactions" button would jump
+            // `activeTab` to a tab that isn't in the header at all.
+            onViewAllInteractions={
+              tabs.includes("Interactions")
+                ? () => setActiveTab(CUSTOMER_PANEL_TABS.indexOf("Interactions"))
+                : undefined
+            }
+            draft={recordDraft.draft}
+            onDraftChange={recordDraft.updateDraft}
+            onPhoneChange={recordDraft.updatePhone}
+            onOverviewFieldChange={recordDraft.updateOverviewField}
+            allowOverviewEdit
+            overviewEditing={overviewEditing}
+            onOverviewEditingChange={onOverviewEditingChange}
+          />
+        )}
       </div>
-      {/* Save/Cancel footer — checked FIRST, same priority/reasoning as
+      {/* Footer — while `matchState` is set, this is EITHER the search
+          step's full-width "Create New Customer" button or the create
+          step's Cancel/Save pair, checked ahead of everything else below —
+          same priority/reasoning as `CustomerInformationSidePanel`'s own
+          `footer` prop (see that render call site's own comment). */}
+      {matchState ? (
+        matchState.step === "search" ? (
+          <PanelFooter className="shrink-0">
+            <Button className="w-full" onClick={matchState.onStartCreate}>
+              Create New Customer
+            </Button>
+          </PanelFooter>
+        ) : (
+          <CustomerRecordSaveFooter
+            onSave={matchState.onSaveNewCustomer}
+            onCancel={() => {
+              recordDraft.cancel();
+              matchState.onBackToSearch();
+            }}
+          />
+        )
+      ) : (
+      /* Save/Cancel footer — checked FIRST, same priority/reasoning as
           `CustomerInformationSidePanel`'s own `footer` prop (see that call
           site's own comment): per explicit request this hover preview now
           has the exact same Customer Overview edit/save capability the two
           real panels do, so it needs the same footer, outranking the
           Copilot/AIInput branches below exactly like the real panels'
-          Detail/Directory footer does. */}
-      {recordDraft.isDirty || overviewEditing ? (
+          Detail/Directory footer does. */
+      recordDraft.isDirty || overviewEditing ? (
         <CustomerRecordSaveFooter
           onSave={() => {
             recordDraft.save();
@@ -2894,6 +3023,186 @@ export function CustomerInfoHoverPreview({
             <AIInput placeholder="Ask about this customer..." showAttach={false} className="w-full" />
           </PanelFooter>
         )
+      )
+      )}
+    </div>
+  );
+}
+
+/* ── Unknown-contact customer matching (Premium/Advanced only) ──
+   Per explicit request: when an interaction on Premium/Advanced isn't
+   backed by a real `CREATE_NEW_CUSTOMERS` directory record (the same
+   `!activeInteractionIsRealCustomer` signal that already drives the no-tab
+   header treatment — see that const's own doc comment on each page file),
+   the docked Customer Information panel no longer just shows a blank
+   Detail-tab form for a name nobody can confirm. Instead it runs a
+   simulated "does this look like anyone already in the directory" check
+   and shows the result — possible matches to link to, or a genuinely-new-
+   contact empty state — with a "Create New Customer" escape hatch either
+   way. Both pieces below are page-agnostic UI-support logic (not a
+   page-specific BEHAVIOR rule each tier reinterprets its own way, unlike
+   e.g. `resolveActiveChannelDateTimeLabel`), so they live here once rather
+   than being duplicated verbatim into each page file — consistent with
+   `buildCustomerInfoFields`/`splitCustomerName`/etc. already doing the
+   same. */
+
+/** Same plain string-hash approach `hashSeed` (agent-next-gen-shared-
+ *  utils.ts) already uses to turn a record id into a stable pseudo-random
+ *  number — kept as its own tiny function here (rather than importing that
+ *  one) since this hashes a raw dialed/typed identifier string, not a
+ *  `recordId`, and the two are conceptually different seeds even though
+ *  the math is identical. */
+function hashMatchSeed(input: string): number {
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash * 31 + input.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+/**
+ * Simulated "does this unknown caller/emailer/chatter potentially match
+ * someone already in the customer directory" check. There's no real
+ * matching backend here — no shared phone/email index to actually query —
+ * so this derives a believable, DETERMINISTIC result from the raw dialed/
+ * typed identifier itself via `hashMatchSeed`: the same identifier always
+ * returns the same result (stable across re-renders and switching away and
+ * back), roughly 3 in 10 identifiers come back with zero matches (a
+ * genuinely first-time contact — the "0 Matches" empty state), and the
+ * rest return 1-8 "possible" matches pulled deterministically out of
+ * `pool` (a rotating window starting at a hash-derived index, not a real
+ * similarity ranking).
+ */
+export function findPossibleCustomerMatches(
+  identifier: string | undefined,
+  pool: readonly CreateNewCustomerRecord[]
+): CreateNewCustomerRecord[] {
+  if (!identifier || pool.length === 0) return [];
+  const seed = hashMatchSeed(identifier);
+  if (seed % 10 < 3) return [];
+  const matchCount = Math.min(pool.length, 1 + (seed % 8));
+  const startIndex = seed % pool.length;
+  const matches: CreateNewCustomerRecord[] = [];
+  for (let i = 0; i < matchCount; i++) {
+    matches.push(pool[(startIndex + i) % pool.length]);
+  }
+  return matches;
+}
+
+/** The "Search Customers" box's own manual filter — unlike
+ *  `findPossibleCustomerMatches` above (which never reads what the agent
+ *  actually typed), this is a plain case-insensitive substring match
+ *  across name/customer id/phone/email, for an agent who wants to look up
+ *  a specific record by hand rather than rely on the automatic check
+ *  (e.g. it came back empty, or missed the right person). Empty query
+ *  returns no results — the panel falls back to
+ *  `findPossibleCustomerMatches`'s own list in that case (see the render
+ *  call site). */
+export function filterCustomersByQuery(
+  query: string,
+  pool: readonly CreateNewCustomerRecord[]
+): CreateNewCustomerRecord[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  return pool.filter(
+    (c) =>
+      c.name.toLowerCase().includes(q) ||
+      c.customerId.toLowerCase().includes(q) ||
+      c.firstPhone.toLowerCase().includes(q) ||
+      c.emailAddress.toLowerCase().includes(q)
+  );
+}
+
+/** Shared "N Matches"/"N Possible Matches"/"0 Matches" header subhead text
+ *  (plus which list is actually the one currently visible) for the search
+ *  step of the unknown-contact matching UI — used by BOTH
+ *  `CustomerInformationSidePanel` and `CustomerInfoHoverPreview`, per
+ *  explicit request that the closed panel's hover preview show the exact
+ *  same information the docked open panel does, so the two never disagree
+ *  on how many matches there are or what to call them. `searchResults`
+ *  (real typed-search results) wins over `possibleMatches` (the automatic
+ *  check) the instant `query` has anything in it — see
+ *  `findPossibleCustomerMatches`/`filterCustomersByQuery`'s own doc
+ *  comments for what each list actually is. */
+function buildCustomerMatchSubhead(
+  query: string,
+  possibleMatches: CreateNewCustomerRecord[],
+  searchResults: CreateNewCustomerRecord[]
+): { subhead: string; visibleList: CreateNewCustomerRecord[] } {
+  const queryActive = !!query.trim();
+  const visibleList = queryActive ? searchResults : possibleMatches;
+  const count = visibleList.length;
+  const subhead = queryActive
+    ? `${count} Match${count === 1 ? "" : "es"}`
+    : count === 0
+      ? "0 Matches"
+      : `${count} Possible Match${count === 1 ? "" : "es"}`;
+  return { subhead, visibleList };
+}
+
+/** The search-step body for the unknown-contact Customer Information panel
+ *  (see the doc comment above) — a `SearchInput` over whichever list is
+ *  currently relevant (`matches`, already resolved by the caller to either
+ *  the automatic possible-matches list or the manual search results — see
+ *  `CustomerInformationSidePanel`'s own `matchState` render branch), each
+ *  row hover-revealing a "Link To Record" button in place of its default
+ *  chevron (`group`/`group-hover`, same reveal-on-hover mechanism already
+ *  used elsewhere in this app, e.g. the Latest Interaction card's "View
+ *  All Interactions" button). Empty list (whether that's a genuine "0
+ *  Matches" or just no search results yet) shows the same centered
+ *  placeholder text either way — the header subhead just above this body
+ *  (built by the caller) is what actually distinguishes those two cases
+ *  for the agent. */
+function CustomerMatchSearchBody({
+  query,
+  onQueryChange,
+  matches,
+  onLinkRecord,
+}: {
+  query: string;
+  onQueryChange: (query: string) => void;
+  matches: CreateNewCustomerRecord[];
+  onLinkRecord: (customer: CreateNewCustomerRecord) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3 px-4 pt-3 pb-4">
+      <SearchInput
+        value={query}
+        onValueChange={onQueryChange}
+        placeholder="Search Customers"
+        aria-label="Search Customers"
+      />
+      {matches.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center py-16 text-center lyra-body-sm text-lyra-fg-secondary">
+          No Customers Match This Interaction
+        </div>
+      ) : (
+        <div className="flex flex-col">
+          {matches.map((customer) => (
+            <div
+              key={customer.id}
+              className="group -mx-2 flex items-center justify-between gap-2 rounded-lyra-sm px-2 py-2.5 transition-colors hover:bg-lyra-bg-surface-container-subtle"
+            >
+              <div className="min-w-0">
+                <p className="lyra-body-md text-lyra-fg-default truncate">{customer.name}</p>
+                <p className="lyra-body-sm text-lyra-fg-secondary truncate">{customer.customerId}</p>
+              </div>
+              <ChevronRight
+                className="h-4 w-4 shrink-0 text-lyra-fg-secondary group-hover:hidden"
+                strokeWidth={1.5}
+                aria-hidden="true"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="hidden shrink-0 group-hover:inline-flex"
+                onClick={() => onLinkRecord(customer)}
+              >
+                Link To Record
+              </Button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -2960,18 +3269,20 @@ export function CustomerInformationSidePanel({
   customerName,
   recordId,
   channels,
-  startedFresh,
+  // `startedFresh` deliberately NOT destructured here — see
+  // `CustomerInfoHoverPreview`'s identical comment on its own matching
+  // param, just above in this file, for the full reasoning.
   tabs,
   width,
   containerWidth,
   onWidthChange,
   onResizeStateChange,
   onOpenHistoryConversation,
-  copilotFocusSignal,
   onAddToast,
   recordDraft,
   overviewEditing,
   onOverviewEditingChange,
+  matchState,
 }: {
   open: boolean;
   pinned: boolean;
@@ -2996,16 +3307,14 @@ export function CustomerInformationSidePanel({
   onMouseLeave?: () => void;
   customerName?: string;
   recordId: string;
-  channels: TrackedChannel[];
-  /** This interaction's own `ActiveInteraction.startedFresh` — see that
+  channels: Thread[];
+  /** This interaction's own `Interaction.startedFresh` — see that
    *  field's own doc comment (agent-next-gen-interaction-dashboard.tsx).
-   *  Feeds `copilotAvailable` below: a `startedFresh` (blank-slate, agent-
-   *  initiated) interaction hasn't had the customer say anything yet, so
-   *  Copilot has nothing to summarize; anything else (a notification-
-   *  opened case, a reopened history entry, an interaction opened from the
-   *  Interactions list, the page's own initially-seeded active call) is
-   *  already an existing, already-routed conversation with real prior
-   *  history, so Copilot is available immediately for those. */
+   *  No longer read by this component (previously fed `copilotAvailable`
+   *  below, before Copilot was hidden entirely — see that const's own doc
+   *  comment); kept in the prop signature since every call site still
+   *  passes it for other reasons, and un-hiding Copilot later would need
+   *  it back immediately. */
   startedFresh?: boolean;
   /**
    * Which tabs this panel supports at all, in order — per explicit
@@ -3014,8 +3323,9 @@ export function CustomerInformationSidePanel({
    * passes the full `CUSTOMER_PANEL_TABS` unchanged. "Copilot" being
    * listed here only means this consumer supports it AT ALL — whether it
    * actually renders as a tab button also depends on `copilotAvailable`
-   * below (see `visibleTabs`), so a consumer that includes "Copilot" here
-   * still won't show it until the conversation has actually started.
+   * below (see `visibleTabs`), currently hardcoded `false` (Copilot hidden
+   * entirely, per later explicit request), so no consumer's "Copilot"
+   * listing here currently has any visible effect.
    */
   tabs: readonly CustomerPanelTabLabel[];
   width: number;
@@ -3027,16 +3337,6 @@ export function CustomerInformationSidePanel({
   containerWidth: number;
   onWidthChange: (width: number) => void;
   onResizeStateChange?: (isResizing: boolean) => void;
-  /** Bumps this panel over to the Copilot tab whenever it changes — per
-   *  explicit request, fired by `AgentNextGenPage` when a customer reply
-   *  lands (`handleSendMessage`'s simulated customer-reply timeout, which is
-   *  also "a customer starting a conversation" in this app's actual flow:
-   *  the agent always sends first, so a customer's first reply back IS the
-   *  start of the back-and-forth). A plain nonce/number, not a boolean — see
-   *  the `useEffect` reading it, below, for why a boolean can't reliably
-   *  re-fire on a second consecutive reply. `undefined` means "no request
-   *  pending" (the initial/idle value — see that same effect's own guard). */
-  copilotFocusSignal?: number;
   /** Fires a toast into the shared stack `AgentNextGenPage` (or whichever
    *  page owns this instance) owns via `useToast`/`<ToastContainer>` — same
    *  "lift the toast call up, don't spin up a second independent toast
@@ -3068,6 +3368,30 @@ export function CustomerInformationSidePanel({
   overviewEditing: boolean;
   onOverviewEditingChange: (editing: boolean) => void;
   onAddToast?: (toast: Omit<ToastItem, "id">) => void;
+  /** When set, this panel shows the unknown-contact customer-matching UI
+   *  (see the doc comment above `findPossibleCustomerMatches`/
+   *  `CustomerMatchSearchBody`) INSTEAD of its normal tabs+body — header
+   *  title/subhead/tabs, body, and footer below all branch on this being
+   *  present rather than on `tabs`/`recordDraft` alone. `undefined` for
+   *  every other consumer (`CustomerRowInfoPanel`/`CustomerInfoHoverPreview`
+   *  never pass this) and for a real-customer interaction on Premium/
+   *  Advanced — only an unknown-contact interaction on those two tiers
+   *  ever sets this (see each page file's own render call site). */
+  matchState?: {
+    step: "search" | "create";
+    query: string;
+    onQueryChange: (query: string) => void;
+    /** Shown instead of `searchResults` whenever `query` is empty — see
+     *  `findPossibleCustomerMatches`'s own doc comment. */
+    possibleMatches: CreateNewCustomerRecord[];
+    /** Shown instead of `possibleMatches` the moment `query` has anything
+     *  typed into it — see `filterCustomersByQuery`'s own doc comment. */
+    searchResults: CreateNewCustomerRecord[];
+    onLinkRecord: (customer: CreateNewCustomerRecord) => void;
+    onStartCreate: () => void;
+    onBackToSearch: () => void;
+    onSaveNewCustomer: () => void;
+  };
 }) {
   const [activeTab, setActiveTab] = useState(0);
   const latestInteraction = useMemo(
@@ -3079,33 +3403,21 @@ export function CustomerInformationSidePanel({
     [customerName, recordId]
   );
   const copilotSummary = useMemo(() => buildCopilotSummary(customerName, recordId), [customerName, recordId]);
-  // Whether Copilot should currently show as a tab at all — per explicit
-  // request, "hide it until the customer responds to an agent in the
-  // conversation." `startedFresh` covers the "conversation already
-  // existed before this panel ever opened" case (see that prop's own doc
-  // comment); `lastCustomerMessageTick` covers a genuinely fresh outbound
-  // interaction whose customer HAS since replied within this session (set
-  // by `handleSendMessage`'s simulated reply — see `TrackedChannel.
-  // lastCustomerMessageTick`'s own doc comment). Either one is enough —
-  // this only needs ONE channel to have heard from the customer, not all
-  // of them.
-  const copilotAvailable = !startedFresh || channels.some((c) => c.lastCustomerMessageTick !== undefined);
+  // Per explicit follow-up request: the Copilot tab is hidden entirely for
+  // now, everywhere — the "launch it automatically once the customer
+  // replies" behavior this was gating (the removed `copilotFocusSignal`
+  // effect that used to sit here, plus its caller-side wiring in all 3
+  // page files) was reported as annoying. Hardcoded `false` rather than
+  // removing "Copilot" from `CUSTOMER_PANEL_TABS`/
+  // `AGENT_WORKSPACE_CUSTOMER_PANEL_TABS` outright, so re-enabling later is
+  // a one-line revert instead of re-plumbing the tab back in from scratch.
+  const copilotAvailable = false;
   // The tabs this panel's own header actually renders — `tabs` (this
   // consumer's configured support list) minus "Copilot" specifically while
-  // it isn't available yet. Everything else in `tabs` always shows;
-  // Copilot is the only conditionally-gated one.
+  // it isn't available (currently: always — see `copilotAvailable` just
+  // above). Everything else in `tabs` always shows; Copilot is the only
+  // conditionally-gated one.
   const visibleTabs = tabs.filter((t) => t !== "Copilot" || copilotAvailable);
-
-  // Jumps this panel to the Copilot tab whenever `copilotFocusSignal`
-  // changes (see that prop's own doc comment) — a plain nonce, not a
-  // boolean, since the same target tab can need to be re-requested more
-  // than once in a row (e.g. two customer replies land back to back) with
-  // no other prop actually changing value in between to re-trigger a
-  // boolean-keyed effect.
-  useEffect(() => {
-    if (copilotFocusSignal === undefined) return;
-    setActiveTab(CUSTOMER_PANEL_TABS.indexOf("Copilot"));
-  }, [copilotFocusSignal]);
 
   // Falls back to Overview if the currently active tab is Copilot but the
   // interaction THIS panel is now showing doesn't have Copilot available
@@ -3117,9 +3429,11 @@ export function CustomerInformationSidePanel({
   // content with no tab looking selected in the header. Keyed on
   // `recordId` (a new interaction being shown), not `copilotAvailable`
   // itself — this is a landing-state correction for switching TO a
-  // different interaction, not something that should also fire mid-
-  // conversation the moment `copilotAvailable` flips true (that case is
-  // already `copilotFocusSignal`'s own job, just above).
+  // different interaction. Now effectively a permanent safety net (since
+  // `copilotAvailable` is hardcoded `false`, see that const's own doc
+  // comment above) rather than something that fires mid-conversation the
+  // moment it used to flip true — left in place rather than removed, since
+  // it's still correct if Copilot is ever re-enabled.
   useEffect(() => {
     if (!copilotAvailable && activeTab === CUSTOMER_PANEL_TABS.indexOf("Copilot")) {
       setActiveTab(CUSTOMER_PANEL_TABS.indexOf("Overview"));
@@ -3134,6 +3448,13 @@ export function CustomerInformationSidePanel({
   // sanely (see its own `open ? currentWidth : 0` branches).
   const clampedWidth = Math.max(0, Math.min(width, containerWidth));
   const clampedMaxWidth = Math.max(0, Math.min(425, containerWidth));
+
+  // See `buildCustomerMatchSubhead`'s own doc comment — shared with
+  // `CustomerInfoHoverPreview` so the docked panel and its hover preview
+  // never disagree on the match count/wording or which list is showing.
+  const { subhead: matchSubhead, visibleList: matchVisibleList } = matchState
+    ? buildCustomerMatchSubhead(matchState.query, matchState.possibleMatches, matchState.searchResults)
+    : { subhead: "", visibleList: [] };
 
   return (
     <SidePanel
@@ -3156,7 +3477,23 @@ export function CustomerInformationSidePanel({
       // this panel (see `PageHeader`'s own `title`/`subtitle` at the
       // record header render site) and in this panel's own Overview tab,
       // so this header no longer needs to repeat them a third time.
-      headerTitle="Customer Information"
+      //
+      // While `matchState` is set (see that prop's own doc comment), this
+      // whole header instead reads either "Customer Information" (search
+      // step — matches every other consumer) or "Create New Customer"
+      // (create step, per explicit request) with a back arrow ahead of it
+      // (`headerIcon` below) instead of a normal `TabList` (`headerTabs`
+      // below is `undefined` in both match steps — neither reference
+      // screenshot shows any tabs).
+      headerTitle={matchState?.step === "create" ? "Create New Customer" : "Customer Information"}
+      headerSubhead={matchState && matchState.step === "search" ? matchSubhead : undefined}
+      headerIcon={
+        matchState?.step === "create" ? (
+          <ActionIconButton aria-label="Back to search" title="Back" onClick={matchState.onBackToSearch}>
+            <ArrowLeft className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+          </ActionIconButton>
+        ) : undefined
+      }
       // `PanelLeftClose`-iconed `PanelPinButton`, standing in for
       // `SidePanel`'s own default `Pin`-iconed one (suppressed by leaving
       // `onPinToggle` unset above) — same shared atom, just a different
@@ -3210,18 +3547,22 @@ export function CustomerInformationSidePanel({
       // same behavior as every other `TabList` in the app; see the
       // previous `InteriorPanel`-based version's identical reasoning for
       // why `"wide"` (not `"compact"`) is the deliberate choice here.
+      // `undefined` entirely while `matchState` is set — neither match
+      // step has a tab list (see `headerTitle`'s own doc comment above).
       headerTabs={
-        <TabList className="px-4" overflowMenu>
-          {visibleTabs.map((label) => (
-            <Tab
-              key={label}
-              active={activeTab === CUSTOMER_PANEL_TABS.indexOf(label)}
-              onClick={() => setActiveTab(CUSTOMER_PANEL_TABS.indexOf(label))}
-            >
-              {label}
-            </Tab>
-          ))}
-        </TabList>
+        matchState ? undefined : (
+          <TabList className="px-4" overflowMenu>
+            {visibleTabs.map((label) => (
+              <Tab
+                key={label}
+                active={activeTab === CUSTOMER_PANEL_TABS.indexOf(label)}
+                onClick={() => setActiveTab(CUSTOMER_PANEL_TABS.indexOf(label))}
+              >
+                {label}
+              </Tab>
+            ))}
+          </TabList>
+        )
       }
       width={clampedWidth}
       // Hides the drag-resize handle while full-screen — its width is
@@ -3259,7 +3600,41 @@ export function CustomerInformationSidePanel({
       // Overview-scoped footers rather than only showing while Detail/
       // Directory happens to be the active tab.
       footer={
-        recordDraft.isDirty || overviewEditing ? (
+        // While `matchState` is set, this footer is EITHER the search
+        // step's full-width "Create New Customer" button or the create
+        // step's Cancel/Save pair — checked first, ahead of even the
+        // generic Save/Cancel footer below, since the create step's own
+        // `recordDraft` is very likely dirty too (the agent is actively
+        // typing a new record's fields) but needs the match-aware Save
+        // handler (`onSaveNewCustomer`, which also promotes this
+        // interaction to a real customer — see the page file's own
+        // doc comment on that handler), not the generic one.
+        matchState ? (
+          matchState.step === "search" ? (
+            <PanelFooter>
+              {/* No `variant` — `Button`'s own default IS the filled
+                  primary style (`bg-lyra-bg-primary`, button.tsx); this
+                  design system has no separate `"primary"` variant name
+                  (that was this button's original, incorrect value — it
+                  silently fell back to the base, unstyled classes since
+                  `cva` has no matching entry for it, per explicit bug
+                  report). Same "just omit variant" convention
+                  `CustomerRecordSaveFooter`'s own Save button already
+                  uses, just below. */}
+              <Button className="w-full" onClick={matchState.onStartCreate}>
+                Create New Customer
+              </Button>
+            </PanelFooter>
+          ) : (
+            <CustomerRecordSaveFooter
+              onSave={matchState.onSaveNewCustomer}
+              onCancel={() => {
+                recordDraft.cancel();
+                matchState.onBackToSearch();
+              }}
+            />
+          )
+        ) : recordDraft.isDirty || overviewEditing ? (
           <CustomerRecordSaveFooter
             onSave={() => {
               recordDraft.save();
@@ -3298,35 +3673,59 @@ export function CustomerInformationSidePanel({
         ) : undefined
       }
     >
-      <CustomerInformationPanelBody
-        activeTab={activeTab}
-        customerName={customerName}
-        latestInteraction={latestInteraction}
-        latestNote={latestNote}
-        copilotSummary={copilotSummary}
-        recordId={recordId}
-        channels={channels}
-        onOpenConversation={onOpenHistoryConversation}
-        // `undefined` (no button at all) when "Interactions" isn't one of
-        // this panel's configured `tabs` — see `visibleTabs`'s own doc
-        // comment above for why: without this gate, Overview's "View All
-        // Interactions" button would jump `activeTab` to a tab that isn't
-        // in the header at all (Agent Workspace 2.0's own reduced tab set).
-        onViewAllInteractions={
-          tabs.includes("Interactions")
-            ? () => setActiveTab(CUSTOMER_PANEL_TABS.indexOf("Interactions"))
-            : undefined
-        }
-        draft={recordDraft.draft}
-        onDraftChange={recordDraft.updateDraft}
-        onPhoneChange={recordDraft.updatePhone}
-        onOverviewFieldChange={recordDraft.updateOverviewField}
-        overviewEditing={overviewEditing}
-        onOverviewEditingChange={onOverviewEditingChange}
-        // Per explicit request — this is one of the two real panels, so it
-        // offers the Customer Overview edit button.
-        allowOverviewEdit
-      />
+      {matchState ? (
+        matchState.step === "search" ? (
+          <CustomerMatchSearchBody
+            query={matchState.query}
+            onQueryChange={matchState.onQueryChange}
+            matches={matchVisibleList}
+            onLinkRecord={matchState.onLinkRecord}
+          />
+        ) : (
+          // The create step's own form — literally the same "Detail" tab
+          // content/draft this panel already shows for an unknown-contact
+          // interaction today (fields seeded from the interaction's own
+          // case number/dialed identifier — see `CustomerDetailTabContent`'s
+          // own doc comment), just reached via the search step instead of
+          // a tab click, and saved via `matchState.onSaveNewCustomer`
+          // (footer above) instead of the generic Save/Cancel footer.
+          <CustomerDetailTabContent
+            fields={recordDraft.draft.overviewFields}
+            draft={recordDraft.draft}
+            onDraftChange={recordDraft.updateDraft}
+          />
+        )
+      ) : (
+        <CustomerInformationPanelBody
+          activeTab={activeTab}
+          customerName={customerName}
+          latestInteraction={latestInteraction}
+          latestNote={latestNote}
+          copilotSummary={copilotSummary}
+          recordId={recordId}
+          channels={channels}
+          onOpenConversation={onOpenHistoryConversation}
+          // `undefined` (no button at all) when "Interactions" isn't one of
+          // this panel's configured `tabs` — see `visibleTabs`'s own doc
+          // comment above for why: without this gate, Overview's "View All
+          // Interactions" button would jump `activeTab` to a tab that isn't
+          // in the header at all (Agent Workspace 2.0's own reduced tab set).
+          onViewAllInteractions={
+            tabs.includes("Interactions")
+              ? () => setActiveTab(CUSTOMER_PANEL_TABS.indexOf("Interactions"))
+              : undefined
+          }
+          draft={recordDraft.draft}
+          onDraftChange={recordDraft.updateDraft}
+          onPhoneChange={recordDraft.updatePhone}
+          onOverviewFieldChange={recordDraft.updateOverviewField}
+          overviewEditing={overviewEditing}
+          onOverviewEditingChange={onOverviewEditingChange}
+          // Per explicit request — this is one of the two real panels, so it
+          // offers the Customer Overview edit button.
+          allowOverviewEdit
+        />
+      )}
     </SidePanel>
   );
 }
@@ -3633,7 +4032,7 @@ export function CustomerRowInfoPanel({
         // date and updated there too). `channels: []` for the same reason
         // `buildCustomerInfoFields` above already gets it: this row was
         // never opened as a real interaction, so there's no actually-open
-        // `TrackedChannel[]` to prefer over the synthesized history —
+        // `Thread[]` to prefer over the synthesized history —
         // `buildCustomerHistoryEntries` (the function this data actually
         // feeds) already treats a missing/empty `channels` as "use the
         // synthesized fallback for everything," which is exactly right

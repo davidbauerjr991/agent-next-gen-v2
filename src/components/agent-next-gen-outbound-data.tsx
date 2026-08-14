@@ -7,7 +7,50 @@ import { CONTACT_HISTORY, type ContactHistoryEntry } from "@/components/agent-ne
 import { type AppMenuGroup, type CreateNewOutboundConfig, type CreateNewOutboundContact, WhatsAppIcon } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_AGENTS } from "@nicecxone/lyra-ui/agents-data";
 import { CREATE_NEW_CUSTOMERS } from "@nicecxone/lyra-ui/customers-data";
-import { Phone, Mail, MessageSquare } from "lucide-react";
+import type { ReactNode } from "react";
+import { Phone, Mail, MessageSquare, MessageCircle, User, Headphones, Share2, Users } from "lucide-react";
+
+/* ── Category icons ──
+   Shared between the "New Outbound" picker's "Choose group" dropdown
+   (`OUTBOUND_GROUPS`'s own `icon`, further down) and each individual
+   contact row within it (`CreateNewContact.categoryIcon`, create-new.tsx) —
+   one constant per category so both places can never drift to different
+   icons for the same category. Declared as functions (not JSX constants)
+   since a single React element instance can't be reused across multiple
+   render sites (agents/teams/skills/customers are each mapped into many
+   rows) — React warns/misbehaves reusing one element in multiple places in
+   the tree, so each call site needs its own fresh element. */
+const agentCategoryIcon = () => <Headphones className="h-4 w-4" strokeWidth={1.5} />;
+const teamCategoryIcon = () => <Users className="h-4 w-4" strokeWidth={1.5} />;
+const skillCategoryIcon = () => <Share2 className="h-4 w-4" strokeWidth={1.5} />;
+const customerCategoryIcon = () => <User className="h-4 w-4" strokeWidth={1.5} />;
+
+/** Wraps a bare category icon in the same colored circle shell lyra-ui's
+ *  own `ListItem` "With leading icon" story hand-builds for each of its
+ *  demo rows (`h-9 w-9 rounded-full ... flex items-center justify-center
+ *  ...`, ListItem.stories.tsx) — per explicit request, `CreateNewContact.
+ *  categoryIcon` (create-new.tsx) reuses that exact treatment rather than
+ *  a bare icon sitting inline with the contact's name. One color pair per
+ *  category, each an existing token already used elsewhere in this app/
+ *  design system (not invented for this): blue "active" for Agents, green
+ *  "success" for Skills, purple "accent" for Teams (the same token
+ *  `OUTBOUND_TEAMS`'s own `t1` avatar already uses, below), and neutral
+ *  "surface shell" gray for Customers. */
+function categoryLeadingIcon(icon: ReactNode, bgClassName: string, textClassName: string): ReactNode {
+  return (
+    <div className={`h-9 w-9 rounded-full ${bgClassName} flex items-center justify-center ${textClassName}`}>
+      {icon}
+    </div>
+  );
+}
+const agentCategoryLeadingIcon = () =>
+  categoryLeadingIcon(agentCategoryIcon(), "bg-lyra-bg-active-subtle", "text-lyra-fg-active-strong");
+const teamCategoryLeadingIcon = () =>
+  categoryLeadingIcon(teamCategoryIcon(), "bg-lyra-accent-purple-soft", "text-lyra-accent-purple-strong");
+const skillCategoryLeadingIcon = () =>
+  categoryLeadingIcon(skillCategoryIcon(), "bg-lyra-status-success-subtle", "text-lyra-status-success-strong");
+const customerCategoryLeadingIcon = () =>
+  categoryLeadingIcon(customerCategoryIcon(), "bg-lyra-bg-surface-shell", "text-lyra-fg-secondary");
 
 /* ── App menu builder (needs onNavigate so built inside the component) ── */
 
@@ -18,28 +61,41 @@ import { Phone, Mail, MessageSquare } from "lucide-react";
 // their menu entries); their pages/routes themselves (`DesktopDesignsPage`/
 // `OutboundEngagementPage`/`LoginPage`, App.tsx) are untouched and still
 // reachable by hash URL, just no longer linked from this menu. "Agent
-// Workspace 2.0 With Desk" is a new second entry — its own separate page
-// (`AgentWorkspace2WithDeskPage.tsx`, its own `#/agent-with-desk` route,
-// App.tsx) rather than reusing "Agent Workspace 2.0"'s `"agent"` page, per
-// explicit request.
+// Workspace 2.0 Advanced" (originally "Agent Workspace Advanced", renamed
+// per explicit request — same underlying page/component/route, just the
+// label changed; `AgentWorkspaceAdvancedPage.tsx`, its own
+// `#/agent-advanced` route, App.tsx — another duplicate of
+// `AgentNextGenPage.tsx`, per explicit request) is the second entry, per
+// explicit request to place it there. "Agent Workspace 2.0 Premium"
+// (originally "Agent Workspace 2.0 With Desk", later renamed per explicit
+// request — same underlying page/component, just the label + route
+// changed) was the original second entry and is now third — its own
+// separate page (`AgentWorkspace2WithDeskPage.tsx`, its own
+// `#/agent-premium` route, App.tsx) rather than reusing "Agent Workspace
+// 2.0"'s `"agent"` page, per explicit request.
 //
-// `currentPage` decides which of the two rows shows the "active" (blue,
-// non-clickable-looking) treatment — each call site passes its OWN page
-// literal (`AgentNextGenPage.tsx` passes `"agent"`,
-// `AgentWorkspace2WithDeskPage.tsx` passes `"agent-with-desk"`), since each
-// page component inherently knows which page it itself is; there's no
-// need to thread that back down from `App.tsx`. Every row still gets an
-// `onClick` (including the currently-active one, which just re-navigates
-// to the same page — harmless) so clicking either row from EITHER page
-// always works, per explicit request ("allow the agent to click back to
-// normal Agent Workspace 2.0").
+// `currentPage` decides which row shows the "active" (blue, non-clickable-
+// looking) treatment — each call site passes its OWN page literal
+// (`AgentNextGenPage.tsx` passes `"agent"`, `AgentWorkspaceAdvancedPage.tsx`
+// passes `"agent-advanced"`, `AgentWorkspace2WithDeskPage.tsx` passes
+// `"agent-with-desk"`), since each page component inherently knows which
+// page it itself is; there's no need to thread that back down from
+// `App.tsx`. Every row still gets an `onClick` (including the currently-
+// active one, which just re-navigates to the same page — harmless) so
+// clicking any row from ANY of the three pages always works, per explicit
+// request ("allow the agent to click back to normal Agent Workspace 2.0").
 export function buildAppMenuGroups(onNavigate: ((page: Page) => void) | undefined, currentPage: Page): AppMenuGroup[] {
   return [
     {
       items: [
         { label: "Agent Workspace 2.0", active: currentPage === "agent", onClick: () => onNavigate?.("agent") },
         {
-          label: "Agent Workspace 2.0 With Desk",
+          label: "Agent Workspace 2.0 Advanced",
+          active: currentPage === "agent-advanced",
+          onClick: () => onNavigate?.("agent-advanced"),
+        },
+        {
+          label: "Agent Workspace 2.0 Premium",
           active: currentPage === "agent-with-desk",
           onClick: () => onNavigate?.("agent-with-desk"),
         },
@@ -65,8 +121,30 @@ export const OUTBOUND_AGENTS: NonNullable<CreateNewOutboundConfig["groups"][numb
   initials: initialsFor(a.name),
   subtitle: a.agentId,
   avatarClassName: a.avatarClassName,
-  channels: a.channels,
+  // Per explicit request: an agent is only reachable by Voice or Chat from
+  // this picker — overrides whatever `CREATE_NEW_AGENTS` itself lists (that
+  // fixture's `channels` models a full agent-center directory record, not
+  // what's actually dialable agent-to-agent here). Voice proceeds as a
+  // normal call (`handleStartCall`'s own agent-call branch, further down in
+  // each page file, then hides Customer Information + the status Select for
+  // that resulting interaction); Chat instead opens the existing "Agent
+  // Chat" panel and never creates an interaction at all — see
+  // `OUTBOUND_CONFIG.channelOptions`'s new `"chat"` entry below.
+  channels: ["voice", "chat"],
   status: a.status,
+  // Per explicit request: same headset icon the "Choose group" dropdown's
+  // own "Agents" row uses (`OUTBOUND_GROUPS` below), now also shown to the
+  // left of EACH agent's name — matters most in the "All"/favorites group,
+  // which mixes agents/teams/skills/customers in one list with no group
+  // heading between them (see `CreateNewContact.categoryIcon`'s own doc
+  // comment, create-new.tsx).
+  categoryIcon: agentCategoryLeadingIcon(),
+  // Per explicit request: calling/chatting an agent skips the "Select
+  // Phone"/"Outbound Skill" detail screen entirely and launches
+  // immediately — an agent has no real per-contact address to choose
+  // between the way a customer does. See `CreateNewOutboundContact.
+  // quickLaunch`'s own doc comment (lyra-ui create-new.tsx).
+  quickLaunch: true,
 }));
 
 export const OUTBOUND_CUSTOMERS: NonNullable<CreateNewOutboundConfig["groups"][number]["contacts"]> = CREATE_NEW_CUSTOMERS.map((c) => ({
@@ -97,6 +175,8 @@ export const OUTBOUND_CUSTOMERS: NonNullable<CreateNewOutboundConfig["groups"][n
     const { firstName, lastName } = splitCustomerName(c.name);
     return `${firstName.toLowerCase()}.${lastName.toLowerCase()}@example.com`;
   })(),
+  // See `OUTBOUND_AGENTS`'s own identical `categoryIcon` comment above.
+  categoryIcon: customerCategoryLeadingIcon(),
 }));
 
 /** One `CreateNewOutboundContact` for a single hand-authored `CONTACT_HISTORY`
@@ -123,6 +203,9 @@ function contactHistoryOutboundContact(entry: ContactHistoryEntry, id: string): 
       label: synthesizePhone(hashSeed(entry.caseId)),
     },
     email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@example.com`,
+    // Every `ContactHistoryEntry` represents a past CUSTOMER contact — see
+    // `OUTBOUND_AGENTS`'s own identical `categoryIcon` comment above.
+    categoryIcon: customerCategoryLeadingIcon(),
   };
 }
 
@@ -184,8 +267,9 @@ export const CONTACT_HISTORY_OUTBOUND_CONTACTS: NonNullable<CreateNewOutboundCon
   buildContactHistoryOutboundContacts(CONTACT_HISTORY);
 
 export const OUTBOUND_TEAMS: NonNullable<CreateNewOutboundConfig["groups"][number]["contacts"]> = [
-  { id: "t1", name: "Billing Support",    initials: "BS", subtitle: "TEAM-04", avatarClassName: "bg-lyra-accent-purple-soft text-lyra-accent-purple-strong", channels: ["voice", "email"] },
-  { id: "t2", name: "Tier 2 Escalations", initials: "T2", subtitle: "TEAM-07", avatarClassName: "bg-lyra-accent-red-soft text-lyra-accent-red-strong",       channels: ["voice", "email"] },
+  // See `OUTBOUND_AGENTS`'s own identical `categoryIcon` comment above.
+  { id: "t1", name: "Billing Support",    initials: "BS", subtitle: "TEAM-04", avatarClassName: "bg-lyra-accent-purple-soft text-lyra-accent-purple-strong", channels: ["voice", "email"], categoryIcon: teamCategoryLeadingIcon() },
+  { id: "t2", name: "Tier 2 Escalations", initials: "T2", subtitle: "TEAM-07", avatarClassName: "bg-lyra-accent-red-soft text-lyra-accent-red-strong",       channels: ["voice", "email"], categoryIcon: teamCategoryLeadingIcon() },
 ];
 
 // Deterministic (no Math.random) per-team agent roster for the Teams
@@ -206,8 +290,11 @@ export const OUTBOUND_TEAM_MEMBERS: Record<string, NonNullable<CreateNewOutbound
   );
 
 export const OUTBOUND_SKILLS: NonNullable<CreateNewOutboundConfig["groups"][number]["contacts"]> = [
-  { id: "s1", name: "Spanish Language",  initials: "ES", subtitle: "SKL-12", avatarClassName: "bg-lyra-accent-green-soft text-lyra-accent-green-strong", channels: ["voice", "email"], status: "available", queueCount: 4, waitTimeSeconds: 200 },
-  { id: "s2", name: "Technical Support", initials: "TS", subtitle: "SKL-03", avatarClassName: "bg-lyra-accent-blue-soft text-lyra-accent-blue-strong",   channels: ["voice", "email"], status: "busy",      queueCount: 7, waitTimeSeconds: 95 },
+  // See `OUTBOUND_AGENTS`'s own identical `categoryIcon`/`quickLaunch`
+  // comments above — a skill queue has no real per-contact address to
+  // choose either, so it gets the same immediate-launch treatment.
+  { id: "s1", name: "Spanish Language",  initials: "ES", subtitle: "SKL-12", avatarClassName: "bg-lyra-accent-green-soft text-lyra-accent-green-strong", channels: ["voice", "email"], status: "available", queueCount: 4, waitTimeSeconds: 200, categoryIcon: skillCategoryLeadingIcon(), quickLaunch: true },
+  { id: "s2", name: "Technical Support", initials: "TS", subtitle: "SKL-03", avatarClassName: "bg-lyra-accent-blue-soft text-lyra-accent-blue-strong",   channels: ["voice", "email"], status: "busy",      queueCount: 7, waitTimeSeconds: 95, categoryIcon: skillCategoryLeadingIcon(), quickLaunch: true },
 ];
 
 // Every group the "New Outbound" filter dropdown COULD show — kept as its
@@ -233,10 +320,21 @@ export const OUTBOUND_GROUPS: CreateNewOutboundConfig["groups"] = [
   // prefix (that phrasing read like an error/apology for something
   // missing, when the real point is just "type to search").
   { id: "all", label: "All", kind: "favorites", emptyMessage: "Search above to find a contact" },
-  { id: "agents", label: "Agents", contacts: OUTBOUND_AGENTS },
-  { id: "teams", label: "Teams", contacts: OUTBOUND_TEAMS },
-  { id: "skills", label: "Skills", contacts: OUTBOUND_SKILLS },
-  { id: "customers", label: "Customers", contacts: OUTBOUND_CUSTOMERS },
+  // Per explicit request: each group below gets a leading icon in the
+  // "Choose group" dropdown (`CreateNewOutboundGroup.icon`, lyra-ui's
+  // create-new.tsx), matched to what that group represents — a headset for
+  // Agents (support), a people-group for Teams, a share/network glyph for
+  // Skills, and a single person for Customers. `h-4 w-4` here is purely
+  // defensive/self-documenting — `Select`'s own icon slot already forces
+  // every option icon to that size (select.tsx) regardless of what's
+  // authored on the element itself. "All" (above) and "Dial Pad" (below,
+  // hidden from the dropdown anyway) intentionally have no icon — neither
+  // was part of the requested set, and the plain "All" row reads fine
+  // unadorned as the default/catch-all option.
+  { id: "agents", label: "Agents", contacts: OUTBOUND_AGENTS, icon: agentCategoryIcon() },
+  { id: "teams", label: "Teams", contacts: OUTBOUND_TEAMS, icon: teamCategoryIcon() },
+  { id: "skills", label: "Skills", contacts: OUTBOUND_SKILLS, icon: skillCategoryIcon() },
+  { id: "customers", label: "Customers", contacts: OUTBOUND_CUSTOMERS, icon: customerCategoryIcon() },
   // Hidden from the dropdown below (`HIDDEN_OUTBOUND_GROUP_IDS`), per
   // explicit request — NOT deleted. Still a complete, valid group
   // definition; `onQuickDial`/`handleQuickDial` (this config's own
@@ -276,6 +374,14 @@ export const OUTBOUND_CONFIG: CreateNewOutboundConfig = {
   hideContactList: true,
   channelOptions: [
     { id: "voice",    label: "Call",     selectLabel: "Voice", icon: <Phone       className="h-5 w-5" strokeWidth={1.5} /> },
+    // Per explicit request: agents' only other reachable channel besides
+    // Voice — `MessageCircle`, matching `ChatChannelRow`/`CHANNEL_TYPE_META.
+    // chat`'s own icon (lyra-ui channel-row.tsx) for the same channel type,
+    // same reasoning `WhatsAppIcon`'s own swap-in above already documents.
+    // No contact in any OTHER group lists "chat" among its own `channels`
+    // (only `OUTBOUND_AGENTS`, above, does), so this option only ever
+    // surfaces for an agent contact.
+    { id: "chat",     label: "Chat",                           icon: <MessageCircle className="h-5 w-5" strokeWidth={1.5} /> },
     { id: "email",    label: "Email",                          icon: <Mail        className="h-5 w-5" strokeWidth={1.5} /> },
     { id: "sms",      label: "SMS",                            icon: <MessageSquare className="h-5 w-5" strokeWidth={1.5} /> },
     // `WhatsAppIcon` (lyra-ui's own real brand glyph, channel-row.tsx) — was

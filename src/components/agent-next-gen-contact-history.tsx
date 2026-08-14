@@ -2,7 +2,7 @@
 // agent-next-gen-shared-utils.ts and sibling agent-next-gen-*.ts(x) files
 // for everything AgentNextGenPage.tsx itself no longer declares — split out
 // once that file crossed Babel's 500KB code-generator threshold.
-import { useState, useMemo } from "react";
+import { useState, useMemo, type ComponentType } from "react";
 import {
   type TagVariant,
   type ChannelType,
@@ -18,15 +18,17 @@ import {
   Badge,
   Tag,
   Label,
+  WhatsAppIcon,
 } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_CUSTOMERS } from "@nicecxone/lyra-ui/customers-data";
-import { type ActiveInteraction } from "@/components/agent-next-gen-interaction-dashboard";
+import { type Interaction } from "@/components/agent-next-gen-interaction-dashboard";
 import { formatElapsedTime } from "@/components/agent-next-gen-shared-utils";
 import { cn } from "@/lib/utils";
 import {
   type LucideIcon,
   Phone,
   MessageCircle,
+  MessageSquare,
   Mail,
   ChevronDown,
   MoreVertical,
@@ -106,7 +108,7 @@ export type ContactHistoryStatusVariant = "critical" | "info" | "warning" | "suc
  *  Open/Pending/Escalated/Resolved/Closed) onto this card's own
  *  `ContactHistoryStatusVariant`, so `buildDismissedContactHistoryEntry`
  *  can log whatever status was actually last assigned to a dismissed
- *  interaction's primary channel (`ActiveInteraction.channelStatuses`) with a matching dot
+ *  interaction's primary channel (`Interaction.channelStatuses`) with a matching dot
  *  color, instead of a hardcoded "Resolved"/"success" regardless. "Closed"
  *  maps to "neutral" (gray) rather than reusing "critical" — a closed
  *  contact isn't a negative outcome the way "Escalated" is, and reusing red
@@ -133,7 +135,21 @@ export interface ContactHistoryEntry {
   redial: boolean;
   description: string;
   caseId: string;
-  channelType: "voice" | "chat" | "email";
+  /**
+   * This row's real originating channel — every `ChannelType` value is
+   * possible here (voice/chat/sms/whatsapp/email), NOT a narrowed display
+   * grouping. Previously this collapsed sms/whatsapp down into "chat" (via
+   * a since-removed `contactHistoryChannelType` helper) — a real, shipped
+   * bug: a dismissed SMS interaction's history row showed a "Chat" tag,
+   * and reopening it rebuilt a literal `chat`-type `Thread` instead of an
+   * `sms` one, which in turn left the real SMS channel un-flagged as
+   * "already open" so it wrongly still showed as addable. Fixed per
+   * explicit bug report — this field (and everything keyed by it —
+   * `channelLabel`, `CONTACT_HISTORY_CHANNEL_ICON`/`_LABEL`/
+   * `_TAG_VARIANT`, `CHANNEL_TYPE_ICON_COLOR_CLASS`) must always carry the
+   * real channel type through losslessly.
+   */
+  channelType: ChannelType;
   channelLabel: string;
   timeAgo: string;
   duration: string;
@@ -179,19 +195,82 @@ export interface ContactHistoryEntry {
    * rows, and every dismissed row, all use "Resolved"/"Escalated") is still
    * an active, appendable conversation once reopened; none of them set
    * this. `closed` drives `handleReopenContactHistoryEntry` →
-   * `ActiveInteraction.closed`: a closed interaction reopens read-only (an
+   * `Interaction.closed`: a closed interaction reopens read-only (an
    * inline "You are viewing a closed interaction." banner, no
    * `InteractionComposer`, no per-channel kebab actions) instead of a
    * normal, reply-able one. A plain boolean rather than checking
    * `statusLabel === "Closed"` by string — display text shouldn't double as
    * the thing behavior branches on. */
   closed?: boolean;
+  /**
+   * The `Interaction.interactionId` this row was logged from, when this
+   * entry was built by `buildDismissedContactHistoryEntry` (i.e. "Unassign
+   * & Dismiss" ended a real, live `Interaction`) — undefined for every
+   * hand-authored `CONTACT_HISTORY`/`EXTENDED_CONTACT_HISTORY` row, since
+   * those never existed as a live `Interaction` in the first place. Purely
+   * a traceability breadcrumb (not read by any handler today): once an
+   * `Interaction` ends, this is the only place its own id survives, so a
+   * dismissed journey stays identifiable in history instead of being
+   * discarded outright.
+   */
+  interactionId?: string;
+  /**
+   * This row's real email address, when known — populated for every
+   * `CREATE_NEW_CUSTOMERS`-backed row (`customer.emailAddress`) and every
+   * dismissed row whose primary `Thread` was itself an email channel
+   * (`primaryChannel.addressLabel`/`.value`). Read by
+   * `contactHistoryDisplayIdentity` (below) for `channelType === "email"`
+   * rows once names are hidden — see that function's own doc comment for
+   * why. Undefined wherever no real address is known, in which case that
+   * function falls back to `name` rather than showing nothing.
+   */
+  email?: string;
+  /**
+   * This row's real phone number, when known — same populate/consume
+   * pattern as `email` above, but for `channelType === "voice"`/`"sms"`
+   * rows (`customer.firstPhone`, or the dismissed row's primary `Thread`
+   * address).
+   */
+  phone?: string;
+  /**
+   * This row's real WhatsApp handle, when known — same pattern again, for
+   * `channelType === "whatsapp"` rows. Synthesized as `@${name}` for
+   * `CREATE_NEW_CUSTOMERS`-backed rows, matching lyra-ui's own
+   * `resolveOutboundDetailField` convention (create-new.tsx) for a
+   * contact with no dedicated `whatsappHandle`-style field on file yet.
+   */
+  whatsappHandle?: string;
 }
 
-export const CONTACT_HISTORY_CHANNEL_ICON: Record<ContactHistoryEntry["channelType"], LucideIcon> = {
-  voice: Phone,
-  chat:  MessageCircle,
-  email: Mail,
+/**
+ * Per-`channelType` display identity for a Contact History row once real
+ * customer names are hidden (Agent Workspace 2.0 only — see
+ * `ContactHistoryCard`/`ContactHistoryEntryDetail`'s own `hideCustomerNames`
+ * prop doc comments) — per explicit request: Chat still shows the
+ * customer's name (no separate "chat handle" concept exists to show
+ * instead), WhatsApp shows the row's `whatsappHandle`, and every other
+ * channel (Voice/SMS/Email) shows a real reach-back address instead of a
+ * name — phone for Voice/SMS, email for Email. Falls back to `name`
+ * wherever the specific field this row would need isn't populated (e.g. a
+ * dismissed quick-dialed row with no captured `Thread.value`), so a row
+ * never renders with no identity at all.
+ */
+export function contactHistoryDisplayIdentity(entry: ContactHistoryEntry): string {
+  if (entry.channelType === "chat") return entry.name;
+  if (entry.channelType === "whatsapp") return entry.whatsappHandle ?? entry.name;
+  if (entry.channelType === "email") return entry.email ?? entry.name;
+  return entry.phone ?? entry.name;
+}
+
+export const CONTACT_HISTORY_CHANNEL_ICON: Record<
+  ContactHistoryEntry["channelType"],
+  LucideIcon | ComponentType<{ className?: string; strokeWidth?: number }>
+> = {
+  voice:    Phone,
+  chat:     MessageCircle,
+  sms:      MessageSquare,
+  whatsapp: WhatsAppIcon,
+  email:    Mail,
 };
 
 export const CONTACT_HISTORY: ContactHistoryEntry[] = [
@@ -200,78 +279,84 @@ export const CONTACT_HISTORY: ContactHistoryEntry[] = [
     description: "Customer was locked out after 5 failed attempts. Verified identity via KBA, reset credentials, and confirmed access restored.",
     caseId: "CST-22841", channelType: "voice", channelLabel: "Voice", timeAgo: "8m ago", duration: "8m 14s",
     channels: ["voice", "sms", "email"],
+    phone: "(704) 555-0142", email: "nathan.cole@example.com", whatsappHandle: "@Nathan Cole",
   },
   {
     id: "ch2", name: "Priya Shah", statusLabel: "Resolved", statusVariant: "success", redial: false,
     description: "Duplicate charge dispute — $89.99 refund issued",
     caseId: "CST-30164", channelType: "chat", channelLabel: "Chat", timeAgo: "34m ago", duration: "12m 02s",
     channels: ["email", "sms"],
+    phone: "(415) 555-0178", email: "priya.shah@example.com", whatsappHandle: "@Priya Shah",
   },
   {
     id: "ch3", name: "Omar Farooq", statusLabel: "Resolved", statusVariant: "success", redial: false,
     description: "Plan upgrade confirmation & feature overview",
     caseId: "CST-16823", channelType: "email", channelLabel: "Email", timeAgo: "2h ago", duration: "6m 30s",
     channels: ["email", "whatsapp"],
+    phone: "(212) 555-0193", email: "omar.farooq@example.com", whatsappHandle: "@Omar Farooq",
   },
   {
     id: "ch4", name: "Lauren Briggs", statusLabel: "Escalated", statusVariant: "critical", redial: true,
     description: "Escalated fraud investigation — 4 suspicious transactions",
     caseId: "CST-27760", channelType: "voice", channelLabel: "Voice", timeAgo: "5h ago", duration: "22m 47s",
     channels: ["voice", "email"],
+    phone: "(312) 555-0164", email: "lauren.briggs@example.com", whatsappHandle: "@Lauren Briggs",
   },
   {
     id: "ch5", name: "Mei Tanaka", statusLabel: "Resolved", statusVariant: "success", redial: false,
     description: "Shipping delay — expedited replacement dispatched",
     caseId: "CST-31045", channelType: "chat", channelLabel: "Chat", timeAgo: "1d ago", duration: "9m 15s",
     channels: ["sms", "whatsapp", "email"],
+    phone: "(206) 555-0157", email: "mei.tanaka@example.com", whatsappHandle: "@Mei Tanaka",
   },
 ];
 
 export const CONTACT_HISTORY_CHANNEL_LABEL: Record<ContactHistoryEntry["channelType"], string> = {
   voice: "Voice",
   chat: "Chat",
+  sms: "SMS",
+  whatsapp: "WhatsApp",
   email: "Email",
 };
 
-/** Channel-type tag color — Voice/Chat/Email each get one of `Tag`'s fixed
- *  "purple"/"teal"/"pink" accent variants (see CONTRIBUTING.md's "Channel
- *  type colors" convention) rather than a one-off className per row, so
- *  any other spot that adds a channel-type tag later picks the same
- *  mapping instead of inventing its own. */
+/** Channel-type tag color — Voice/Email keep `Tag`'s fixed "purple"/"pink"
+ *  accent variants (see CONTRIBUTING.md's "Channel type colors"
+ *  convention); Chat/SMS/WhatsApp reuse lyra-ui's own established
+ *  "teal"/"neutral"/"default" trio (`CHANNEL_TYPE_TAG_VARIANT`,
+ *  channel-row.tsx) rather than a one-off mapping here, so a dismissed
+ *  SMS/WhatsApp interaction's history tag reads distinctly from a Chat one
+ *  the exact same way the record-header's own `ChannelTab` chips already
+ *  do (see that file's own doc comment for why the three read as
+ *  genuinely distinct channels, not one grouping). */
 export const CONTACT_HISTORY_CHANNEL_TAG_VARIANT: Record<ContactHistoryEntry["channelType"], TagVariant> = {
   voice: "purple",
   chat: "teal",
+  sms: "neutral",
+  whatsapp: "default",
   email: "pink",
 };
 
-/** Same Voice/Chat/Email → purple/teal/pink mapping as
- *  `CONTACT_HISTORY_CHANNEL_TAG_VARIANT` above, as plain icon-color
- *  classes instead of a `Tag` variant — for spots like
- *  `InteractionsTable`'s per-row type icon, where the channel indicator is
- *  a bare icon (no room for a pill in a 48px column) but should still tint
- *  to the same three hues rather than sitting flat gray. */
+/** Same channel → color mapping as `CONTACT_HISTORY_CHANNEL_TAG_VARIANT`
+ *  above, as plain icon-color classes instead of a `Tag` variant — for
+ *  spots like `InteractionsTable`'s per-row type icon, where the channel
+ *  indicator is a bare icon (no room for a pill in a 48px column) but
+ *  should still tint consistently rather than sitting flat gray.
+ *  SMS/WhatsApp reuse the same neutral/"active" text tones `Tag`'s own
+ *  "neutral"/"default" variants render with (`tag.tsx`'s `tagVariants`)
+ *  rather than inventing new accent hues those two variants don't have. */
 export const CHANNEL_TYPE_ICON_COLOR_CLASS: Record<ContactHistoryEntry["channelType"], string> = {
   voice: "text-lyra-accent-purple-strong",
   chat: "text-lyra-accent-teal-strong",
+  sms: "text-lyra-fg-secondary",
+  whatsapp: "text-lyra-fg-active-strong",
   email: "text-lyra-accent-pink-strong",
 };
-
-/** Maps a customer's supported `ChannelType[]` (from `CREATE_NEW_CUSTOMERS`,
- *  e.g. `["email", "sms", "voice"]`) down to Contact History's own narrower
- *  channel grouping — voice takes priority (it's what "Redial" needs),
- *  then sms/whatsapp both read as "Chat", falling back to "Email" (every
- *  customer record includes it). */
-export function contactHistoryChannelType(channels: ChannelType[]): ContactHistoryEntry["channelType"] {
-  if (channels.includes("voice")) return "voice";
-  if (channels.includes("sms") || channels.includes("whatsapp")) return "chat";
-  return "email";
-}
 
 /** Shared per-row content shape for every customer-derived (as opposed to
  *  hand-authored, like `CONTACT_HISTORY` above) Contact History row —
  *  everything except what's already on the `CREATE_NEW_CUSTOMERS` record
  *  itself (name/caseId) or derived from it (channelType/channelLabel/
- *  redial, via `contactHistoryChannelType`). */
+ *  redial). */
 export interface ContactHistoryTemplate {
   statusLabel: string;
   statusVariant: ContactHistoryStatusVariant;
@@ -294,7 +379,13 @@ export function buildContactHistoryFromCustomers(
 ): ContactHistoryEntry[] {
   return customerIndexes.map((customerIndex, i) => {
     const customer = CREATE_NEW_CUSTOMERS[customerIndex];
-    const channelType = contactHistoryChannelType(customer.channels);
+    // Voice takes priority (it's what "Redial" needs — see `redial` below),
+    // otherwise just the first channel this customer record happens to list
+    // — a plain, lossless pick rather than the since-removed
+    // `contactHistoryChannelType` helper's old "collapse every text channel
+    // down into Chat" behavior (see `ContactHistoryEntry.channelType`'s own
+    // doc comment for the real, shipped bug that caused).
+    const channelType = customer.channels.includes("voice") ? "voice" : customer.channels[0] ?? "email";
     return {
       id: `${idPrefix}-${customer.id}`,
       name: customer.name,
@@ -308,17 +399,47 @@ export function buildContactHistoryFromCustomers(
       // `ContactHistoryEntry.customerId`'s own doc comment for why
       // `handleRedial` needs this.
       customerId: customer.id,
+      // `email`/`phone`/`whatsappHandle` — see `ContactHistoryEntry`'s own
+      // doc comments for these three. `whatsappHandle` is synthesized as
+      // `@${name}`, matching lyra-ui's own `resolveOutboundDetailField`
+      // convention (create-new.tsx) for a contact with no dedicated
+      // WhatsApp-handle field on file.
+      email: customer.emailAddress,
+      phone: customer.firstPhone,
+      whatsappHandle: `@${customer.name}`,
       ...templates[i],
     };
   });
 }
 
-export function buildDismissedContactHistoryEntry(interaction: ActiveInteraction, clockTick: number): ContactHistoryEntry {
-  const channelType = contactHistoryChannelType(interaction.channels.map((c) => c.type));
-  const primaryChannel = interaction.channels.find((c) => c.type === channelType) ?? interaction.channels[0];
+export function buildDismissedContactHistoryEntry(interaction: Interaction, clockTick: number): ContactHistoryEntry {
+  // Voice takes priority (it's what "Redial" needs — see `redial` below)
+  // when this interaction has a voice thread among its (rare, multi-
+  // channel) open threads; otherwise whichever thread is actually current
+  // — falling back to the first one — stands in as "primary." Either way,
+  // `channelType` below is that thread's own REAL type, never collapsed —
+  // see `ContactHistoryEntry.channelType`'s own doc comment for the real,
+  // shipped bug a since-removed `contactHistoryChannelType` helper caused
+  // by lumping sms/whatsapp into "chat" here (a dismissed SMS interaction's
+  // history row showed a "Chat" tag, and reopening it rebuilt a literal
+  // `chat`-type `Thread` instead of an `sms` one).
+  const primaryChannel =
+    interaction.threads.find((c) => c.type === "voice") ??
+    interaction.threads.find((c) => c.id === interaction.currentThreadId) ??
+    interaction.threads[0];
+  const channelType = primaryChannel?.type ?? "chat";
   const earliestStart =
-    interaction.channels.length > 0 ? Math.min(...interaction.channels.map((c) => c.startTick)) : clockTick;
-  const statusLabel = interaction.channelStatuses?.[primaryChannel?.id ?? ""] ?? "Resolved";
+    interaction.threads.length > 0 ? Math.min(...interaction.threads.map((c) => c.startTick)) : clockTick;
+  const statusLabel = interaction.threadStatuses?.[primaryChannel?.id ?? ""] ?? "Resolved";
+  // The real captured address (email/phone/WhatsApp handle) this row's
+  // primary Thread was opened on, if any — `addressLabel` (human-readable,
+  // e.g. "(456) 383-3329") preferred over the raw `value` (e.g.
+  // "+14563833329"), same preference `ChannelToggle`'s own face already
+  // uses (see `Thread.addressLabel`'s own doc comment). Undefined for a
+  // quick-dialed/redialed thread with no captured address at all — in
+  // which case `contactHistoryDisplayIdentity` (above) falls back to
+  // `name` rather than showing nothing.
+  const channelAddress = primaryChannel?.addressLabel ?? primaryChannel?.value;
   return {
     id: `dismissed-${interaction.id}-${Date.now()}`,
     name: interaction.customerName ?? "Customer",
@@ -328,7 +449,7 @@ export function buildDismissedContactHistoryEntry(interaction: ActiveInteraction
     description: primaryChannel?.preview
       ? `${primaryChannel.preview} — ${statusLabel.toLowerCase()} and dismissed by agent`
       : `${statusLabel} and dismissed by agent`,
-    caseId: interaction.recordId,
+    caseId: interaction.customerId,
     channelType,
     channelLabel: CONTACT_HISTORY_CHANNEL_LABEL[channelType],
     timeAgo: "Just now",
@@ -348,7 +469,20 @@ export function buildDismissedContactHistoryEntry(interaction: ActiveInteraction
     // can have more than one open channel of the same `type` (e.g. two SMS
     // threads on different numbers) — `CreateNewOutboundContact.channels`
     // only needs each type once, not one entry per open thread.
-    channels: [...new Set(interaction.channels.map((c) => c.type))],
+    channels: [...new Set(interaction.threads.map((c) => c.type))],
+    interactionId: interaction.interactionId,
+    // `email`/`phone`/`whatsappHandle` — see `ContactHistoryEntry`'s own
+    // doc comments for these three. Only the one matching this row's real
+    // `channelType` is populated from `channelAddress` above; the other two
+    // stay undefined (`contactHistoryDisplayIdentity` never reads them for
+    // a row of this type). WhatsApp falls back to a synthesized `@${name}`
+    // handle (same convention `buildContactHistoryFromCustomers` and
+    // lyra-ui's own `resolveOutboundDetailField` use) when no real captured
+    // address exists for this thread.
+    email: channelType === "email" ? channelAddress : undefined,
+    phone: channelType === "voice" || channelType === "sms" ? channelAddress : undefined,
+    whatsappHandle:
+      channelType === "whatsapp" ? channelAddress ?? `@${interaction.customerName ?? "Customer"}` : undefined,
   };
 }
 
@@ -480,6 +614,7 @@ export function ContactHistoryCard({
   onSelectEntry,
   selectedEntryId,
   historyByRange,
+  hideCustomerNames,
 }: {
   /** Fired by clicking anywhere on a row — opens this entry's summary in
    *  `AgentNextGenPage`'s shared right-docked `InteriorPanel` slot (main
@@ -501,6 +636,17 @@ export function ContactHistoryCard({
    *  from a module-level constant, since "Today" is real, growing state
    *  (see this card's own doc comment above), not a fixed fixture. */
   historyByRange: Record<ContactHistoryDateFilterValue, ContactHistoryEntry[]>;
+  /**
+   * Per explicit request, Agent Workspace 2.0 only: rows show
+   * `contactHistoryDisplayIdentity(entry)` (a real reach-back address —
+   * phone for Voice/SMS, email for Email, the row's own WhatsApp handle
+   * for WhatsApp — falling back to `name` for Chat, which has no separate
+   * "handle" concept) in place of `entry.name`. Defaults to false/unset —
+   * Agent Workspace 2.0 Premium/Advanced don't pass this, so both keep
+   * showing real customer names exactly as before, per that same explicit
+   * request ("keep as-is in advanced and premium").
+   */
+  hideCustomerNames?: boolean;
 }) {
   const [dateFilter, setDateFilter] = useState<ContactHistoryDateFilterValue>("today");
   const [searchQuery, setSearchQuery] = useState("");
@@ -511,15 +657,23 @@ export function ContactHistoryCard({
   // a query like "billing" or "CST-30164" both find their row. Case-
   // insensitive substring match, same convention as every other quick
   // search in this app (e.g. `DesktopDesignsPage`'s table toolbar).
+  // `hideCustomerNames` also matches on whatever identity is actually
+  // showing (`contactHistoryDisplayIdentity`) — a phone/email/handle
+  // search should find its row even though `entry.name` itself is never
+  // on screen in that mode.
   const filteredEntries = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return entries;
     return entries.filter((entry) =>
-      [entry.name, entry.description, entry.caseId, entry.channelLabel].some((field) =>
-        field.toLowerCase().includes(query)
-      )
+      [
+        entry.name,
+        entry.description,
+        entry.caseId,
+        entry.channelLabel,
+        ...(hideCustomerNames ? [contactHistoryDisplayIdentity(entry)] : []),
+      ].some((field) => field.toLowerCase().includes(query))
     );
-  }, [entries, searchQuery]);
+  }, [entries, searchQuery, hideCustomerNames]);
 
   return (
     <DashboardCard
@@ -592,6 +746,7 @@ export function ContactHistoryCard({
           {filteredEntries.map((entry, i) => {
             const ChannelIcon = CONTACT_HISTORY_CHANNEL_ICON[entry.channelType];
             const isSelected = entry.id === selectedEntryId;
+            const displayName = hideCustomerNames ? contactHistoryDisplayIdentity(entry) : entry.name;
             return (
               <div
                 key={entry.id}
@@ -618,7 +773,7 @@ export function ContactHistoryCard({
               >
                 <div className="flex flex-col gap-1.5 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="lyra-body-md-emphasis text-lyra-fg-default">{entry.name}</span>
+                    <span className="lyra-body-md-emphasis text-lyra-fg-default">{displayName}</span>
                     {/* Status badge — dot + label, matching the reference
                         screenshot's status-dropdown rows (colored dot,
                         plain text, no pill background) rather than Tag's
@@ -678,13 +833,22 @@ export function ContactHistoryCard({
  *  "Email Summary" for the other two), and the meta line uses `timeAgo`
  *  (a relative string, e.g. "8m ago") in place of that other panel's real
  *  formatted timestamp. */
-export function ContactHistoryEntryDetail({ entry }: { entry: ContactHistoryEntry }) {
+export function ContactHistoryEntryDetail({
+  entry,
+  hideCustomerNames,
+}: {
+  entry: ContactHistoryEntry;
+  /** Same flag/behavior as `ContactHistoryCard`'s own prop of this name —
+   *  see that prop's doc comment. */
+  hideCustomerNames?: boolean;
+}) {
   const notesLabel =
     entry.channelType === "voice" ? "Call Notes" : entry.channelType === "email" ? "Email Summary" : "Chat Summary";
+  const displayName = hideCustomerNames ? contactHistoryDisplayIdentity(entry) : entry.name;
   return (
     <div className="flex flex-col gap-3 p-4">
       <span className="lyra-body-sm text-lyra-fg-secondary">
-        {[entry.statusLabel, entry.name, entry.timeAgo].filter(Boolean).join(" · ")}
+        {[entry.statusLabel, displayName, entry.timeAgo].filter(Boolean).join(" · ")}
       </span>
       <div className="rounded-lyra-md border border-lyra-border-subtle bg-lyra-bg-control-subtle overflow-hidden flex flex-col gap-3 p-4">
         <div className="flex flex-col gap-1 min-w-0">

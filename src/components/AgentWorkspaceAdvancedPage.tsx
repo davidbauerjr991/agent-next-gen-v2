@@ -1,3 +1,15 @@
+// AgentWorkspaceAdvancedPage — "Agent Workspace 2.0 Advanced" (originally
+// "Agent Workspace Advanced", renamed per explicit request — the
+// component/file name and internal `"agent-advanced"` page id/route were
+// deliberately left as-is) in the top-left app menu (agent-next-gen-
+// outbound-data.tsx's `buildAppMenuGroups`, second item), its own route at
+// #/agent-advanced (App.tsx). Per explicit
+// request, this is a duplicate of AgentNextGenPage.tsx (only the exported
+// component's own name + this page's own display strings/page id were
+// changed) — a genuinely separate file/component so edits to "Agent
+// Workspace 2.0" (AgentNextGenPage.tsx) do NOT affect this page, and vice
+// versa. Same convention as AgentWorkspace2WithDeskPage.tsx's own top-of-
+// file note — the two are NOT kept in sync automatically.
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { cn } from "@/lib/utils";
@@ -59,7 +71,7 @@ import {
   ConsultTransferIcon,
   CHANNEL_TYPE_META,
 } from "@nicecxone/lyra-ui";
-import { CREATE_NEW_CUSTOMERS } from "@nicecxone/lyra-ui/customers-data";
+import { CREATE_NEW_CUSTOMERS, type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
 import { useScheduleContent } from "@/components/SchedulePanel";
 import {
   initialsFor,
@@ -148,6 +160,8 @@ import {
   AGENT_WORKSPACE_CUSTOMER_PANEL_TABS,
   buildCustomerInfoFields,
   useCustomerRecordDraft,
+  findPossibleCustomerMatches,
+  filterCustomersByQuery,
 } from "@/components/agent-next-gen-customer-info-panel";
 // PROTOTYPE — local-only, not in lyra-ui yet. See CollapsedChannelBadge's
 // own doc comment for why, and CLAUDE.md's lyra-ui rules for the convention
@@ -194,7 +208,7 @@ import {
 // renamed from `AI_PANEL_DEFAULT_WIDTH` now that Ask AI (its original sole
 // occupant, back when each of these was its own independently-sized
 // `Draggable`) has been removed from this app.
-// ── AgentNextGenPage ── (see agent-next-gen-shared-utils.ts and sibling
+// ── AgentWorkspaceAdvancedPage ── (see agent-next-gen-shared-utils.ts and sibling
 // agent-next-gen-*.ts(x) files for everything this component itself no
 // longer declares — split out once this file crossed Babel's 500KB
 // code-generator threshold)
@@ -411,19 +425,14 @@ const SCREEN_POP_APPS: SelectOption[] = [
 ];
 
 // Search panel's own sub-tabs (`useSearchPanelContent`, agent-next-gen-
-// search-panel.tsx), with "interactions" listed FIRST per explicit request
-// (was "customers" first, per an earlier explicit request — reverted per
-// this later one, "have Interactions be the first tab visible" instead):
-// that hook treats the first entry as both the leftmost tab AND its own
-// default active tab. "customers" was later removed entirely (per explicit
-// request — basic Agent Workspace 2.0 agents don't have customer-database
-// access; that's reserved for Agent Workspace 2.0 Advanced/Premium, see those
-// pages' own `SEARCH_PANEL_TABS`/`WITH_DESK_SEARCH_PANEL_TABS`), leaving
-// just Interactions/Messages/Threads here.
-// `AgentWorkspace2WithDeskPage.tsx` passes its own, shorter list (just
-// Messages/Threads) to the same hook instead of this constant — see that
-// file's own call site.
-const SEARCH_PANEL_TABS: SearchPanelTabKey[] = ["interactions", "messages", "threads"];
+// search-panel.tsx) — all 4 tabs, with "interactions" listed FIRST per
+// explicit request (was "customers" first, per an earlier explicit
+// request — reverted per this later one, "have Interactions be the first
+// tab visible" instead): that hook treats the first entry as both the
+// leftmost tab AND its own default active tab. `AgentWorkspace2WithDeskPage.tsx`
+// passes its own, shorter list (just Messages/Threads) to the same hook
+// instead of this constant — see that file's own call site.
+const SEARCH_PANEL_TABS: SearchPanelTabKey[] = ["interactions", "customers", "messages", "threads"];
 
 // Builds a `tagOpenChannels` closure off of the given `interactions` — reads
 // each `Thread.type`/`.value` (skipping any channel the agent has
@@ -470,16 +479,11 @@ function buildOpenChannelTagger(interactions: Interaction[]) {
   };
 }
 
-/** "7/23/2025 09:32 AM" — the compact numeric date/time style the record
- *  header's own subtitle (Agent Workspace 2.0 only, see this file's own
- *  `resolveActiveChannelDateTimeLabel`/render call site below) uses in
- *  place of the long-form "July 23, 2025"/"9:32 AM" pair every mock/
- *  synthesized `Contact.date`/`startTime` (and `Thread.reopenedContacts`
- *  entry) already stores — reformats rather than introduces a second,
- *  differently-shaped stored value. `undefined`/invalid input (there's no
- *  real date to format) returns `undefined` rather than an empty string,
- *  so the caller's own `&&` guard can skip rendering the subtitle
- *  entirely instead of showing a blank "Email | " with nothing after it. */
+/** Duplicated verbatim from AgentNextGenPage.tsx (Agent Workspace 2.0) per
+ *  this codebase's "no shared sync" convention (see BEHAVIOR.md) — used
+ *  ONLY for the unknown-contact record-header subtitle (see the
+ *  `resolveActiveChannelDateTimeLabel` doc comment below, and the
+ *  `PageHeader`'s `subtitle` render call site further down this file). */
 function formatCompactDateTime(input: string | Date): string | undefined {
   const date = typeof input === "string" ? new Date(input) : input;
   if (Number.isNaN(date.getTime())) return undefined;
@@ -488,36 +492,11 @@ function formatCompactDateTime(input: string | Date): string | undefined {
   return `${datePart} ${timePart}`;
 }
 
-/** Per explicit request (Agent Workspace 2.0 only — see this file's own
- *  `PageHeader` `subtitle` render call site): resolves which date/time this
- *  channel's subtitle should show, in priority order —
- *  1. This Thread's own most recent reopen (`reopenedContacts`, if it's
- *     ever been reopened) — the freshest real activity on this channel.
- *  2. `isFreshLaunch` (a brand-new outbound channel) branches on whether
- *     the customer has actually been contacted yet (per a later explicit
- *     follow-up):
- *     - Chat/SMS/WhatsApp (`isTextChannel`): the literal string `"Draft"`
- *       until `launchedAt` is set (the agent's first live message hasn't
- *       gone out yet — see `threadLaunchTimestamps`'s own doc comment,
- *       above this component), then that FROZEN captured send time —
- *       never a continuously-ticking "now," which is what this used to
- *       return unconditionally for the whole `isFreshLaunch` duration.
- *     - Voice/Email: still `formatCompactDateTime(new Date())`, unchanged
- *       — there's no separate dial/send action modeled for either channel
- *       in this prototype (composer is hidden for both — see rule #20 in
- *       BEHAVIOR.md), so "created" and "launched" are the same moment for
- *       them and there's nothing for a "Draft" state to meaningfully gate
- *       on.
- *  3. Otherwise, the LAST (most recent/"current") entry of whichever fixed
- *     mock session array this channel type reuses everywhere else in this
- *     app (`TRANSCRIPT_SESSIONS`/`_VOICE`/`_EMAIL` — same "no real per-
- *     interaction backend yet" shared-mock-data convention every other
- *     reader of these arrays already follows, `InteractionTranscript`'s
- *     own `lastSessionId` included).
- *  Returns `undefined` for an unrecognized/missing channel type, or a
- *  channel type with no matching mock array at all — the caller's own
- *  `&&` guard skips the subtitle entirely rather than showing a bare
- *  channel label with nothing after it. */
+/** Duplicated verbatim from AgentNextGenPage.tsx (Agent Workspace 2.0) per
+ *  this codebase's "no shared sync" convention — see that file's own doc
+ *  comment on this same function for the full priority-order rationale.
+ *  Used ONLY for the unknown-contact record-header subtitle (this tier's
+ *  real-customer subtitle is untouched by this port). */
 function resolveActiveChannelDateTimeLabel(
   channelType: ChannelType | undefined,
   isFreshLaunch: boolean,
@@ -548,7 +527,7 @@ function resolveActiveChannelDateTimeLabel(
   return formatCompactDateTime(`${lastSession.date} ${lastSession.startTime}`);
 }
 
-export function AgentNextGenPage({
+export function AgentWorkspaceAdvancedPage({
   showPageHeader = false,
   showPanelToggle = false,
   showInteriorPanel = true,
@@ -592,19 +571,10 @@ export function AgentNextGenPage({
     () => (initialInteraction ? [initialInteraction] : [])
   );
   // Keeps `agent-next-gen-case-database.ts`'s own local "database" in sync
-  // with every live interaction's TRUE current state — every message sent,
-  // every status change, every channel added/dismissed — not just a
-  // snapshot frozen at the one moment a card happens to get dismissed. Per
-  // explicit request ("add the ability to write to the database locally
-  // during the session"): this is what makes that write continuous rather
-  // than a single point-in-time save. `handleDismissInteraction` below
-  // ALSO calls `saveCaseRecord` directly, redundantly with this effect —
-  // deliberately: this effect only re-runs on `interactions`'s NEXT change
-  // after a render, so relying on it alone for the dismiss moment itself
-  // (right as that same interaction is being REMOVED from `interactions`)
-  // would race against `setInteractions(remaining)` already having dropped
-  // it by the time this effect could observe it once more. Cheap either
-  // way — `saveCaseRecord` is a plain object-write, not network I/O.
+  // with every live interaction's TRUE current state — see this same
+  // effect's own doc comment in AgentNextGenPage.tsx for the full
+  // reasoning (mirrored here per this file's own established convention of
+  // mirroring bug fixes/behavior changes across all 3 page components).
   useEffect(() => {
     interactions.forEach((interaction) => saveCaseRecord(interaction));
   }, [interactions]);
@@ -741,17 +711,20 @@ export function AgentNextGenPage({
   // Which of the three triggers actually opened the popover currently named
   // by `outcomeDraftKey` — the LeftNav `ChannelRow` Outcome button, the
   // transcript's own `TranscriptSessionSeparator` Outcome button, and the
-  // record-header `ChannelTab`'s kebab "Outcome" entry (plus, in Agent
-  // Workspace 2.0 only, the record-header's own top-right icon-button
-  // cluster that replaces the hidden tab row — source `"header"`) all key
-  // off the exact same `${interactionId}:${channelKey}` value for a given
-  // channel (so all stay in sync on the same shared draft), but that meant
-  // clicking any one satisfied every `outcomeDraftKey === key` check and
-  // popped open more than one popover at once (reported via screenshot,
-  // back when there were only two triggers). Each trigger's own `open` now
-  // additionally requires this to match its own source, so only the one
-  // actually clicked shows as open — the underlying draft (tags/
-  // disposition/summary) still stays the same shared state either way.
+  // record-header `ChannelTab`'s kebab "Outcome" entry all key off the exact
+  // same `${interactionId}:${channelKey}` value for a given channel (so all
+  // three stay in sync on the same shared draft), but that meant clicking
+  // any one satisfied every `outcomeDraftKey === key` check and popped open
+  // more than one popover at once (reported via screenshot, back when there
+  // were only two triggers). Each trigger's own `open` now additionally
+  // requires this to match its own source, so only the one actually clicked
+  // shows as open — the underlying draft (tags/disposition/summary) still
+  // stays the same shared state either way.
+  // Per explicit request/follow-up: a fourth possible source, `"header"`,
+  // for the record header's own top-right icon-button cluster — only
+  // rendered while `showChannelTabRow` reads `false` for the active
+  // interaction (see that const's own doc comment). Mirrors Agent Workspace
+  // 2.0's identical `outcomeDraftSource` union (AgentNextGenPage.tsx).
   const [outcomeDraftSource, setOutcomeDraftSource] = useState<"leftnav" | "transcript" | "tab" | "header" | null>(null);
   const buildDefaultOutcomeDraft = () => ({
     tags: ["Technical", "Account"],
@@ -759,21 +732,48 @@ export function AgentNextGenPage({
     summary: OUTCOME_DEFAULT_SUMMARY,
   });
   const [outcomeDraft, setOutcomeDraft] = useState(buildDefaultOutcomeDraft);
-  /** Per explicit request (2.0 only — see `resolveActiveChannelDateTimeLabel`'s
-   *  own doc comment for the render side): the real `Date` a fresh chat/SMS/
-   *  WhatsApp thread's first live message actually went out, captured ONCE
-   *  (never overwritten) the moment `handleSendMessage` sees it's the
-   *  channel's first send, keyed `${interactionId}:${channelKey}` — same
-   *  scheme `outcomeDraftKey` uses, since a literal channel id/type can
-   *  repeat across different interactions. Until an entry exists for a given
-   *  key, that channel's header subtitle shows "Draft" instead of a date/
-   *  time (a freshly-created thread that hasn't actually contacted the
-   *  customer yet isn't genuinely "launched"). Voice/Email never get an
-   *  entry here — there's no separate send/dial action in this prototype to
-   *  gate them on, so they're never in a "Draft" state to begin with. Local
-   *  component state (not on `Interaction`) since this is purely a 2.0
-   *  header-subtitle concern, not shared app data. */
+  // Duplicated verbatim from AgentNextGenPage.tsx (Agent Workspace 2.0) per
+  // this codebase's "no shared sync" convention — records, per
+  // `${interactionId}:${channelKey}`, the real wall-clock moment a
+  // brand-new text-channel thread's first-ever LIVE agent message actually
+  // went out (captured once inside `handleSendMessage`, below). Used only
+  // by `resolveActiveChannelDateTimeLabel` (above) so a fresh outbound
+  // chat/SMS/WhatsApp thread's unknown-contact subtitle shows the literal
+  // string "Draft" until that first message is sent, then freezes on the
+  // real send time instead of ticking with `new Date()` forever.
   const [threadLaunchTimestamps, setThreadLaunchTimestamps] = useState<Record<string, string>>({});
+  /* ── Unknown-contact customer matching (per explicit request) ──
+     When the docked Customer Information panel is showing an unknown-
+     contact interaction (`!activeInteractionIsRealCustomer`, below), it now
+     runs a simulated "does this look like anyone in the directory" check
+     instead of just a blank Detail-tab form — these three pieces of state
+     back that flow. See `handleLinkCustomerRecord`/`handleCreateNewCustomer`
+     (below `handleOutcomeOpenChange`) for what actually consumes them, and
+     `findPossibleCustomerMatches`/`CustomerMatchSearchBody`'s own doc
+     comments (agent-next-gen-customer-info-panel.tsx) for the check itself. */
+  /** Which step of the flow is showing — "search" (possible matches / 0
+   *  matches / manual search) or "create" (the "Create New Customer"
+   *  form). Reset to "search" whenever a DIFFERENT interaction becomes
+   *  active (see the reset effect a bit further down, once
+   *  `activeInteraction` itself is in scope) — an agent shouldn't land
+   *  back on the create form for interaction B just because they'd
+   *  clicked into it for interaction A. */
+  const [customerMatchStep, setCustomerMatchStep] = useState<"search" | "create">("search");
+  /** The "Search Customers" box's own typed value — reset alongside
+   *  `customerMatchStep` for the same reason. */
+  const [customerMatchQuery, setCustomerMatchQuery] = useState("");
+  /** Customer directory records created THIS session via "Create New
+   *  Customer" (see `handleCreateNewCustomer` below) — there's no real
+   *  backend here to persist a new record into the actual
+   *  `CREATE_NEW_CUSTOMERS` directory (that array is static, imported
+   *  data), so newly "created" customers live here instead, in-memory for
+   *  the rest of the session. Checked alongside `CREATE_NEW_CUSTOMERS`
+   *  everywhere a real-customer membership test happens
+   *  (`activeInteractionIsRealCustomer` below) and everywhere the match/
+   *  search pool is built, so a customer created earlier this session
+   *  reads as "real" from then on and can even show up as a possible
+   *  match for a LATER unrelated unknown contact. */
+  const [createdCustomerRecords, setCreatedCustomerRecords] = useState<CreateNewCustomerRecord[]>([]);
   const handleOutcomeOpenChange = (key: string, open: boolean, source: "leftnav" | "transcript" | "tab" | "header") => {
     if (open) {
       // Reset to a fresh draft every time a (possibly different) channel's
@@ -801,18 +801,50 @@ export function AgentNextGenPage({
     setOutcomeDraftSource(null);
   };
   // Own `resolutionMenuOpen`/`resolutionMenuView` state for the record-
-  // header's icon-button-cluster Outcome popover (Agent Workspace 2.0 only
-  // — see `showChannelTabRow`'s own doc comment above), built with the same
-  // now-exported `useOutcomePopoverState`/`buildOutcomePopoverSlots` helpers
-  // `ChannelRow`/`ChannelTab` themselves use internally (channel-row.tsx) —
-  // reused verbatim here rather than hand-duplicating that popover's own
-  // Resolution/Tags/Disposition/Summary form a third time. A dedicated
-  // instance (not shared with the LeftNav/tab popovers' own internal state,
-  // which live inside those lyra-ui components and aren't reachable from
-  // here) — harmless since only one Outcome popover is ever open at a time
-  // regardless (`outcomeDraftKey`/`outcomeDraftSource` above already
-  // enforce that across all triggers, this one included via `"header"`).
+  // header's icon-button-cluster Outcome popover, only rendered while
+  // `showChannelTabRow` reads `false` for the active interaction (see that
+  // const's own doc comment) — built with the same `useOutcomePopoverState`/
+  // `buildOutcomePopoverSlots` helpers Agent Workspace 2.0's identical
+  // header cluster already uses (AgentNextGenPage.tsx), exported from
+  // lyra-ui specifically so this exact popover-composition doesn't need to
+  // be hand-rolled a third time here.
   const headerOutcomePopoverState = useOutcomePopoverState();
+  /* ── Header status chip (only while `showChannelTabRow` is `false` for
+     the active interaction — see that const's own doc comment) ──
+     Own local Popover open/view state, mirroring Agent Workspace 2.0's
+     identical `headerStatusMenuOpen`/`headerStatusMenuView` pair
+     (AgentNextGenPage.tsx) — a single header instance never has more than
+     one of itself on screen, so a lone `useState` pair is enough, no id/
+     key needed. Renders via `ChannelStatusTag` (agent-next-gen-
+     transcript.tsx), the same component `TranscriptSessionSeparator` uses
+     for its own copy. */
+  const [headerStatusMenuOpen, setHeaderStatusMenuOpen] = useState(false);
+  const [headerStatusMenuView, setHeaderStatusMenuView] = useState<"menu" | "confirm">("menu");
+  const handleHeaderStatusMenuOpenChange = (open: boolean) => {
+    setHeaderStatusMenuOpen(open);
+    setHeaderStatusMenuView("menu");
+  };
+  const handleHeaderSelectStatus = (status: string) => {
+    if (status === "Closed") {
+      setHeaderStatusMenuView("confirm");
+      return;
+    }
+    if (activeInteraction && activeChannel) {
+      handleInteractionStatusChange(activeInteraction.id, activeChannel.id, status);
+    }
+    setHeaderStatusMenuOpen(false);
+  };
+  const handleHeaderConfirmCloseStatus = () => {
+    if (activeInteraction && activeChannel) {
+      handleInteractionStatusChange(activeInteraction.id, activeChannel.id, "Closed");
+    }
+    setHeaderStatusMenuOpen(false);
+    setHeaderStatusMenuView("menu");
+  };
+  const handleHeaderCancelCloseStatus = () => {
+    setHeaderStatusMenuOpen(false);
+    setHeaderStatusMenuView("menu");
+  };
   const contactHistoryByRange = useMemo(
     () => buildContactHistoryByRange(dismissedContactHistory),
     [dismissedContactHistory]
@@ -974,6 +1006,19 @@ export function AgentNextGenPage({
   useEffect(() => {
     setActiveCustomerOverviewEditing(false);
   }, [activeInteraction?.customerId]);
+  // Keyed on `activeInteraction?.id` (the left-nav slot key — this flips
+  // the instant `handleLinkCustomerRecord`/`handleCreateNewCustomer`
+  // succeed too, since both reassign it), not `customerId` like the effect
+  // above: switching to a genuinely DIFFERENT card should always land back
+  // on the search step, but resolving THIS SAME card's own unknown-contact
+  // flow (which also changes `id`) should too — the panel stops rendering
+  // this UI at all the instant `activeInteractionIsRealCustomer` flips
+  // true, so there's nothing wrong with also quietly resetting `step` back
+  // to "search" under it as this fires.
+  useEffect(() => {
+    setCustomerMatchStep("search");
+    setCustomerMatchQuery("");
+  }, [activeInteraction?.id]);
 
   /* A past session's conversation opened as a TAB in the interaction space
      (record header), via the Customer Information panel's Overview "Open
@@ -1040,42 +1085,224 @@ export function AgentNextGenPage({
   // hasn't replied yet" (`lastCustomerMessageTick`), same compound check
   // `isNewOutboundThread` uses at the LeftNav card / record-header tab
   // loops (their own doc comments have the full reasoning) — reused here
-  // as the single shared value for every OTHER surface keyed off the
-  // ACTIVE channel specifically: `InteractionTranscript`'s `isNewThread`
-  // prop (the session row) and, in this 2.0-only file, the header's own
-  // icon-button action cluster.
+  // for `InteractionTranscript`'s own `isNewThread` prop (the session row).
   const activeChannelIsNewOutboundThread =
     !!activeInteraction?.startedFresh && activeChannel?.lastCustomerMessageTick === undefined;
   // Per explicit request: true when the active interaction's own `id` is
   // one of `OUTBOUND_AGENTS`'s ids — i.e. this is an agent-to-agent voice
   // call, not a customer interaction (an agent's own outbound "Chat" pick
   // never reaches this state at all — `handleStartCall`'s own agent+chat
-  // branch, above, returns early before ever creating one). Customer
-  // Information is already unconditionally hidden in this 2.0-only file
-  // (`showCustomerInformation`, above) regardless of this flag, so the only
-  // thing this actually gates here is the header's own status chip
-  // (`ChannelStatusTag`, further down) — an agent call has no real
-  // Open/Pending/Resolved/Closed disposition to log against a colleague the
-  // way a genuine customer contact does.
+  // branch, below, returns early before ever creating one). Gates BOTH
+  // Customer Information (the docked panel + its header toggle/hover-
+  // preview — an agent-to-agent call has no real customer record behind it
+  // any more meaningfully than the existing "unknown contact" case does,
+  // but per explicit follow-up request this hides it outright rather than
+  // falling back to the Detail-only tab set that case still gets) AND the
+  // header's own status chip (`ChannelStatusTag`, further down — an agent
+  // call has no real Open/Pending/Resolved/Closed disposition to log
+  // against a colleague the way a genuine customer contact does).
   const activeInteractionIsAgentCall = !!activeInteraction && OUTBOUND_AGENTS.some((a: CreateNewOutboundContact) => a.id === activeInteraction.id);
-  // Looks up `threadLaunchTimestamps`' own captured entry (if any) for the
-  // ACTIVE channel specifically — see that state's own doc comment for the
-  // full "Draft" reasoning. Same `${interactionId}:${channelKey}` scheme
-  // `handleSendMessage` writes with.
+  // Per explicit request: true when the active interaction is genuinely
+  // backed by a real `CREATE_NEW_CUSTOMERS` directory record — every
+  // creation path either reuses that real `customer-N` id verbatim
+  // (`handleStartCall`'s directory pick, `handleOpenAssignmentFromNotification`,
+  // `handleOpenInteractionRow`, a `handleRedial` with a real
+  // `entry.customerId`) or falls back to a synthetic, namespaced one with
+  // no backing record (`quickdial:`, a `redial:` with no real customerId,
+  // lyra-ui's `adhoc:` "Continue with" flow, a hand-authored Contact
+  // History-only entry) — so this membership check is the precise,
+  // general "is this a real customer" signal, not just a prefix check on
+  // one specific synthetic namespace. `true` when there's no active
+  // interaction at all — harmless default, nothing reads it in that case.
+  // ALSO true when `id` matches a `createdCustomerRecords` entry (above) —
+  // per explicit request, an interaction the agent just ran "Create New
+  // Customer" or "Link To Record" on (`handleCreateNewCustomer`/
+  // `handleLinkCustomerRecord`, below) must immediately read as a real
+  // customer too, promoting it straight into every OTHER tier of this same
+  // "real customer" treatment (full channel tab row, full Customer
+  // Information tab set, plain customer-ID subtitle — see
+  // `showChannelTabRow` right below) the instant either action resolves,
+  // not just at the customer directory's own static, build-time contents.
+  const activeInteractionIsRealCustomer = activeInteraction
+    ? CREATE_NEW_CUSTOMERS.some((c) => c.id === activeInteraction.id) ||
+      createdCustomerRecords.some((c) => c.id === activeInteraction.id)
+    : true;
+  // Per explicit request: for a brand-new outbound assignment NOT
+  // associated with a real customer record, this tier gets the SAME
+  // no-tab-row header treatment Agent Workspace 2.0 always uses (see that
+  // file's own `showChannelTabRow` doc comment) — there's no real customer
+  // database behind a synthetic id here either, and with only ever the one
+  // channel such an interaction can have, the tab row has nothing useful
+  // to show. Unlike 2.0's hardcoded `false`, this is per-INTERACTION here:
+  // an interaction genuinely tied to a real customer
+  // (`activeInteractionIsRealCustomer`) keeps the full tab row exactly as
+  // before — per explicit follow-up, that half of this tier's behavior is
+  // unchanged for now. Whole-lifetime, not just while `startedFresh` — an
+  // old reopened synthetic Contact History entry gets this treatment too,
+  // for as long as it's never actually a real customer record, not just
+  // while freshly launched.
+  const showChannelTabRow = !activeInteraction || activeInteractionIsRealCustomer;
+  // Duplicated verbatim from AgentNextGenPage.tsx (Agent Workspace 2.0) per
+  // this codebase's "no shared sync" convention — the launch timestamp
+  // (see `threadLaunchTimestamps`'s own doc comment above) for THIS active
+  // channel specifically, and the resolved date/time (or "Draft") label
+  // built from it. Used ONLY by the unknown-contact `PageHeader` subtitle
+  // further down this file — a real-customer interaction's plain
+  // customer-ID subtitle never reads either of these.
   const activeChannelLaunchedAt = activeInteraction
     ? threadLaunchTimestamps[`${activeInteraction.id}:${activeChannel?.id ?? activeChannel?.type ?? ""}`]
     : undefined;
-  // Per explicit request (Agent Workspace 2.0 only — see the `PageHeader`
-  // `subtitle` render call site below): this channel's own "Email | M/D/
-  // YYYY hh:mm AM/PM"-style date/time, replacing the plain customer ID
-  // subtitle every other tier keeps. See `resolveActiveChannelDateTimeLabel`'s
-  // own doc comment above for the full resolution order.
   const activeChannelDateTime = resolveActiveChannelDateTimeLabel(
     activeChannelType,
     !!activeInteraction?.startedFresh,
     activeChannel,
     activeChannelLaunchedAt
   );
+  // The full pool the unknown-contact matching flow (below) checks against
+  // — the static directory plus anything `createdCustomerRecords` has
+  // added this session (see that state's own doc comment for why a
+  // created customer belongs in the pool too).
+  const customerDirectoryPool = useMemo(
+    () => [...CREATE_NEW_CUSTOMERS, ...createdCustomerRecords],
+    [createdCustomerRecords]
+  );
+  // The raw dialed/typed identifier this unknown channel was reached on —
+  // `Thread.value` (e.g. `handleQuickDial`'s own dialed `phoneNumber`) when
+  // set, falling back to its own display label, then to whatever this
+  // interaction's own card is titled, then its id — there's always SOME
+  // stable string by the last fallback, which is all
+  // `findPossibleCustomerMatches` actually needs (see that function's own
+  // doc comment for why the exact string barely matters — it's a
+  // deterministic seed, not something the check parses for meaning).
+  const activeUnknownContactIdentifier =
+    activeChannel?.value ?? activeChannel?.addressLabel ?? activeInteraction?.customerName ?? activeInteraction?.id;
+  // Per explicit request: the automatic "does this look like anyone in the
+  // directory" check for the active unknown-contact interaction — see
+  // `findPossibleCustomerMatches`'s own doc comment
+  // (agent-next-gen-customer-info-panel.tsx) for what it actually does.
+  // Computed unconditionally (harmless for a real-customer interaction —
+  // nothing reads it in that case, since the panel never sets `matchState`
+  // for one) rather than gated behind `!activeInteractionIsRealCustomer`
+  // here, so the `useMemo` dependency list stays simple.
+  const possibleCustomerMatches = useMemo(
+    () => findPossibleCustomerMatches(activeUnknownContactIdentifier, customerDirectoryPool),
+    [activeUnknownContactIdentifier, customerDirectoryPool]
+  );
+  // The "Search Customers" box's own manual results — see
+  // `filterCustomersByQuery`'s own doc comment. Empty (and therefore never
+  // shown — see `CustomerInformationSidePanel`'s own `matchState` render
+  // branch) until the agent actually types something.
+  const customerSearchResults = useMemo(
+    () => filterCustomersByQuery(customerMatchQuery, customerDirectoryPool),
+    [customerMatchQuery, customerDirectoryPool]
+  );
+  /** Per explicit request: promotes the active unknown-contact interaction
+   *  to a REAL customer by pointing it at an EXISTING directory record the
+   *  agent picked from the "Possible Matches"/search list (`onLinkRecord`,
+   *  wired into `CustomerMatchSearchBody`'s own "Link To Record" button —
+   *  see that component's doc comment). Reassigns this interaction's own
+   *  identity fields to the matched record's — `id` (so
+   *  `activeInteractionIsRealCustomer` above reads `true` from the very
+   *  next render, cascading into every other "real customer" surface:
+   *  `showChannelTabRow`, the full Customer Information tab set, the plain
+   *  customer-ID subtitle — see each of those consts' own doc comments),
+   *  `customerId`, and `customerName`. Changing `customerId` also resets
+   *  `activeCustomerRecordDraft` (that hook's own reset-on-recordId-change
+   *  effect — see `useCustomerRecordDraft`'s own doc comment) to a FRESH
+   *  draft synthesized from the matched record, discarding whatever was
+   *  pending in the unknown-contact Detail form — correct here, since this
+   *  interaction is now a totally different, already-real customer, not a
+   *  continuation of the blank one. Deliberately updates `interactions`/
+   *  `activeInteractionId` directly rather than going through
+   *  `switchActiveInteraction` — this isn't switching to a DIFFERENT card,
+   *  it's the same card being recognized as someone real, so none of that
+   *  helper's "leaving one assignment for another" side-panel bookkeeping
+   *  applies. */
+  const handleLinkCustomerRecord = (customer: CreateNewCustomerRecord) => {
+    if (!activeInteraction) return;
+    const fromId = activeInteraction.id;
+    setInteractions((prev) =>
+      prev.map((interaction) =>
+        interaction.id === fromId
+          ? { ...interaction, id: customer.id, customerId: customer.customerId, customerName: customer.name }
+          : interaction
+      )
+    );
+    setActiveInteractionId(customer.id);
+    addToast({
+      variant: "success",
+      title: "Linked to record",
+      message: `Linked to ${customer.name}'s customer record`,
+      duration: 4000,
+    });
+  };
+  /** Advances the unknown-contact matching flow to its "Create New
+   *  Customer" step (`CustomerMatchSearchBody`'s footer button) — see
+   *  `customerMatchStep`'s own doc comment. */
+  const handleStartCreateCustomer = () => setCustomerMatchStep("create");
+  /** Returns to the search step WITHOUT discarding anything — the header's
+   *  own back-arrow button (`CustomerInformationSidePanel`'s
+   *  `matchState.onBackToSearch`) uses this directly; the create step's
+   *  own Cancel button calls `activeCustomerRecordDraft.cancel()` first,
+   *  THEN this — see that render call site. */
+  const handleBackToCustomerSearch = () => setCustomerMatchStep("search");
+  /** Per explicit request: promotes the active unknown-contact interaction
+   *  to a real customer by minting a brand-new directory record from
+   *  whatever the agent typed into the "Create New Customer" form
+   *  (`activeCustomerRecordDraft.draft` — the SAME Detail-tab draft this
+   *  panel already showed for this interaction; see
+   *  `CustomerInformationSidePanel`'s own `matchState` body branch for why
+   *  no separate draft/hook is needed for this step). Deliberately does
+   *  NOT reassign `customerId` (unlike `handleLinkCustomerRecord` above) —
+   *  keeping the interaction's own existing case number means
+   *  `activeCustomerRecordDraft` never resets (its own reset effect is
+   *  keyed on `customerId`, unchanged here), so every field the agent just
+   *  typed stays showing, unbroken, the instant this flips the panel over
+   *  to the full "known customer" Detail tab — genuinely "the new customer
+   *  information populated," per the request, not a fresh resynthesis.
+   *  Only `id` (so `activeInteractionIsRealCustomer` flips true) and
+   *  `customerName` (built from the typed name, so the record header's
+   *  title updates too) change. */
+  const handleSaveNewCustomer = () => {
+    if (!activeInteraction) return;
+    const firstName = activeCustomerRecordDraft.draft.firstName.trim();
+    const lastName = activeCustomerRecordDraft.draft.lastName.trim();
+    const name = [firstName, lastName].filter(Boolean).join(" ") || activeInteraction.customerName || "New Customer";
+    const newId = `created-customer:${activeInteraction.id}`;
+    const newRecord: CreateNewCustomerRecord = {
+      id: newId,
+      name,
+      customerId: activeInteraction.customerId,
+      channels: activeChannelType ? [activeChannelType] : [],
+      avatarClassName: "bg-lyra-accent-blue-soft text-lyra-accent-blue-strong",
+      firstName: firstName || name,
+      lastName,
+      group: activeCustomerRecordDraft.draft.group || "Standard",
+      firstPhone: activeChannelType === "voice" ? (activeChannel?.value ?? "") : "",
+      emailAddress: activeChannelType === "email" ? (activeChannel?.value ?? "") : "",
+      address1: "",
+      city: "",
+      state: "",
+      postalCode: "",
+      originalCustomerId: activeCustomerRecordDraft.draft.originalContactNumber || activeInteraction.customerId,
+      dateOfBirth: "",
+      agent: `${CURRENT_AGENT_FIRST_NAME} ${CURRENT_AGENT_LAST_NAME}`,
+      agentTeam: "",
+      paymentBalance: activeCustomerRecordDraft.draft.balanceDue || "$0.00",
+    };
+    const fromId = activeInteraction.id;
+    setCreatedCustomerRecords((prev) => [...prev, newRecord]);
+    setInteractions((prev) =>
+      prev.map((interaction) => (interaction.id === fromId ? { ...interaction, id: newId, customerName: name } : interaction))
+    );
+    setActiveInteractionId(newId);
+    addToast({
+      variant: "success",
+      title: "Customer created",
+      message: `${name} added to the customer directory`,
+      duration: 4000,
+    });
+  };
   // Shared clock powering every open channel's live "MM:SS since it
   // started" elapsed display — independent of `elapsedSeconds` below, which
   // is the agent's own status timer and resets on status change.
@@ -1206,7 +1433,7 @@ export function AgentNextGenPage({
   const appMenuGroups = buildAppMenuGroups((page) => {
     setAppMenuOpen(false);
     onNavigate?.(page);
-  }, "agent");
+  }, "agent-advanced");
 
   /* Panel animation state machine — see AgentNextGenTemplate.stories.tsx for full comment */
   type PanelState = "closed" | "open" | "closing";
@@ -1559,65 +1786,6 @@ export function AgentNextGenPage({
      version this replaces got away with: a `SidePanel` needs pinned vs.
      hover-preview state and its own narrow-container guard, since (unlike
      `InteriorPanel`) it has no such handling built in. */
-  // Per explicit request: "Agent Workspace 2.0" (this file — NOT Premium/
-  // AgentWorkspace2WithDeskPage.tsx, NOT Advanced/
-  // AgentWorkspaceAdvancedPage.tsx, both of which keep the panel unchanged)
-  // has no real customer database behind it to look anything up in, so the
-  // panel would only ever open onto empty/meaningless content here — the
-  // whole feature (docked panel, its header toggle button, and its hover
-  // preview) is disabled at the two render sites below (search
-  // `showCustomerInformation` — deliberately a single named constant, not
-  // scattered `false`s, so this is one flip to reverse later) rather than
-  // removed outright, since the state/handlers themselves are still shared
-  // verbatim with Premium/Advanced and easiest to keep mirrored across all
-  // three per this file's own established convention.
-  const showCustomerInformation = false;
-  // Same "no real customer database behind this tier" reasoning as
-  // `showCustomerInformation` just above, applied to a second surface: the
-  // record header's own top-right "add another channel to this same
-  // interaction" row (`getAvailableChannels`/`getHeaderAction`, both from
-  // `useOutboundAddButton` below — see that hook's own call site). Adding a
-  // channel there only makes sense if there's a real customer record to ask
-  // "what OTHER addresses does this person have on file" — with no such
-  // record behind Agent Workspace 2.0, every interaction is just the one
-  // channel it started on, 1:1, with no "+" affordance offering others.
-  // Per explicit request, Premium/Advanced keep this row exactly as-is —
-  // only gates the record-header render site below, not the shared
-  // `useOutboundAddButton` hook call itself or the LeftNav card's own
-  // separate `getHeaderAction(interaction.id)` "+" (out of scope for this
-  // request, which named the top-right row specifically).
-  const showAddChannelActions = false;
-  // Same "no real customer database, every interaction is 1:1" reasoning as
-  // `showAddChannelActions` just above, applied a third time: with no
-  // ability to add another channel to an interaction, there is also never
-  // more than the one thread to switch between, so the channel tab row
-  // below the record header (the `TabList`/`ChannelTab` strip) has nothing
-  // useful to show — it would only ever render a single non-interactive tab.
-  // Per explicit request, hide that row entirely in Agent Workspace 2.0 and
-  // relocate its per-channel kebab actions (Unassign & Dismiss, Consult/
-  // Transfer, Outcome, Send Transcript, Download Transcript, Translate
-  // Messages) as individual icon buttons into the record header's top-right
-  // `actions` slot instead (see the `PageHeader` render site below). Premium/
-  // Advanced keep the tab row exactly as-is.
-  const showChannelTabRow = false;
-  // Follow-up to `showChannelTabRow` just above: per explicit request, once
-  // that row's per-channel Transfer/Outcome/Unassign & Dismiss icons moved
-  // up into the record header, the exact same icons in `InteractionTranscript`'s
-  // own per-session row (`TranscriptSessionSeparator`'s own copy of that
-  // cluster) read as redundant duplicates of the header's now-permanent
-  // copy — hidden there too via `InteractionTranscript`'s own
-  // `showSessionActionCluster` prop (see that prop's own doc comment,
-  // agent-next-gen-transcript.tsx) at this file's own call site below. The
-  // session row's status CHIP specifically isn't just hidden alongside the
-  // rest of that cluster, though — it's relocated into the header's own
-  // icon-button row instead (`ChannelStatusTag`, imported from that same
-  // module and reused verbatim rather than rebuilt, per the `Popover`
-  // gotcha CLAUDE.md documents for hand-duplicating rich popovers), landing
-  // as the last (far-right) item after the six icon buttons so it's still
-  // reachable with the session row's own copy gone. Premium/Advanced keep
-  // the session row's own cluster (icons AND status chip) exactly as-is —
-  // this constant only ever threads through to the one 2.0 call site.
-  const showSessionActionCluster = false;
   // Open + pinned by default (per explicit request) — a fresh interaction's
   // Customer Information panel starts docked open rather than closed/
   // hover-only; `isSidePanelContainerNarrow`'s guard below still forces it
@@ -2443,26 +2611,11 @@ export function AgentNextGenPage({
     const id = entry.customerId ?? `history:${entry.id}`;
     const existingInteraction = interactions.find((i) => i.id === id);
     // Restore the exact record `agent-next-gen-case-database.ts` saved for
-    // this case (every Thread, every liveMessages entry, every
-    // threadStatuses value) INSTEAD of rebuilding a lossy guess from this
-    // entry's own single-channel summary — see that module's own top-of-
-    // file comment for the three bugs this fixes: reopening used to always
-    // synthesize a brand-new address (a second "tab" for the same channel
-    // type instead of continuing the one the customer actually messaged
-    // on), start with zero prior messages (the whole conversation gone),
-    // and pick up `entry.statusLabel` — one lossy summary field — rather
-    // than the real per-channel status map, which could read differently
-    // the moment an interaction ever had more than one open channel.
-    //
-    // Only takes this path when there's no ALREADY-live interaction under
-    // this same `id` — if the card's still open right now (the customer
-    // has another channel open elsewhere on it, say), the merge-into-
-    // existing-Thread branch further down already handles that correctly
-    // and should keep doing so untouched. Falls through to this function's
-    // prior synthesized-`Thread` behavior below when no DB record exists
-    // either — true for every hand-authored `CONTACT_HISTORY`/
-    // `EXTENDED_CONTACT_HISTORY` fixture row, which never existed as a
-    // real, live `Interaction` in this session for anything to have saved.
+    // this case instead of rebuilding a lossy guess from this entry's own
+    // single-channel summary — see that module's own top-of-file comment,
+    // and this same short-circuit's doc comment in AgentNextGenPage.tsx,
+    // for the full reasoning (mirrored here per this file's own
+    // established convention).
     if (!existingInteraction) {
       const storedRecord = getCaseRecord(entry.caseId);
       if (storedRecord) {
@@ -2638,14 +2791,9 @@ export function AgentNextGenPage({
         messages.some((m) => m.sender === "agent")
       );
       if (everSentAgentMessage) {
-        // Belt-and-suspenders explicit save, on top of the continuous
-        // `useEffect` sync above — see that effect's own doc comment for why
-        // this is the one moment relying on it alone would race against
-        // `setInteractions(remaining)` below already having dropped this
-        // interaction. This is what `handleReopenContactHistoryEntry` reads
-        // back to restore the exact record (every Thread, every liveMessages
-        // entry, every threadStatuses value) instead of rebuilding a lossy
-        // guess from this dismiss's own summary `ContactHistoryEntry` alone.
+        // Explicit save, redundant with the continuous `useEffect` sync above
+        // — see that effect's own doc comment in AgentNextGenPage.tsx for why
+        // this exact moment can't rely on the effect alone.
         saveCaseRecord(dismissed);
         const entry = buildDismissedContactHistoryEntry(dismissed, clockTick);
         // Upsert by `caseId`, not a plain prepend — per explicit bug report:
@@ -2795,14 +2943,11 @@ export function AgentNextGenPage({
         : undefined) ??
       "channel";
 
-    // Per explicit request (2.0 only) — see `threadLaunchTimestamps`'s own
-    // doc comment above: this is the channel's first-ever live message
-    // exactly when it has no `liveMessages` entry yet for this key — the
-    // real "launched" moment for a fresh chat/SMS/WhatsApp thread. Captured
-    // once (the `prev[launchKey] ?` guard makes this a no-op on every later
-    // send for the same channel) so 2.0's header subtitle can stop showing
-    // "Draft" and show this frozen date/time instead, rather than a
-    // continuously-ticking "now."
+    // Duplicated verbatim from AgentNextGenPage.tsx (Agent Workspace 2.0)
+    // per this codebase's "no shared sync" convention — captures the real
+    // send time of a brand-new thread's first-ever LIVE agent message
+    // (guarded on no prior `liveMessages` for this channel key), once, into
+    // `threadLaunchTimestamps` (see that state's own doc comment above).
     if (!interactionAtSend?.liveMessages?.[channelKeyAtSend]?.length) {
       const launchKey = `${interactionId}:${channelKeyAtSend}`;
       setThreadLaunchTimestamps((prev) => (prev[launchKey] ? prev : { ...prev, [launchKey]: new Date().toISOString() }));
@@ -2898,53 +3043,6 @@ export function AgentNextGenPage({
     );
   };
 
-  /* ── Header status chip (Agent Workspace 2.0 only) ──
-     Own local Popover open/view state — unlike `InteractionTranscript`'s own
-     `statusMenuOpenId`/`statusMenuView` (which have to name WHICH session,
-     since a transcript can show several `TranscriptSessionSeparator` rows
-     at once and only one of their status popovers should ever be open), a
-     single header instance never has more than one of itself on screen, so
-     a lone `useState` pair is enough — no id/key needed. Renders via
-     `ChannelStatusTag` (agent-next-gen-transcript.tsx), the same component
-     `TranscriptSessionSeparator` uses for its own (now-hidden-in-2.0)
-     copy — see `showSessionActionCluster`'s own doc comment above for the
-     full reasoning. */
-  const [headerStatusMenuOpen, setHeaderStatusMenuOpen] = useState(false);
-  const [headerStatusMenuView, setHeaderStatusMenuView] = useState<"menu" | "confirm">("menu");
-  // Opening (or re-opening) always starts on the list view, same "never
-  // stranded on a stale confirm view" reasoning
-  // `InteractionTranscript`'s own `handleStatusMenuOpenChange` documents.
-  const handleHeaderStatusMenuOpenChange = (open: boolean) => {
-    setHeaderStatusMenuOpen(open);
-    setHeaderStatusMenuView("menu");
-  };
-  // A non-"Closed" status picked straight from the list — applies right
-  // away (via the same `handleInteractionStatusChange` every other status
-  // trigger for this channel already funnels through) and closes the
-  // popover. "Closed" itself routes to the confirm view first instead — see
-  // `handleHeaderConfirmCloseStatus` below.
-  const handleHeaderSelectStatus = (status: string) => {
-    if (status === "Closed") {
-      setHeaderStatusMenuView("confirm");
-      return;
-    }
-    if (activeInteraction && activeChannel) {
-      handleInteractionStatusChange(activeInteraction.id, activeChannel.id, status);
-    }
-    setHeaderStatusMenuOpen(false);
-  };
-  const handleHeaderConfirmCloseStatus = () => {
-    if (activeInteraction && activeChannel) {
-      handleInteractionStatusChange(activeInteraction.id, activeChannel.id, "Closed");
-    }
-    setHeaderStatusMenuOpen(false);
-    setHeaderStatusMenuView("menu");
-  };
-  const handleHeaderCancelCloseStatus = () => {
-    setHeaderStatusMenuOpen(false);
-    setHeaderStatusMenuView("menu");
-  };
-
   /* ── Preventing duplicate channels from the CreateNew picker ──
      A contact already reachable via a currently-open channel (e.g. Jamie
      Torres has an SMS interaction open on a specific number) still shows
@@ -2978,23 +3076,7 @@ export function AgentNextGenPage({
     const tagOpenChannels = buildOpenChannelTagger(interactions);
     return {
       ...OUTBOUND_CONFIG,
-      // "customers" dropped entirely (per explicit request) — basic Agent
-      // Workspace 2.0 agents don't have customer-database access, same
-      // reasoning `SEARCH_PANEL_TABS` above already removed "customers"
-      // for (Agent Workspace 2.0 Advanced/Premium keep the full group list —
-      // their own `outboundConfig` memos, AgentWorkspaceAdvancedPage.tsx/
-      // AgentWorkspace2WithDeskPage.tsx, are untouched). Same "filter
-      // before mapping" pattern `OUTBOUND_CONFIG` itself already uses to
-      // hide the "dialpad" group everywhere (`HIDDEN_OUTBOUND_GROUP_IDS`,
-      // agent-next-gen-outbound-data.tsx) — done locally here instead,
-      // since only this one page needs it, not every consumer of the
-      // shared `OUTBOUND_CONFIG`. Filtering the group out here removes it
-      // from BOTH the "Choose group" dropdown AND the "All" group's own
-      // search pool (`allOutboundContacts`, create-new.tsx, is built by
-      // flat-mapping `outbound.groups` — an excluded group's contacts
-      // never enter it), so this also satisfies "don't allow the search
-      // to pull customer records" with no separate handling needed.
-      groups: OUTBOUND_CONFIG.groups.filter((group) => group.id !== "customers").map((group) => {
+      groups: OUTBOUND_CONFIG.groups.map((group) => {
         // Teams' own "Choose team" sub-picker — per explicit request,
         // picking a team here swaps this group's `contacts` from the
         // (now-unused-as-a-list) team records over to that team's real
@@ -4203,8 +4285,8 @@ export function AgentNextGenPage({
             <PopoverPrimitive.Root open={appMenuOpen} onOpenChange={setAppMenuOpen}>
               <PopoverPrimitive.Trigger asChild>
                 <AppName
-                  icon={<img src={appIcon} alt="Agent Workspace 2.0" className="h-6 w-6" />}
-                  name="Agent Workspace 2.0"
+                  icon={<img src={appIcon} alt="Agent Workspace 2.0 Advanced" className="h-6 w-6" />}
+                  name="Agent Workspace 2.0 Advanced"
                   compact={isCompactHeader}
                   aria-expanded={appMenuOpen}
                 />
@@ -4220,7 +4302,7 @@ export function AgentNextGenPage({
                   <AppMenu
                     groups={appMenuGroups}
                     footer={<CXoneLogo />}
-                    header={isCompactHeader ? "Agent Workspace 2.0" : undefined}
+                    header={isCompactHeader ? "Agent Workspace 2.0 Advanced" : undefined}
                   />
                 </PopoverPrimitive.Content>
               </PopoverPrimitive.Portal>
@@ -5024,23 +5106,25 @@ export function AgentNextGenPage({
                     <PageHeader
                       ref={recordHeaderRef}
                       title={activeInteraction.customerName ?? "Customer"}
-                      // Per explicit request (Agent Workspace 2.0 only —
-                      // Premium/Advanced keep the plain customer ID
-                      // subtitle exactly as before): "{icon} {Channel
-                      // label} | {date/time}" (e.g. "✉ Email | 7/23/2025
-                      // 09:32 AM") instead — see `CHANNEL_TYPE_META`
-                      // (channel-row.tsx) for the same icon/label pair
-                      // every other channel-type surface in this app
-                      // already draws from, and
+                      // Per explicit follow-up request: an unknown-contact
+                      // interaction (`!showChannelTabRow` — see that
+                      // const's own doc comment above) gets the SAME
+                      // "{icon} {Channel label} | {date/time or Draft}"
+                      // subtitle Agent Workspace 2.0 always shows
+                      // (AgentNextGenPage.tsx — see `CHANNEL_TYPE_META`/
                       // `resolveActiveChannelDateTimeLabel`'s own doc
-                      // comment above for where the date/time itself comes
-                      // from. `undefined` (not a bare channel label with
-                      // nothing after it) whenever either half is missing
-                      // — `PageHeader`'s own `{subtitle && ...}` guard
+                      // comments above for where each half comes from),
+                      // instead of this tier's own plain customer-ID text.
+                      // A real-customer interaction keeps the plain
+                      // customer ID unchanged — per explicit request, that
+                      // half of this tier's behavior stays as-is.
+                      // `undefined` (not a bare channel label with nothing
+                      // after it) whenever either half is missing —
+                      // `PageHeader`'s own `{subtitle && ...}` guard
                       // (page-header.tsx) then skips the subtitle row
-                      // entirely.
+                      // entirely, same fallback 2.0 uses.
                       subtitle={
-                        activeChannelType && activeChannelDateTime ? (
+                        !showChannelTabRow && activeChannelType && activeChannelDateTime ? (
                           <span className="flex items-center gap-1.5 min-w-0">
                             <span className="shrink-0 text-lyra-fg-secondary" aria-hidden="true">
                               {CHANNEL_TYPE_META[activeChannelType].icon}
@@ -5049,7 +5133,9 @@ export function AgentNextGenPage({
                               {CHANNEL_TYPE_META[activeChannelType].label} | {activeChannelDateTime}
                             </span>
                           </span>
-                        ) : undefined
+                        ) : (
+                          activeInteraction.customerId
+                        )
                       }
                       // "Active" specifically (not "Closed", which is a
                       // definite, real state regardless of channel) is only
@@ -5066,66 +5152,24 @@ export function AgentNextGenPage({
                       badgeColor={activeInteraction.closed ? "slate" : "green"}
                       actions={
                         <>
-                          {/* Per explicit request: with `showChannelTabRow`
-                              false (Agent Workspace 2.0 only — every
-                              interaction here is a single 1:1 thread, so the
-                              tab row below has nothing to switch between,
-                              see that constant's own doc comment above), the
-                              six actions that used to live in that row's
-                              per-tab kebab menu (Unassign & Dismiss, Consult
-                              / Transfer, Outcome, Send Transcript, Download
-                              Transcript, Translate Messages) move up here as
-                              individual icon buttons instead, so they're
-                              still reachable with the row itself gone.
-                              `activeChannel` — this whole cluster acts on
-                              whichever channel is actually current (the same
-                              one the now-hidden row's own active tab would
-                              have been), computed once, above.
-                              Unassign & Dismiss and Outcome are the only two
-                              real actions here (mirroring the tab kebab's
-                              own `onDismiss`/`outcome` wiring exactly, same
-                              shared `outcomeDraftKey`/`outcomeDraftSource`
-                              state, this trigger's own `"header"` source);
-                              Consult / Transfer, Send Transcript, Download
-                              Transcript, and Translate Messages stay
-                              decorative-only (no `onClick`) — same "no real
-                              backend to wire these into yet" placeholder
-                              state those exact same items are already left
-                              in everywhere else they appear in this app
-                              (`agent-next-gen-transcript.tsx`, lyra-ui's own
-                              `channel-row.tsx` kebab). `size="sm"` (32px) —
-                              matches this same `actions` slot's other icon
-                              buttons (Full Screen/Dock, a few thousand lines
-                              up) rather than introducing a third icon-button
-                              size into this one row. */}
+                          {/* Per explicit request: for a brand-new outbound
+                              assignment NOT associated with a real customer
+                              record (`!showChannelTabRow` — see that const's
+                              own doc comment above), this tier gets the
+                              SAME record-header icon-button cluster Agent
+                              Workspace 2.0 always shows in place of its
+                              (always-hidden there) tab row — ported
+                              verbatim from that file's own `actions` render
+                              site, including the "new outbound thread"
+                              close-only collapse
+                              (`activeChannelIsNewOutboundThread`) and the
+                              status chip/Unassign & Dismiss restyle. An
+                              interaction WITH a real customer record never
+                              renders this — its tab row (below) already
+                              carries these same six actions in its own
+                              per-tab kebab, unchanged. */}
                           {!showChannelTabRow && activeChannel && (
                             <>
-                              {/* Per explicit request/follow-up clarification:
-                                  a brand-new, agent-initiated OUTBOUND thread
-                                  (`activeChannelIsNewOutboundThread`, above —
-                                  see its own doc comment for the full
-                                  "outbound vs. customer-initiated"/"customer
-                                  hasn't replied yet" reasoning) hasn't earned
-                                  Consult/Transfer, Outcome, Send/Download
-                                  Transcript, or Translate Messages yet — none
-                                  of them have anything real to act on for a
-                                  conversation that hasn't actually started.
-                                  This is this file's own extrapolation of
-                                  the exact same "new thread → close-only"
-                                  treatment applied to the other two tiers'
-                                  tab kebab (record-header `ChannelTab`'s
-                                  `showMenu`) and the session row
-                                  (`TranscriptSessionSeparator`'s
-                                  `isNewThread`): this cluster IS 2.0's own
-                                  replacement for that now-hidden tab row
-                                  (see `showChannelTabRow`'s own doc comment),
-                                  so the same collapse applies here for
-                                  consistency, even though it wasn't named as
-                                  a fourth surface explicitly. The status
-                                  chip stays (still meaningful — a fresh
-                                  thread genuinely reads "Open"); see further
-                                  down for the Unassign & Dismiss →
-                                  plain-close swap. */}
                               {!activeChannelIsNewOutboundThread && (
                               <>
                               <Tooltip content="Consult / Transfer" placement="bottom" asLabel>
@@ -5152,8 +5196,6 @@ export function AgentNextGenPage({
                                     onOpenChange: (open) =>
                                       activeChannelOutcomeKey && handleOutcomeOpenChange(activeChannelOutcomeKey, open, "header"),
                                     resolutionOptions: TRANSCRIPT_SESSION_STATUS_OPTIONS,
-                                    // "Open", not "Resolved" — an untouched channel is
-                                    // freshly opened, not already wrapped up.
                                     resolution: activeInteraction.threadStatuses?.[activeChannel.id] ?? "Open",
                                     onResolutionChange: (value) =>
                                       handleInteractionStatusChange(activeInteraction.id, activeChannel.id, value),
@@ -5210,33 +5252,11 @@ export function AgentNextGenPage({
                               </Tooltip>
                               </>
                               )}
-                              {/* Status chip — relocated here from the
-                                  session row's own copy (now hidden, see
-                                  `showSessionActionCluster`'s own doc
-                                  comment above) per explicit follow-up
-                                  request: far right of this icon cluster,
-                                  same `ChannelStatusTag` component
-                                  `TranscriptSessionSeparator` itself uses,
-                                  reused verbatim rather than rebuilt.
-                                  `activeChannelStatus ?? "Open"` — same
-                                  fallback every other reader of this
-                                  channel's status already falls back to
-                                  (the tab kebab's own Outcome `resolution`
-                                  field, the record-header tab's own
-                                  tooltip) — a channel with no status set
-                                  yet is a fresh, untouched thread, not one
-                                  that's already wrapped up. `disabled`
-                                  once this channel itself reads "Closed" —
-                                  same "no way back in from here" lockdown
-                                  the session row's own copy already
-                                  enforced. */}
                               {/* Per explicit request: an agent-to-agent
                                   voice call has no real disposition to log
                                   against a colleague — see
                                   `activeInteractionIsAgentCall`'s own doc
-                                  comment above for why this is the only
-                                  render site that flag actually needs to
-                                  touch in this file. */}
+                                  comment above. */}
                               {!activeInteractionIsAgentCall && (
                               <ChannelStatusTag
                                 status={activeChannelStatus ?? "Open"}
@@ -5249,110 +5269,10 @@ export function AgentNextGenPage({
                                 disabled={activeChannelStatus === "Closed"}
                               />
                               )}
-                              {/* Unassign & Dismiss — per explicit follow-up
-                                  request, moved from its old spot leading
-                                  this cluster to the far right (last, past
-                                  even the status chip) and restyled from a
-                                  plain neutral icon button to a labeled
-                                  outline-critical `Button`: a destructive,
-                                  irreversible action reads as more
-                                  deliberately set apart from the five
-                                  decorative/informational icons beside it
-                                  this way, rather than blending in as just
-                                  another same-weight icon. `Separator` adds
-                                  a bit of literal breathing room backing
-                                  that same "set apart" intent up visually.
-                                  No named `outline`+`critical` variant
-                                  exists on `Button` itself (button.tsx only
-                                  has plain `outline` — neutral border/text
-                                  — and solid `destructive` — no outline
-                                  version of either), so this composes
-                                  `outline`'s own base classes with the same
-                                  `border-lyra-status-critical-strong`/
-                                  `text-lyra-status-critical-strong`/
-                                  `bg-lyra-status-critical-subtle` (hover)
-                                  tokens every other critical/destructive
-                                  surface in this design system already
-                                  uses (menu-item.tsx's destructive row,
-                                  tags-input.tsx's error state, etc.) rather
-                                  than inventing new ones. `size="md"` (32px
-                                  tall) matches this row's other buttons —
-                                  `ActionIconButton`'s own `size="sm"` maps
-                                  to `Button`'s `icon-md` (also 32px), see
-                                  `ACTION_ICON_BUTTON_SIZE_MAP`, actions.tsx
-                                  — so the row's height stays uniform even
-                                  though this one button now shows a label.
-                                  Same dismiss-whole-interaction-vs-just-
-                                  this-channel branching every other
-                                  Unassign & Dismiss trigger for this exact
-                                  channel already uses (the record-header
-                                  tab's own kebab entry, this cluster's own
-                                  prior icon-only version).
-                                  For a brand-new outbound thread
-                                  (`activeChannelIsNewOutboundThread`), this
-                                  real button is swapped for a red trash-icon
-                                  "Delete Draft" button instead — per
-                                  explicit follow-up request, since closing a
-                                  genuine, untouched draft (no message sent
-                                  yet) actually deletes it outright (no
-                                  Contact History entry gets logged for it —
-                                  see `handleDismissInteraction`'s own
-                                  `everSentAgentMessage` check) rather than
-                                  merely dismissing a live assignment,
-                                  matching the same swap
-                                  `TranscriptSessionSeparator`'s own
-                                  `isNewThread` mode and lyra-ui's own
-                                  `removable`/`removeVariant`/`showMenu`
-                                  delete-draft fallback already make on the
-                                  other "new thread" surfaces. */}
                               <Separator orientation="vertical" className="h-5 mx-1" />
-                              {activeChannelIsNewOutboundThread ? (
-                                <Tooltip content="Delete Draft" placement="bottom" asLabel>
-                                  <ActionIconButton
-                                    aria-label="Delete Draft"
-                                    size="sm"
-                                    className="text-lyra-status-critical-strong hover:text-lyra-status-critical-strong"
-                                    onClick={() => {
-                                      if (activeInteraction.threads.length > 1) {
-                                        handleDismissChannel(activeInteraction.id, activeChannel);
-                                      } else {
-                                        handleDismissInteraction(activeInteraction.id);
-                                      }
-                                    }}
-                                  >
-                                    <Trash2 className="h-4 w-4" strokeWidth={1.5} />
-                                  </ActionIconButton>
-                                </Tooltip>
-                              ) : (
-                                // Per explicit follow-up request: icon-only
-                                // (no visible label) to take up less of the
-                                // header's own row — same critical outline
-                                // styling as before, just dropped down to
-                                // `size="icon-md"` (32px) with the label
-                                // moved into `title`, which `Button` itself
-                                // auto-wraps in a Tooltip + sets as
-                                // `aria-label` for any `icon-*` size (see
-                                // that prop's own doc comment, button.tsx) —
-                                // no separate hand-wrapped `Tooltip` needed.
-                                <Button
-                                  variant="outline"
-                                  size="icon-md"
-                                  title="Unassign & Dismiss"
-                                  className="shrink-0 border-lyra-status-critical-strong text-lyra-status-critical-strong hover:bg-lyra-status-critical-subtle hover:border-lyra-status-critical-strong active:bg-lyra-status-critical-medium"
-                                  onClick={() => {
-                                    if (activeInteraction.threads.length > 1) {
-                                      handleDismissChannel(activeInteraction.id, activeChannel);
-                                    } else {
-                                      handleDismissInteraction(activeInteraction.id);
-                                    }
-                                  }}
-                                >
-                                  <UserX className="h-4 w-4" strokeWidth={1.5} />
-                                </Button>
-                              )}
                             </>
                           )}
-                          {showAddChannelActions && (recordHeaderWidth >= 768 ? (
+                          {recordHeaderWidth >= 768 ? (
                             // One icon button per still-addable channel —
                             // same bordered/outline look Customer
                             // Information's own icon-collapsed state uses
@@ -5405,7 +5325,7 @@ export function AgentNextGenPage({
                               "h-8 w-8 px-0 bg-lyra-bg-primary text-lyra-fg-on-primary hover:bg-lyra-state-hover-primary active:bg-lyra-state-pressed-primary",
                               { label: "Add Channel", showLabel: false }
                             )
-                          ))}
+                          )}
                           {/* Same hover-preview `Popover` + toggle `Button`
                               this row used to have before the tab row (see
                               git history). Per explicit follow-up request,
@@ -5438,7 +5358,15 @@ export function AgentNextGenPage({
                               handler correctly closes the panel too
                               whenever this button is on screen (floating +
                               open) rather than only ever opening it. */}
-                          {showCustomerInformation && !(effectiveSidePanelPinned && sidePanelOpen) && (
+                          {/* Per explicit request: an agent-to-agent call
+                              has no real customer record behind it —
+                              `activeInteractionIsAgentCall` (above) hides
+                              this toggle/hover-preview outright, same as it
+                              hides the docked panel itself further down,
+                              rather than falling back to the Detail-only
+                              tab set an "unknown contact" interaction still
+                              gets. */}
+                          {!activeInteractionIsAgentCall && !(effectiveSidePanelPinned && sidePanelOpen) && (
                           <Popover
                             open={customerInfoPreviewOpen && !sidePanelOpen}
                             onOpenChange={setCustomerInfoPreviewOpen}
@@ -5479,13 +5407,45 @@ export function AgentNextGenPage({
                                 recordId={activeInteraction.customerId}
                                 channels={activeInteraction.threads}
                                 startedFresh={activeInteraction.startedFresh}
-                                tabs={AGENT_WORKSPACE_CUSTOMER_PANEL_TABS}
+                                // Per explicit request: this hover preview
+                                // must show the SAME information the
+                                // docked open panel does — was hardcoded
+                                // to the full `AGENT_WORKSPACE_CUSTOMER_-
+                                // PANEL_TABS` regardless of customer
+                                // identity, unlike the docked panel's own
+                                // `tabs` (below), which already restricts
+                                // to Detail-only for an unknown-contact
+                                // interaction. Now mirrors that exact same
+                                // condition.
+                                tabs={activeInteractionIsRealCustomer ? AGENT_WORKSPACE_CUSTOMER_PANEL_TABS : (["Detail"] as const)}
                                 onMouseEnter={openCustomerInfoPreview}
                                 onMouseLeave={scheduleCloseCustomerInfoPreview}
                                 onAddToast={addToast}
                                 recordDraft={activeCustomerRecordDraft}
                                 overviewEditing={activeCustomerOverviewEditing}
                                 onOverviewEditingChange={setActiveCustomerOverviewEditing}
+                                // Same `matchState` object passed to the
+                                // docked panel below (see that call site's
+                                // own doc comment) — per explicit request,
+                                // this hover preview must show the exact
+                                // same customer-matching UI for an
+                                // unknown-contact interaction, not the old
+                                // generic Overview tabs.
+                                matchState={
+                                  activeInteractionIsRealCustomer
+                                    ? undefined
+                                    : {
+                                        step: customerMatchStep,
+                                        query: customerMatchQuery,
+                                        onQueryChange: setCustomerMatchQuery,
+                                        possibleMatches: possibleCustomerMatches,
+                                        searchResults: customerSearchResults,
+                                        onLinkRecord: handleLinkCustomerRecord,
+                                        onStartCreate: handleStartCreateCustomer,
+                                        onBackToSearch: handleBackToCustomerSearch,
+                                        onSaveNewCustomer: handleSaveNewCustomer,
+                                      }
+                                }
                               />
                             }
                           >
@@ -5550,6 +5510,66 @@ export function AgentNextGenPage({
                             </Button>
                           </Popover>
                           )}
+                          {/* Per explicit follow-up request: moved to the
+                              FAR RIGHT of this whole actions row, past the
+                              Add Channel buttons and the Customer
+                              Information toggle — previously sat
+                              immediately after the status chip/Separator,
+                              directly following the icon cluster. Still
+                              gated on the same `!showChannelTabRow &&
+                              activeChannel` condition as that cluster
+                              (own comment above) — an interaction WITH a
+                              real customer record never renders this
+                              here either. */}
+                          {!showChannelTabRow && activeChannel && (
+                            // Per explicit follow-up request: a genuine,
+                            // never-launched draft's close button reads as a
+                            // red trash icon/"Delete Draft" instead of a
+                            // plain "Close" — closing an untouched draft
+                            // actually deletes it outright (no Contact
+                            // History entry gets logged — see
+                            // `handleDismissInteraction`'s own
+                            // `everSentAgentMessage` check), matching the
+                            // same treatment `TranscriptSessionSeparator`'s
+                            // own `isNewThread` mode and lyra-ui's own
+                            // `removable`/`removeVariant`/`showMenu`
+                            // delete-draft fallback already use on the other
+                            // "new thread" surfaces.
+                            activeChannelIsNewOutboundThread ? (
+                              <Tooltip content="Delete Draft" placement="bottom" asLabel>
+                                <ActionIconButton
+                                  aria-label="Delete Draft"
+                                  size="sm"
+                                  className="text-lyra-status-critical-strong hover:text-lyra-status-critical-strong"
+                                  onClick={() => {
+                                    if (activeInteraction.threads.length > 1) {
+                                      handleDismissChannel(activeInteraction.id, activeChannel);
+                                    } else {
+                                      handleDismissInteraction(activeInteraction.id);
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" strokeWidth={1.5} />
+                                </ActionIconButton>
+                              </Tooltip>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="icon-md"
+                                title="Unassign & Dismiss"
+                                className="shrink-0 border-lyra-status-critical-strong text-lyra-status-critical-strong hover:bg-lyra-status-critical-subtle hover:border-lyra-status-critical-strong active:bg-lyra-status-critical-medium"
+                                onClick={() => {
+                                  if (activeInteraction.threads.length > 1) {
+                                    handleDismissChannel(activeInteraction.id, activeChannel);
+                                  } else {
+                                    handleDismissInteraction(activeInteraction.id);
+                                  }
+                                }}
+                              >
+                                <UserX className="h-4 w-4" strokeWidth={1.5} />
+                              </Button>
+                            )
+                          )}
                         </>
                       }
                     />
@@ -5568,6 +5588,14 @@ export function AgentNextGenPage({
                         bug independent of how the width is measured, so this
                         is needed here regardless of the `@container`-vs-
                         `ResizeObserver` approach. */}
+                    {/* Per explicit request: hidden entirely for a brand-new
+                        outbound assignment NOT associated with a real customer
+                        record (`!showChannelTabRow` — see that const's own doc
+                        comment above) — the record header's own icon-button
+                        cluster (rendered above, in `actions`) takes over its
+                        six actions instead, same substitution Agent Workspace
+                        2.0 always makes. An interaction WITH a real customer
+                        record keeps this row exactly as before. */}
                     {showChannelTabRow && (
                     <div className="flex min-w-0 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6">
                       {/* Now just the channel `TabList` on its own — the
@@ -5797,6 +5825,17 @@ export function AgentNextGenPage({
                                 activeInteraction.threadStatuses?.[c.id] !== "Closed" &&
                                 !isNewOutboundThread
                               }
+                              // Per explicit follow-up request: the
+                              // `showMenu={false}` fallback above reads as a
+                              // red trash icon/"Delete Draft" for a genuine,
+                              // never-launched draft's tab specifically
+                              // (`isNewOutboundThread`), NOT for an
+                              // already-closed channel/interaction's tab —
+                              // that still gets the plain neutral "×"/"Close
+                              // {type}" treatment (`ChannelTabProps.
+                              // removeVariant`'s own default). See that
+                              // prop's own doc comment, channel-row.tsx.
+                              removeVariant={isNewOutboundThread ? "delete-draft" : "close"}
                               // Wires the kebab's "Outcome" entry to the real
                               // popover (`ChannelTabProps.outcome`, channel-
                               // row.tsx) — same shared draft/resolution state
@@ -5960,6 +5999,21 @@ export function AgentNextGenPage({
                           // see `activeChannelIsNewOutboundThread`'s own
                           // doc comment above for the full reasoning.
                           isNewThread={activeChannelIsNewOutboundThread}
+                          // Per explicit follow-up (screenshot report): once
+                          // the record header's own icon-button cluster took
+                          // over for a non-real-customer interaction
+                          // (`!showChannelTabRow` — see that const's own doc
+                          // comment above), this session row's OWN copy of
+                          // the same cluster (status chip, Consult/Transfer,
+                          // Outcome, Unassign & Dismiss/close) became a
+                          // redundant duplicate directly underneath it —
+                          // same reasoning Agent Workspace 2.0's own
+                          // hardcoded `showSessionActionCluster = false`
+                          // doc comment lays out, just keyed dynamically
+                          // here instead of a permanent constant, since this
+                          // tier's tab row/header-cluster substitution
+                          // itself is per-interaction, not permanent.
+                          showSessionActionCluster={showChannelTabRow}
                           reopenedContacts={activeChannel?.reopenedContacts}
                           liveMessages={activeInteraction.liveMessages?.[activeChannelKey] ?? []}
                           // Same union of conditions the "closed
@@ -6003,7 +6057,6 @@ export function AgentNextGenPage({
                                 }
                               : undefined
                           }
-                          showSessionActionCluster={showSessionActionCluster}
                         />
                         {/* `activeChannelType !== "email" && !== "voice"` —
                             per explicit request, hidden for now on both
@@ -6296,11 +6349,6 @@ export function AgentNextGenPage({
                         }}
                         selectedEntryId={selectedContactHistoryEntry?.id ?? null}
                         historyByRange={contactHistoryByRange}
-                        // Per explicit request, Agent Workspace 2.0 only —
-                        // see `ContactHistoryCard`'s own `hideCustomerNames`
-                        // doc comment (agent-next-gen-contact-history.tsx).
-                        // Premium/Advanced don't pass this.
-                        hideCustomerNames
                       />
                     </div>
 
@@ -6451,7 +6499,7 @@ export function AgentNextGenPage({
                         ))}
                       </div>
                     ) : selectedContactHistoryEntry ? (
-                      <ContactHistoryEntryDetail entry={selectedContactHistoryEntry} hideCustomerNames />
+                      <ContactHistoryEntryDetail entry={selectedContactHistoryEntry} />
                     ) : (
                       <div className="flex flex-col gap-4 px-4 py-4">
                         <Input label="Subject" placeholder="Enter subject" />
@@ -6548,8 +6596,12 @@ export function AgentNextGenPage({
                   `CustomerInformationSidePanel` itself, not here) is what
                   actually flips its border/resize-handle/slide-direction to
                   match — this DOM move alone only changes which edge of the
-                  ROW it renders against. */}
-              {showCustomerInformation && showPanelToggle && activeInteraction && (
+                  ROW it renders against. Per explicit request, also gated
+                  on `!activeInteractionIsAgentCall` — an agent-to-agent
+                  call hides this docked panel outright (see that const's
+                  own doc comment above), not just its Detail-only
+                  "unknown contact" fallback. */}
+              {!activeInteractionIsAgentCall && showPanelToggle && activeInteraction && (
                 // `key`ed on the assignment's own id, same "force a full
                 // remount on every genuine switch" technique the content
                 // column further down already uses (see that div's own
@@ -6664,7 +6716,18 @@ export function AgentNextGenPage({
                   recordId={activeInteraction.customerId}
                   channels={activeInteraction.threads}
                   startedFresh={activeInteraction.startedFresh}
-                  tabs={AGENT_WORKSPACE_CUSTOMER_PANEL_TABS}
+                  // Per explicit request: a brand-new outbound assignment
+                  // NOT associated with a real customer record shows ONLY
+                  // the Detail tab (no Overview/Copilot/Notes/etc.) — for
+                  // its whole lifetime, based purely on customer identity
+                  // (`activeInteractionIsRealCustomer`, see that const's own
+                  // doc comment above). An interaction WITH a real customer
+                  // record keeps this tier's normal reduced tab set
+                  // (`AGENT_WORKSPACE_CUSTOMER_PANEL_TABS` — unlike
+                  // Premium, this tier never used the full `CUSTOMER_PANEL_TABS`
+                  // set here, so that's what "real customer" keeps, not the
+                  // full set).
+                  tabs={activeInteractionIsRealCustomer ? AGENT_WORKSPACE_CUSTOMER_PANEL_TABS : (["Detail"] as const)}
                   onOpenHistoryConversation={(entry) =>
                     setHistoryConversationTab({ interactionId: activeInteraction.id, entry, active: true })
                   }
@@ -6681,6 +6744,30 @@ export function AgentNextGenPage({
                   recordDraft={activeCustomerRecordDraft}
                   overviewEditing={activeCustomerOverviewEditing}
                   onOverviewEditingChange={setActiveCustomerOverviewEditing}
+                  // Per explicit request: an unknown-contact interaction
+                  // (`!activeInteractionIsRealCustomer` — same signal
+                  // `tabs` above already keys off) gets the customer-
+                  // matching UI (search/possible-matches/create-new)
+                  // instead of its normal tabs+body — see `matchState`'s
+                  // own doc comment (agent-next-gen-customer-info-
+                  // panel.tsx) for what each piece does. `undefined` for a
+                  // real-customer interaction, same as every OTHER
+                  // consumer of this component always passes.
+                  matchState={
+                    activeInteractionIsRealCustomer
+                      ? undefined
+                      : {
+                          step: customerMatchStep,
+                          query: customerMatchQuery,
+                          onQueryChange: setCustomerMatchQuery,
+                          possibleMatches: possibleCustomerMatches,
+                          searchResults: customerSearchResults,
+                          onLinkRecord: handleLinkCustomerRecord,
+                          onStartCreate: handleStartCreateCustomer,
+                          onBackToSearch: handleBackToCustomerSearch,
+                          onSaveNewCustomer: handleSaveNewCustomer,
+                        }
+                  }
                 />
                 </div>
               )}

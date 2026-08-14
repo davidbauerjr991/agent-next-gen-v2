@@ -73,7 +73,7 @@ import {
 /** A channel open within one live interaction — tracks when it started
  *  (in ticks of the shared clock below) rather than a fixed elapsed string,
  *  so the rendered `InteractionChannel.elapsed` keeps counting up live. */
-export interface TrackedChannel {
+export interface Thread {
   /** Unique identity for this specific channel, so two channels of the same
    *  `type` (e.g. two SMS threads on different numbers) are tracked as
    *  separate rows instead of one overwriting the other — see
@@ -144,14 +144,35 @@ export interface TrackedChannel {
    *  tooltip's message segment is omitted rather than showing "0 Messages"
    *  for a channel type that doesn't have messages). */
   messageCount?: number;
-  /** This channel's own conversation/session id — distinct from
-   *  `ActiveInteraction.recordId` below (the *customer/case* record shown in
-   *  the page header): one record can have several channels open, each its
-   *  own conversation with its own id. Synthesized via
-   *  `generateInteractionId()` at channel-creation time (for every channel
-   *  type, including voice); shown on this channel's `ChannelToggle` tooltip as
-   *  "#{interactionId}". */
-  interactionId?: string;
+  /** This Thread's own BASE Contact's id — the first/original Contact this
+   *  Thread was opened with, generated once (`generateContactId`) at
+   *  Thread-creation time and never touched again afterward. A reopen does
+   *  NOT overwrite this — each reopen gets its OWN distinct id on its own
+   *  `reopenedContacts` entry instead (see that field's own doc comment),
+   *  since a reopen is a genuinely separate Contact within the same still-
+   *  ongoing Thread, not a continuation of this one. The `ChannelToggle`
+   *  tooltip's own "current Contact id" reads whichever is actually most
+   *  recent — the last `reopenedContacts` entry's `contactId` if this
+   *  Thread has ever been reopened, this field otherwise. Set for every
+   *  Thread, including quick-dialed/redialed ones — unlike `value` (a real
+   *  captured address), a Contact ID doesn't depend on going through
+   *  CreateNew's own contact flow, every Thread genuinely has its own
+   *  instance of contact regardless of how it started. Optional only
+   *  because a handful of other, non-outbound-originated flows
+   *  (`handleOpenAssignmentFromNotification`'s seeded `initialInteraction`)
+   *  don't build a `Thread` through any of the handlers that set this. */
+  contactId?: string;
+  /** REMOVED (was `interactionId?: string`) — a plain synthesized digit
+   *  shown on this Thread's `ChannelToggle` tooltip as "#{interactionId}",
+   *  genuinely redundant now that `Contact.contactId` exists as the real,
+   *  correctly-generated per-contact id: this Thread's own currently-active
+   *  Contact already has its own proper id, so the tooltip now reads THAT
+   *  instead of maintaining a second, parallel id nobody else in the app
+   *  ever agreed with (this field's own id and a Contact's `contactId` were
+   *  two independently-generated numbers for what a reader would reasonably
+   *  assume was the same thing). See the `ChannelToggle` tooltip's own
+   *  render call site for where the active Contact's `contactId` is read
+   *  from instead. */
   /**
    * Every time this channel is restarted at the SAME address/handle (same
    * `id`, reused via `handleStartCall`'s "same contact already has an
@@ -159,12 +180,12 @@ export interface TrackedChannel {
    * currently reads `"Closed"`, one entry gets appended here — per explicit
    * request, reopening a closed channel via "Add Channel" shouldn't just
    * silently resume the same conversation as if nothing happened; it should
-   * read as a genuinely NEW session, appended below whatever's already
-   * there (the old closed session's own messages, real mock history or
+   * read as a genuinely NEW Contact, appended below whatever's already
+   * there (the old closed Contact's own messages, real mock history or
    * otherwise) rather than replacing it. `InteractionTranscript` (this
    * file, further down) turns each entry here into one more synthetic,
-   * empty "Session Details" separator — the exact same shape
-   * `isFreshLaunch`'s own single synthetic session already uses, just one
+   * empty "Session Details" separator (a `Contact`) — the exact same shape
+   * `isFreshLaunch`'s own single synthetic Contact already uses, just one
    * per reopen instead of unconditionally one total — appended AFTER
    * whichever base session list (`TRANSCRIPT_SESSIONS`/`_VOICE`/`_EMAIL`,
    * or the `isFreshLaunch` synthetic one) that channel type would otherwise
@@ -175,32 +196,41 @@ export interface TrackedChannel {
    * it): whatever the agent types next still starts blank under this
    * newest entry (`sessionsToRender`'s own last id — see
    * `InteractionTranscript`'s `lastSessionId`) because `InteractionTranscript`
-   * slices the flat array back into per-session chunks using each entry's
+   * slices the flat array back into per-Contact chunks using each entry's
    * own `messagesBeforeReopen` boundary below, not because the array
    * itself was ever cleared. Kept (not reset) across multiple close→reopen
-   * cycles on the same channel, so each one gets its own distinct row
+   * cycles on the same Thread, so each one gets its own distinct Contact
    * rather than the latest reopen silently overwriting a prior one. Text
    * channels (chat/sms/whatsapp) only — see `InteractionTranscript`'s own
    * `isTextChannel` gate for why voice/email don't have an equivalent
-   * multi-session concept to extend here.
+   * multi-Contact concept to extend here.
    */
-  reopenedSessions?: {
+  reopenedContacts?: {
     id: string;
     date: string;
     startTime: string;
     /**
-     * Snapshot of `liveMessages[this channel's id]?.length` at the exact
+     * Snapshot of `liveMessages[this thread's id]?.length` at the exact
      * moment this reopen happened — per explicit correction, reopening a
-     * closed channel must NOT wipe its prior messages; they stay visible
-     * (dimmed) under their original session instead of vanishing. This
+     * closed Thread must NOT wipe its prior messages; they stay visible
+     * (dimmed) under their original Contact instead of vanishing. This
      * boundary is what lets `InteractionTranscript` slice the one flat
-     * `liveMessages` array back into per-session chunks: everything before
-     * this index belongs to whatever session came before this reopen (the
-     * base session, or an earlier reopen), everything from this index up
+     * `liveMessages` array back into per-Contact chunks: everything before
+     * this index belongs to whatever Contact came before this reopen (the
+     * base Contact, or an earlier reopen), everything from this index up
      * to the NEXT reopen's own `messagesBeforeReopen` (or the array's end,
-     * for the last entry) belongs to this reopen's own session.
+     * for the last entry) belongs to this reopen's own Contact.
      */
     messagesBeforeReopen: number;
+    /** This reopen's own, distinct Contact id (`generateContactId`) — a
+     *  reopen is a genuinely separate Contact within the same still-ongoing
+     *  Thread, not a continuation of the base Contact (`contactId` above on
+     *  `Thread`) or of whichever reopen preceded it. Fed straight into
+     *  `InteractionTranscript`'s synthetic per-reopen `Contact` (in place of
+     *  the old, buggy `recordId` reuse) and read by the `ChannelToggle`
+     *  tooltip as the "current Contact id" whenever this Thread has ever
+     *  been reopened — see `Thread.contactId`'s own doc comment above. */
+    contactId: string;
   }[];
 }
 
@@ -210,28 +240,59 @@ export interface TrackedChannel {
  *  contact id (or `quickdial:<number>`) so starting a second channel with
  *  the same contact adds to this interaction's `channels` instead of
  *  creating a second card. */
-export interface ActiveInteraction {
+export interface Interaction {
+  /** Left-nav slot/card key — always the underlying customer/agent/team/
+   *  skill record's own id (or `quickdial:<number>`), reused across the
+   *  whole relationship so a customer only ever has one active card at a
+   *  time. Deliberately NOT this Interaction's own identity — see
+   *  `interactionId` below for that. Kept separate on purpose: this id has
+   *  to stay stable for the left nav's own dedup/lookup logic
+   *  (`interactions.find(i => i.id === ...)` everywhere) regardless of how
+   *  many distinct Interactions (journeys) this same customer has had. */
   id: string;
+  /** This Interaction's own identity — distinct from `id` above (the left-
+   *  nav slot key) AND from `customerId` below (the person/account this
+   *  Interaction is with). One customer can have several Interactions over
+   *  their whole relationship (a March billing dispute, a June renewal
+   *  call, ...); each is its own journey with its own id and its own
+   *  start/end. Generated fresh (`generateInteractionId`) only when a
+   *  customer with no currently-open card gets engaged again — see
+   *  `handleStartCall`/`handleRedial`/`handleQuickDial`/
+   *  `handleReopenContactHistoryEntry`/`handleOpenInteractionRow`'s own
+   *  `isNewInteraction` branches, all of which now generate a fresh one
+   *  there and carry the EXISTING card's own `interactionId` forward
+   *  otherwise (adding another Thread, or reopening a closed one, to an
+   *  already-open card is still the SAME Interaction/journey, not a new
+   *  one). Ends when "Unassign & Dismiss" closes this card out
+   *  (`handleDismissInteraction`) — logged onto the resulting
+   *  `ContactHistoryEntry.interactionId` so a dismissed Interaction stays
+   *  traceable in history, not just discarded. */
+  interactionId: string;
   customerName?: string;
-  /** Customer/agent/team/skill record id shown under the name on this
-   *  interaction's detail page header — the contact's real id
-   *  (`CreateNewOutboundContact.subtitle`, e.g. a customerId/agentId) when
-   *  the interaction was started from a known record, `entry.caseId` when
-   *  redialed from Contact History, or a freshly generated case number
-   *  (`generateCaseId`) for quick-dialed numbers with no matching record. */
-  recordId: string;
-  channels: TrackedChannel[];
-  /** Which open channel is "current" — shared source of truth between this
+  /** This Interaction's own customer/agent/team/skill record id — the
+   *  Customer ID shown under the name on this interaction's detail page
+   *  header — the contact's real id (`CreateNewOutboundContact.subtitle`,
+   *  e.g. a customerId/agentId) when the interaction was started from a
+   *  known record, `entry.caseId` when redialed from Contact History, or a
+   *  freshly generated case number (`generateCaseId`) for quick-dialed
+   *  numbers with no matching record. NOT this Interaction's own identity
+   *  (see `interactionId` above) or a specific Contact's own id (see
+   *  `Contact.contactId`, agent-next-gen-transcript.tsx) — this is the
+   *  PERSON/ACCOUNT the whole journey is with, stable across every
+   *  Interaction and every Contact/Thread within it. */
+  customerId: string;
+  threads: Thread[];
+  /** Which open Thread is "current" — shared source of truth between this
    *  interaction's `InteractionNavItem` card (its `currentChannelKey` prop)
    *  and its `ChannelToggle` bar (each toggle's `active`), so clicking either one
-   *  updates the other. A `TrackedChannel.id` (falls back to the last
-   *  channel's own id when unset — see the `?? mostRecentId` reads below —
+   *  updates the other. A `Thread.id` (falls back to the last
+   *  thread's own id when unset — see the `?? mostRecentId` reads below —
    *  same default a fresh interaction already had before this field
    *  existed). Kept in sync by `handleStartCall`/`handleQuickDial`/
-   *  `handleRedial` (a new/refreshed channel always takes over as current,
+   *  `handleRedial` (a new/refreshed thread always takes over as current,
    *  mirroring `InteractionNavItem`'s own auto-select-newest rule) and by
    *  `handleChannelSelect` (a row or tab click). */
-  currentChannelId?: string;
+  currentThreadId?: string;
   /** Set once, at the moment this interaction's card is first created via
    *  an agent-INITIATED outbound launch — the `idx === -1` branch in
    *  `handleStartCall`/`handleQuickDial`/`handleRedial` only — never
@@ -261,23 +322,23 @@ export interface ActiveInteraction {
    * data. Populated by `handleSendMessage`: an agent-typed message from
    * `InteractionComposer` is pushed immediately, then a simulated customer
    * reply is pushed a couple seconds later (there's no real backend here to
-   * receive an actual customer response from). Kept on `ActiveInteraction`
+   * receive an actual customer response from). Kept on `Interaction`
    * itself (not local component state) so it survives switching away to a
    * different interaction and back via the left nav, instead of resetting
    * every time `InteractionTranscript` remounts.
    *
-   * Keyed by channel (`TrackedChannel.id ?? .type`, same scheme
-   * `currentChannelId`/`channelStatuses` already use — see the latter's own
+   * Keyed by thread (`Thread.id ?? .type`, same scheme
+   * `currentThreadId`/`threadStatuses` already use — see the latter's own
    * doc comment), NOT one flat array for the whole interaction — this used
    * to be a lone `TranscriptMessage[]`, which was a real, confirmed bug:
    * every message sent on ANY channel landed in that one shared array, so
    * switching to a different (or freshly opened) channel on the same card
    * showed every other channel's own conversation too — e.g. opening a
    * Voice channel right after chatting on WhatsApp showed the WhatsApp
-   * messages under the Voice tab. Per-channel keys fix that: the render call
-   * site resolves only the CURRENT channel's own entry
+   * messages under the Voice tab. Per-thread keys fix that: the render call
+   * site resolves only the CURRENT thread's own entry
    * (`liveMessages?.[currentKey] ?? []`) before handing it to
-   * `InteractionTranscript`, same as `channelStatuses` already does for
+   * `InteractionTranscript`, same as `threadStatuses` already does for
    * status.
    */
   liveMessages?: Record<string, TranscriptMessage[]>;
@@ -300,7 +361,7 @@ export interface ActiveInteraction {
    * explicitly assigned via the session-status popover
    * (`TranscriptSessionSeparator`) or the LeftNav `ChannelRow`'s own
    * Outcome button (same underlying value, see `ChannelOutcomeConfig`'s
-   * `resolution`) — keyed by `TrackedChannel.id`, ONE entry per open
+   * `resolution`) — keyed by `Thread.id`, ONE entry per open
    * channel, not a single interaction-wide value. This used to be a lone
    * `currentStatus?: string` applying to whichever channel happened to be
    * "current" — a real, confirmed bug: closing one channel (say, a chat
@@ -314,14 +375,14 @@ export interface ActiveInteraction {
    *
    * Undefined for a channel until the agent actually changes its status,
    * at which point that channel's own current session's hardcoded default
-   * status (`TranscriptSession.status`) still applies. A channel that's
+   * status (`Contact.status`) still applies. A channel that's
    * restarted at the same id (e.g. redialing the same number, reusing
-   * `TrackedChannel.id`) has its entry explicitly cleared first (see
+   * `Thread.id`) has its entry explicitly cleared first (see
    * `withoutChannelStatus`) rather than silently inheriting whatever it
    * was left at before — a reopened channel should read as freshly open,
    * not still "Closed" under its own reused id.
    *
-   * Kept here, on `ActiveInteraction` itself, for the same reason
+   * Kept here, on `Interaction` itself, for the same reason
    * `liveMessages`/`closed` are — `InteractionTranscript` isn't remounted
    * per-interaction (no `key` prop at its call site), so a status held only
    * in that component's own local state wouldn't actually travel with a
@@ -338,11 +399,11 @@ export interface ActiveInteraction {
    * last assigned, not always "Resolved". Written back onto a freshly
    * reopened interaction by `handleReopenContactHistoryEntry` (from
    * `entry.statusLabel`), so reopening a dismissed (or hand-authored)
-   * Contact History row picks its (single, freshly-built) channel back up
+   * Contact History row picks its (single, freshly-built) thread back up
    * in that same status instead of resetting to whatever hardcoded default
    * status `TRANSCRIPT_SESSIONS`/`_VOICE`/`_EMAIL` otherwise assigns it.
    */
-  channelStatuses?: Record<string, string>;
+  threadStatuses?: Record<string, string>;
 }
 
 /* ── Left nav items ──
@@ -386,7 +447,7 @@ export function buildNavItems(
    "Last Updated" ranks each assignment by its most recently added/touched
    channel (the highest `startTick` among its open channels); "Start Date" by
    its oldest/first one (the lowest). Both are the only time signal a
-   `TrackedChannel` actually carries in this prototype (see `startTick`'s own
+   `Thread` actually carries in this prototype (see `startTick`'s own
    doc comment) — no separate "last activity" field exists to track finer-
    grained events (a new message, a status change, etc.), so "most recently
    added a channel" is the closest real proxy available for "most recently
@@ -412,10 +473,10 @@ export const ASSIGNMENT_SORT_OPTIONS: { value: AssignmentSortValue; label: strin
   { value: "awaitingLongest", label: "Longest Wait" },
 ];
 
-export function sortAssignments(interactions: ActiveInteraction[], sort: AssignmentSortValue): ActiveInteraction[] {
+export function sortAssignments(interactions: Interaction[], sort: AssignmentSortValue): Interaction[] {
   if (sort === "awaitingLongest") {
-    const key = (i: ActiveInteraction) => {
-      const awaitingTicks = i.channels
+    const key = (i: Interaction) => {
+      const awaitingTicks = i.threads
         .filter((c) => c.awaitingResponse)
         .map((c) => c.lastCustomerMessageTick ?? c.startTick);
       return awaitingTicks.length > 0 ? Math.min(...awaitingTicks) : Infinity;
@@ -424,8 +485,8 @@ export function sortAssignments(interactions: ActiveInteraction[], sort: Assignm
     // longest wait) needs to sort first here.
     return [...interactions].sort((a, b) => key(a) - key(b));
   }
-  const key = (i: ActiveInteraction) => {
-    const ticks = i.channels.map((c) => c.startTick);
+  const key = (i: Interaction) => {
+    const ticks = i.threads.map((c) => c.startTick);
     return sort === "startDate" ? Math.min(...ticks) : Math.max(...ticks);
   };
   return [...interactions].sort((a, b) => key(b) - key(a));

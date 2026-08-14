@@ -37,14 +37,41 @@ function generateCaseId(): string {
   return `CS-${Math.floor(1000000 + Math.random() * 9000000)}`;
 }
 
-/** Synthesized per-channel conversation/session id — same plain-numeric
- *  shape as the reference screenshot ("#707535188548", 12 digits, no
- *  prefix) — distinct from `generateCaseId`'s "CS-" shape, which is a
- *  customer/case-level id, not a per-channel one. See
- *  `TrackedChannel.interactionId`'s own doc comment for why these are two
- *  different things. */
+/** This Interaction's own real, distinct identity — same plain-numeric
+ *  shape as an earlier reference screenshot ("#707535188548", 12 digits, no
+ *  prefix) — distinct from `generateCaseId`'s "CS-" shape (a customer/case-
+ *  level id) AND from `generateContactId`'s "CTX-" shape (a specific
+ *  Contact's own id) below. Called exactly once per Interaction, at the
+ *  moment a customer with no currently-open card gets engaged again (see
+ *  `Interaction.interactionId`'s own doc comment, agent-next-gen-
+ *  interaction-dashboard.tsx, for the full start/end lifecycle this feeds).
+ *  Previously generated per-CHANNEL instead (used for `Thread`'s own,
+ *  since-removed `interactionId` field, shown on its `ChannelToggle`
+ *  tooltip) — repurposed here now that a real `Interaction` concept with
+ *  its own id and lifecycle exists to actually use this name correctly. */
 function generateInteractionId(): string {
   return String(Math.floor(100000000000 + Math.random() * 900000000000));
+}
+
+/** A specific Contact's own real id — "CTX-YYYYMMDD-NNNNN", matching the
+ *  format the handful of hardcoded historical `TRANSCRIPT_SESSIONS`/`_VOICE`/
+ *  `_EMAIL` mock Contacts already use for their own `caseId` (now
+ *  `Contact.contactId`) — e.g. "CTX-20250722-08841". Called once per Contact
+ *  (the synthetic "just launched" one, and each reopen) at the moment it's
+ *  created, replacing what used to be a real, shipped bug: every live
+ *  Contact's own `caseId` was set to `recordId` (now `Interaction.
+ *  customerId`) — the CUSTOMER's id, not a distinct per-Contact one — so the
+ *  Session Details panel's own "Contact ID" field and the "# caseId · date"
+ *  separator pill both silently showed the Customer ID instead. Distinct
+ *  from `generateInteractionId` above (an Interaction's own id) — a single
+ *  Interaction can have several Contacts (the initial one, plus one more per
+ *  reopen), each needs its own. */
+function generateContactId(date: Date = new Date()): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const suffix = String(Math.floor(10000 + Math.random() * 90000));
+  return `CTX-${yyyy}${mm}${dd}-${suffix}`;
 }
 
 /** Renders a tick count (seconds since the channel/interaction started) as
@@ -107,11 +134,15 @@ function getAwaitingSeverity(waitSeconds: number): "success" | "warning" | "crit
  *  ("Escalation - {X}", see `INITIAL_NOTIFICATIONS` in
  *  agent-next-gen-interaction-dashboard.tsx), so the two can't describe the
  *  same channel with two different words. SMS/WhatsApp/Chat all read as
- *  "Chat" (default branch) — same chat-shaped-channels grouping this app
- *  already uses elsewhere (e.g. `contactHistoryChannelType`) — since
- *  nothing in this mock data distinguishes them from a customer's own
- *  vantage point; Voice falls back to "Call" defensively even though no
- *  current entry uses it. */
+ *  "Chat" (default branch) here — purely a notification-copy
+ *  simplification local to this function, since nothing in this mock data
+ *  distinguishes them from a customer's own vantage point; Voice falls
+ *  back to "Call" defensively even though no current entry uses it. (Not
+ *  to be confused with `ContactHistoryEntry.channelType`, agent-next-gen-
+ *  contact-history.tsx — that field must carry the real channel type
+ *  losslessly; a similar collapsing helper used to live there too and was
+ *  removed after it caused a real, shipped bug — see that field's own doc
+ *  comment.) */
 function channelNoun(channel: ChannelType): string {
   switch (channel) {
     case "email":
@@ -188,12 +219,12 @@ function percentOfTeam(you: number, team: number): number {
 /** Drops a single channel id's entry out of a `channelStatuses` map, leaving
  *  every other channel's own status untouched — used by `handleStartCall`
  *  when a channel is restarted at the SAME address (so it reuses
- *  `TrackedChannel.id`, per that field's own doc comment): without this, a
+ *  `Thread.id`, per that field's own doc comment): without this, a
  *  channel that was previously set to "Closed" and then redialed at the same
  *  number would silently reopen still reading "Closed" under its reused id,
  *  since nothing would otherwise clear the stale entry. Returns `undefined`
  *  (rather than an empty object) when the map is empty afterward, matching
- *  `ActiveInteraction.channelStatuses`'s own optional-when-nothing-set
+ *  `Interaction.channelStatuses`'s own optional-when-nothing-set
  *  convention. */
 function withoutChannelStatus(
   statuses: Record<string, string> | undefined,
@@ -272,11 +303,11 @@ function splitCustomerName(customerName: string | undefined): { firstName: strin
 }
 
 /** What a record-header tab (`ChannelTab`'s own `address` prop) should show
- *  on its face — AND, just as importantly, what `TrackedChannel.value`
+ *  on its face — AND, just as importantly, what `Thread.value`
  *  itself should be set to — for a channel that was opened WITHOUT a real
  *  captured address: reopening a Contact History row, redialing one, or
  *  opening a row from the Interactions list all build a fresh
- *  `TrackedChannel` with no picked address of their own (no stored phone/
+ *  `Thread` with no picked address of their own (no stored phone/
  *  email on either data shape), unlike `handleStartCall`'s own New
  *  Outbound/Customer-table path, which always has a real picked/typed
  *  address on hand (`selection.phone`, threaded onto both `value` and
@@ -295,7 +326,7 @@ function splitCustomerName(customerName: string | undefined): { firstName: strin
  *  This agreement is NOT just cosmetic: `create-new.tsx`'s
  *  `resolveOutboundDetailField`/`isChannelBlockedForContact` compare a
  *  contact's `openChannelAddresses[type]` (built from each open
- *  `TrackedChannel.value` — see `buildOpenChannelTagger`,
+ *  `Thread.value` — see `buildOpenChannelTagger`,
  *  AgentNextGenPage.tsx/AgentWorkspace2WithDeskPage.tsx) against that same
  *  contact's OWN `email`/`primaryPhone`/synthesized-`@name` WhatsApp handle
  *  to decide whether every address for a channel is already open and the
@@ -490,12 +521,13 @@ function phoneDisplayFromValue(value: PhoneValue): string {
 /** Which of the three top-level views `AgentNextGenPage` is currently
  *  showing — the Desk dashboard, an active interaction's record, or
  *  Settings. */
-type Page = "agent-workspace" | "agent" | "agent-with-desk" | "outbound" | "login";
+type Page = "agent-workspace" | "agent" | "agent-with-desk" | "agent-advanced" | "outbound" | "login";
 
 export {
   initialsFor,
   generateCaseId,
   generateInteractionId,
+  generateContactId,
   formatElapsedTime,
   formatWaitTime,
   AWAITING_WARNING_SECONDS,

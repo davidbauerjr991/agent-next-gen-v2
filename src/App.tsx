@@ -4,22 +4,30 @@ import { Sidebar } from "@/components/Sidebar";
 import { DesktopDesignsPage } from "@/components/DesktopDesignsPage";
 import { AgentNextGenPage } from "@/components/AgentNextGenPage";
 import { AgentWorkspace2WithDeskPage } from "@/components/AgentWorkspace2WithDeskPage";
+import { AgentWorkspaceAdvancedPage } from "@/components/AgentWorkspaceAdvancedPage";
 import { OutboundEngagementPage } from "@/components/OutboundEngagementPage";
 import { LoginPage } from "@/components/LoginPage";
 
-type Page = "agent-workspace" | "agent" | "agent-with-desk" | "outbound" | "login";
+type Page = "agent-workspace" | "agent" | "agent-with-desk" | "agent-advanced" | "outbound" | "login";
 
 /* ── Hash-based routing ──
    "login" is now the home/root page (empty hash) — "agent" (the Desk page)
    moved off root onto its own "#/agent" hash so it's still directly
-   linkable/bookmarkable. "agent-with-desk" ("Agent Workspace 2.0 With Desk"
-   in the app menu) is its own separate route/component
-   (AgentWorkspace2WithDeskPage.tsx — a deliberate duplicate of
-   AgentNextGenPage.tsx, see that file's own top-of-file note) rather than
-   reusing "agent"'s page, per explicit request. */
+   linkable/bookmarkable. "agent-with-desk" ("Agent Workspace 2.0 Premium" in
+   the app menu — originally "Agent Workspace 2.0 With Desk", renamed per
+   explicit request; the internal `"agent-with-desk"` page id/component name
+   were deliberately left as-is, only the user-facing label + route changed)
+   is its own separate route/component (AgentWorkspace2WithDeskPage.tsx — a
+   deliberate duplicate of AgentNextGenPage.tsx, see that file's own
+   top-of-file note) rather than reusing "agent"'s page, per explicit
+   request. "agent-advanced" ("Agent Workspace 2.0 Advanced" in the app menu,
+   second item) is the same pattern again — its own separate route/component
+   (AgentWorkspaceAdvancedPage.tsx, another duplicate of
+   AgentNextGenPage.tsx), per explicit request. */
 const PAGE_HASH: Record<Page, string> = {
   "agent":           "#/agent",
-  "agent-with-desk": "#/agent-with-desk",
+  "agent-with-desk": "#/agent-premium",
+  "agent-advanced":  "#/agent-advanced",
   "agent-workspace": "#/agentworkspacepremium",
   "outbound":        "#/outboundengagement",
   "login":           "",
@@ -28,7 +36,8 @@ const PAGE_HASH: Record<Page, string> = {
 function pageFromHash(): Page {
   const hash = window.location.hash;
   if (hash === "#/agent") return "agent";
-  if (hash === "#/agent-with-desk") return "agent-with-desk";
+  if (hash === "#/agent-premium") return "agent-with-desk";
+  if (hash === "#/agent-advanced") return "agent-advanced";
   if (hash === "#/agentworkspacepremium") return "agent-workspace";
   if (hash === "#/outboundengagement") return "outbound";
   return "login";
@@ -321,6 +330,10 @@ function App() {
 
   if (page === "agent-with-desk") {
     return <AgentWorkspace2WithDeskPage showPageHeader showPanelToggle showInteriorPanel onNavigate={setPage} />;
+  }
+
+  if (page === "agent-advanced") {
+    return <AgentWorkspaceAdvancedPage showPageHeader showPanelToggle showInteriorPanel onNavigate={setPage} />;
   }
 
   if (page === "login") {
