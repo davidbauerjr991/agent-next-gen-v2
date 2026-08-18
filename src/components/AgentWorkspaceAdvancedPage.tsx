@@ -576,7 +576,12 @@ function resolveInteractionLastCustomerResponseLabel(
       consider(new Date(`${reopened.date} ${reopened.startTime}`));
       continue;
     }
-    if (interaction.startedFresh) continue;
+    // Per-THREAD, not `interaction.startedFresh` — see `Thread.startedFresh`'s
+    // own doc comment. This loop already iterates per-thread (`c`); a
+    // genuinely fresh thread (no history to fall back to) skips the canned
+    // fallback below regardless of whether the interaction it lives on was
+    // itself born fresh or resumed from history.
+    if (c.startedFresh) continue;
     const baseSessions =
       c.type === "email"
         ? TRANSCRIPT_SESSIONS_EMAIL
@@ -1082,6 +1087,14 @@ export function AgentWorkspaceAdvancedPage({
       )
     : undefined;
   const activeChannelType = activeChannel?.type;
+  // Per explicit follow-up request ("leave the active badge visible if the
+  // agent switches between chat/other channels"): whether the interaction
+  // has a chat thread open ANYWHERE among its threads, not just whether the
+  // currently-selected tab (`activeChannelType`) happens to be it — see the
+  // record-header `badge` call site's own doc comment further down for the
+  // full reasoning. `false` (not `undefined`) while there's no active
+  // interaction at all, matching every other boolean derived here.
+  const hasOpenChatThread = !!activeInteraction?.threads.some((c) => c.type === "chat");
   // The bare channel-key half of `activeChannelOutcomeKey` below — used on
   // its own to resolve this channel's own entry out of
   // `Interaction.liveMessages` (see that field's own doc comment for
@@ -1108,14 +1121,15 @@ export function AgentWorkspaceAdvancedPage({
   // site below) without touching any sibling channel's own status.
   const activeChannelStatus = activeChannel ? activeInteraction?.threadStatuses?.[activeChannel.id] : undefined;
   // Per explicit request/follow-up clarification: true for a brand-new
-  // AGENT-INITIATED OUTBOUND active channel — `activeInteraction.
-  // startedFresh` (see its own doc comment) AND-ed with "the customer
-  // hasn't replied yet" (`lastCustomerMessageTick`), same compound check
-  // `isNewOutboundThread` uses at the LeftNav card / record-header tab
+  // AGENT-INITIATED OUTBOUND active channel — the active Thread's OWN
+  // `startedFresh` (see that field's own doc comment on why this reads
+  // per-Thread now, not `activeInteraction.startedFresh`) AND-ed with "the
+  // customer hasn't replied yet" (`lastCustomerMessageTick`), same compound
+  // check `isNewOutboundThread` uses at the LeftNav card / record-header tab
   // loops (their own doc comments have the full reasoning) — reused here
   // for `InteractionTranscript`'s own `isNewThread` prop (the session row).
   const activeChannelIsNewOutboundThread =
-    !!activeInteraction?.startedFresh && activeChannel?.lastCustomerMessageTick === undefined;
+    !!activeChannel?.startedFresh && activeChannel?.lastCustomerMessageTick === undefined;
   // Per explicit request: true when the active interaction's own `id` is
   // one of `OUTBOUND_AGENTS`'s ids — i.e. this is an agent-to-agent voice
   // call, not a customer interaction (an agent's own outbound "Chat" pick
@@ -1198,7 +1212,9 @@ export function AgentWorkspaceAdvancedPage({
     : undefined;
   const activeChannelDateTime = resolveActiveChannelDateTimeLabel(
     activeChannelType,
-    !!activeInteraction?.startedFresh,
+    // Per-Thread, same reasoning as `activeChannelIsNewOutboundThread` above
+    // — see `Thread.startedFresh`'s own doc comment.
+    !!activeChannel?.startedFresh,
     activeChannel,
     activeChannelLaunchedAt
   );
@@ -2373,6 +2389,16 @@ export function AgentWorkspaceAdvancedPage({
       // model draws.
       contactId: existingChannel?.contactId ?? generateContactId(),
       reopenedContacts,
+      // Per explicit follow-up request ("whenever a new channel is open
+      // unless it is re-opening a channel it should open as a draft"): an
+      // agent-initiated outbound launch always gets a fresh, empty session
+      // — see `Thread.startedFresh`'s own doc comment for why this is now a
+      // per-Thread flag rather than the interaction-wide one this used to
+      // rely on exclusively. `existingChannel`'s own reopen path already
+      // renders its own synthetic empty session via `reopenedContacts`
+      // regardless of this flag, so unconditionally `true` here is correct
+      // either way.
+      startedFresh: true,
     };
 
     setInteractions((prev) => {
@@ -2552,6 +2578,10 @@ export function AgentWorkspaceAdvancedPage({
       value: phoneNumber,
       addressLabel: phoneNumber,
       contactId: generateContactId(),
+      // Per explicit follow-up request — see `Thread.startedFresh`'s own
+      // doc comment. A quick-dialed number has no prior conversation to
+      // show; always a fresh, empty session.
+      startedFresh: true,
     };
     setInteractions((prev) => {
       const idx = prev.findIndex((i) => i.id === id);
@@ -2627,6 +2657,10 @@ export function AgentWorkspaceAdvancedPage({
       value: voiceAddress,
       addressLabel: voiceAddress,
       contactId: generateContactId(),
+      // Per explicit follow-up request — see `Thread.startedFresh`'s own
+      // doc comment. A redial is a fresh new call, not a continuation of
+      // Contact History's own past conversation; always an empty session.
+      startedFresh: true,
     };
     setInteractions((prev) => {
       const idx = prev.findIndex((i) => i.id === id);
@@ -2676,6 +2710,12 @@ export function AgentWorkspaceAdvancedPage({
       addressLabel: query,
       messageCount: channel === "voice" ? undefined : 0,
       contactId: generateContactId(),
+      // Per explicit follow-up request ("whenever a new channel is open
+      // unless it is re-opening a channel it should open as a draft — you
+      // can see if you go to 2.0 and open an interaction from the search
+      // then add a channel it populates the content") — see `Thread.
+      // startedFresh`'s own doc comment for the full per-Thread fix.
+      startedFresh: true,
     };
     setInteractions((prev) =>
       prev.map((interaction) => {
@@ -4771,15 +4811,17 @@ export function AgentWorkspaceAdvancedPage({
                   // needs to affect one without the other (next paragraph).
                   const isClosed = interaction.threadStatuses?.[c.id] === "Closed" || !!interaction.closed;
                   // Per explicit request/follow-up clarification: a brand-new
-                  // AGENT-INITIATED OUTBOUND channel — `interaction.startedFresh`
-                  // (see its own doc comment), reused straight from the same
-                  // signal `isFreshLaunch`/`copilotAvailable` already key off —
-                  // hasn't earned Consult/Transfer, Outcome, or Unassign &
-                  // Dismiss yet, so this card's kebab collapses to a plain
-                  // close ("×") button just like a closed one (`removable`
-                  // below). `!hasCustomerResponded(c)` matters too: the
-                  // moment the customer actually replies, this is a real,
-                  // live conversation like any other — same "still fresh vs.
+                  // AGENT-INITIATED OUTBOUND channel — this channel's OWN
+                  // `c.startedFresh` (see `Thread.startedFresh`'s own doc
+                  // comment for why per-Thread, not `interaction.startedFresh`),
+                  // reused straight from the same signal `isFreshLaunch`/
+                  // `copilotAvailable` already key off — hasn't earned
+                  // Consult/Transfer, Outcome, or Unassign & Dismiss yet, so
+                  // this card's kebab collapses to a plain close ("×") button
+                  // just like a closed one (`removable` below).
+                  // `!hasCustomerResponded(c)` matters too: the moment the
+                  // customer actually replies, this is a real, live
+                  // conversation like any other — same "still fresh vs.
                   // already has real activity" split `copilotAvailable`
                   // already draws — so the lockdown lifts automatically
                   // rather than persisting for the rest of the interaction's
@@ -4788,7 +4830,7 @@ export function AgentWorkspaceAdvancedPage({
                   // (notification/table-row opens deliberately don't set
                   // `startedFresh` — see those call sites' own doc comments),
                   // matching the explicit "not outbound" clarification.
-                  const isNewOutboundThread = !!interaction.startedFresh && !hasCustomerResponded(c);
+                  const isNewOutboundThread = !!c.startedFresh && !hasCustomerResponded(c);
                   // Per explicit request: a "Resolved" channel ALSO stops
                   // counting toward SLA/awaiting-response — same treatment
                   // `isClosed` above already gets — WITHOUT closing the
@@ -5357,10 +5399,17 @@ export function AgentWorkspaceAdvancedPage({
                       // dropped, an SMS/WhatsApp/email thread has no
                       // presence signal at all), so labeling those "Active"
                       // overclaims a certainty this app doesn't have.
+                      // Follow-up request ("leave the active badge visible
+                      // if the agent switches between chat/other channels"):
+                      // this reads `hasOpenChatThread` (does the interaction
+                      // have a chat thread open ANYWHERE) rather than
+                      // `activeChannelType === "chat"` (is chat the
+                      // currently-selected tab), so switching to another
+                      // open channel's tab no longer hides the badge.
                       // `badge={undefined}` renders nothing at all (see
                       // `PageHeader`'s own `{badge && <Badge>...}` guard,
                       // page-header.tsx) rather than an empty pill.
-                      badge={activeInteraction.closed ? "Closed" : activeChannelType === "chat" ? "Active" : undefined}
+                      badge={activeInteraction.closed ? "Closed" : hasOpenChatThread ? "Active" : undefined}
                       badgeColor={activeInteraction.closed ? "slate" : "green"}
                       actions={
                         <>
@@ -5729,14 +5778,15 @@ export function AgentWorkspaceAdvancedPage({
                           const outcomeKey = `${activeInteraction.id}:${key}`;
                           // Same "brand-new outbound thread" signal the
                           // LeftNav card loop derives (`isNewOutboundThread`,
-                          // above) — `interaction.startedFresh` reused
-                          // straight through, AND-ed with "the customer
-                          // hasn't replied yet" so the lockdown lifts the
-                          // moment this becomes a real conversation. See
-                          // that const's own doc comment for the full
-                          // reasoning.
+                          // above) — this channel's OWN `c.startedFresh` (see
+                          // `Thread.startedFresh`'s own doc comment for why
+                          // per-Thread, not `activeInteraction.startedFresh`),
+                          // AND-ed with "the customer hasn't replied yet" so
+                          // the lockdown lifts the moment this becomes a real
+                          // conversation. See that const's own doc comment
+                          // for the full reasoning.
                           const isNewOutboundThread =
-                            !!activeInteraction.startedFresh && c.lastCustomerMessageTick === undefined;
+                            !!c.startedFresh && c.lastCustomerMessageTick === undefined;
                           return (
                             <ChannelTab
                               key={key}
@@ -6048,7 +6098,10 @@ export function AgentWorkspaceAdvancedPage({
                           // always preferred when one exists.
                           contactId={activeChannel?.contactId ?? activeInteraction.customerId}
                           skillLabel={activeChannel?.preview}
-                          isFreshLaunch={!!activeInteraction.startedFresh}
+                          // Per-Thread — see `Thread.startedFresh`'s own doc
+                          // comment for why this reads the ACTIVE channel's
+                          // own flag, not `activeInteraction.startedFresh`.
+                          isFreshLaunch={!!activeChannel?.startedFresh}
                           // Per explicit request/follow-up clarification —
                           // see `activeChannelIsNewOutboundThread`'s own
                           // doc comment above for the full reasoning.

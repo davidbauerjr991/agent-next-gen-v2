@@ -43,18 +43,23 @@ import {
 
 export interface AddChannelAdHocButtonProps {
   /** Fires once the agent finishes the popup's flow — `query` is the
-   *  trimmed, exact text they typed; `channel` is `"email"` for anything
-   *  email-shaped (fires immediately on "Continue with '{query}'", no
-   *  further step). For phone-shaped input, "Continue with '{query}'"
-   *  no longer fires this directly — it instead advances to a second
-   *  "Select Channel" step (SMS vs Voice, mirroring `create-new.tsx`'s own
-   *  New Outbound detail screen's `RadioButtonGroup`) per explicit
-   *  request ("when a channel is added that is a phone number and
-   *  Continue... is selected, display radio buttons for sms or voice...
-   *  so the agent can choose what type of interaction to open"), and only
-   *  fires once the agent picks one and confirms. The popover closes and
-   *  its field/step resets immediately after this fires — callers don't
-   *  need to do either themselves. */
+   *  trimmed, exact text they typed (possibly edited on step 2, see
+   *  below); `channel` is `"email"` for anything email-shaped (fires
+   *  immediately on "Continue with '{query}'", no further step). For
+   *  phone-shaped input, "Continue with '{query}'" no longer fires this
+   *  directly — it instead advances to a second step showing the same
+   *  phone `Input` (still editable) plus a "Select Channel" `RadioButtonGroup`
+   *  (SMS vs Voice, mirroring `create-new.tsx`'s own New Outbound detail
+   *  screen) and a "Start Interaction" button, per explicit request ("when
+   *  a channel is added that is a phone number and Continue... is
+   *  selected, display radio buttons for sms or voice... so the agent can
+   *  choose what type of interaction to open", further followed up with
+   *  "the updated add channel should display the phone input as well as
+   *  the select channel radios (so the agent can change the phone if they
+   *  want) then add the start interaction button"). Only fires once the
+   *  agent picks a channel and presses "Start Interaction". The popover
+   *  closes and its field/step resets immediately after this fires —
+   *  callers don't need to do either themselves. */
   onLaunch: (query: string, channel: ChannelType) => void;
   /** Optional trigger sizing override — the trigger is a plain `Button
    *  variant="default" size="icon-md"`, so its resting color/shape is
@@ -147,19 +152,21 @@ function AddChannelAdHocButton({ onLaunch, className }: AddChannelAdHocButtonPro
       // button's presence changing how much bottom padding the WHOLE body
       // effectively had.
       footer={
-        // Per explicit follow-up request (SMS/Voice choice for phone-
-        // shaped input): step 2's footer button reads plain "Continue" —
-        // by this point the agent has already confirmed the number itself
-        // via step 1's own "Continue with '{trimmed}'" button, so
-        // repeating the number here would be redundant; it stays disabled
-        // until a channel is actually picked (`!phoneChannel`), same
-        // required-choice guard `RadioButtonGroup`'s own `error` state
-        // exists for elsewhere in this app, kept simple here since there's
-        // only ever one field to blame.
+        // Per further explicit follow-up request ("the updated add channel
+        // should display the phone input as well as the select channel
+        // radios (so the agent can change the phone if they want) then add
+        // the start interaction button"): step 2's footer button now reads
+        // "Start Interaction" (the actual launch action, not just an
+        // intermediate "Continue") and stays disabled until BOTH the phone
+        // field still holds a valid phone-shaped value (`canContinue` —
+        // the agent can edit it in place on this step, see `content`
+        // below, and an edit that breaks the phone shape should block
+        // launch same as an empty field would) AND a channel is picked
+        // (`phoneChannel`).
         choosingPhoneChannel ? (
           <div className="px-5 pb-4 pt-1">
-            <Button variant="outline" size="lg" wrap className="w-full" disabled={!phoneChannel} onClick={handleContinue}>
-              Continue
+            <Button variant="outline" size="lg" wrap className="w-full" disabled={!canContinue || !phoneChannel} onClick={handleContinue}>
+              Start Interaction
             </Button>
           </div>
         ) : canContinue ? (
@@ -174,14 +181,25 @@ function AddChannelAdHocButton({ onLaunch, className }: AddChannelAdHocButtonPro
         choosingPhoneChannel ? (
           // Per explicit follow-up request ("when a channel is added that
           // is a phone number and Continue... is selected, display radio
-          // buttons for sms or voice (like you do with new outbound)"):
-          // reuses the exact `RadioButtonGroup` component (and "Select
-          // Channel" label) `create-new.tsx`'s own New Outbound detail
-          // screen already uses for its own channel picker
-          // (radio-button-group.tsx), instead of a locally hand-rolled
-          // pair of buttons — same "extend/reuse the design system"
-          // reasoning as every other shared-primitive call in this file.
+          // buttons for sms or voice (like you do with new outbound)"),
+          // and the further follow-up above (phone field stays visible +
+          // editable on this step too, not just the radios): the phone
+          // `Input` from step 1 carries over onto this step unchanged
+          // (same `value`/`onChange`, still typeable) directly above the
+          // `RadioButtonGroup` — reuses the exact `RadioButtonGroup`
+          // component (and "Select Channel" label) `create-new.tsx`'s own
+          // New Outbound detail screen already uses for its own channel
+          // picker (radio-button-group.tsx), instead of a locally
+          // hand-rolled pair of buttons — same "extend/reuse the design
+          // system" reasoning as every other shared-primitive call in this
+          // file.
           <div className="flex flex-col gap-3 pt-1 pb-2">
+            <Input
+              label="Enter Email Or Phone Number"
+              value={value}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setValue(e.target.value)}
+              placeholder="Email or phone number"
+            />
             <RadioButtonGroup
               label="Select Channel"
               options={[

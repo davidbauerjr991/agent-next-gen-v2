@@ -1169,24 +1169,20 @@ export function TranscriptSessionSeparator({
       collapsible
       value={open ? session.id : ""}
       onValueChange={() => {}}
-      // `px-6` moved directly onto this root (was applied via a wrapping
-      // `<div className="w-full px-6">` at the call site) — per explicit
-      // bug report ("the only problem is it's not sticky at the top
-      // anymore"): a sticky element's stickiness bounds are constrained to
-      // its own CONTAINING BLOCK, which for a plain (non-positioned)
-      // element is its immediate parent's padding box. Wrapping this root
-      // in a div that held ONLY the separator gave it a containing block
-      // with zero extra height beyond the separator's own — nowhere to
-      // "stick" as the page scrolled, exactly the same class of bug this
-      // component's OWN call site doc comment already documents for why
-      // live messages have to share this session's container (see
-      // `InteractionTranscript`'s own "Live messages" comment). Padding
-      // applied here instead keeps this root a DIRECT sibling of the
-      // per-session message content again (both children of the same
-      // `<div key={session.id}>`, which has real height to scroll through)
-      // while still getting the full-width, no-max-width look the
-      // call site's own doc comment describes.
-      //
+      // Per explicit follow-up request, un-reverting an earlier revert
+      // ("dang - revert that last change - go back to full screen width"):
+      // back to full-width again — the outer scroll wrapper (`Interaction
+      // Transcript`'s own call site, see its doc comment) is unconstrained
+      // (`w-full`, no max-width) once more, so this root carries its own
+      // `px-6` directly again instead of inheriting a constrained parent's
+      // inset. `px-6` lives HERE (not on a wrapping div) for the same
+      // sticky-containing-block reasoning already established: a sticky
+      // element's stickiness bounds are its own immediate parent's box — a
+      // wrapper holding ONLY this separator has zero extra height to stick
+      // through. This root stays a DIRECT sibling of the per-session
+      // message content (both children of the same `<div key={session.id}>`,
+      // which has real height) — that part was never touched by either the
+      // revert or this un-revert.
       className="sticky top-0 z-[1] bg-lyra-bg-surface-base px-6"
     >
       {/* `border-b border-lyra-border-subtle` lives on this `Item`, not the
@@ -2314,30 +2310,25 @@ export function InteractionTranscript({
         onScroll={handleTranscriptScroll}
         className="h-full overflow-y-auto"
       >
-        {/* Per explicit follow-up request ("make the session row not have
-            a max-width... this may affect the sticky effect of multiple
-            session rows so take that into account"): this outer wrapper
-            used to be `max-w-[1200px] mx-auto px-6`, constraining BOTH the
-            `TranscriptSessionSeparator` row and the message bubbles under
-            it to the same centered 1200px column — visibly narrower than
-            the full-width record header above it once the window got wide
-            enough. Now full width, unconstrained; the 1200px-centered
-            column moved down onto a new wrapper around just the message
-            content, per session (see `sessionContentDimmed`'s own wrapper
-            div further down) — `TranscriptSessionSeparator` itself picked
-            up its own `px-6` directly on its root instead (see that
-            component's own doc comment for why it's applied there rather
-            than via a wrapping div — a first attempt at exactly that broke
-            its `sticky top-0` stickiness, since a sticky element is
-            confined to its own immediate parent's box, and a wrapper
-            holding ONLY the separator has no extra height for it to stick
-            through). `position: sticky` itself resolves against the
+        {/* Per explicit follow-up request, un-reverting the max-width-back
+            change just above it ("dang - revert that last change - go back
+            to full screen width"): back to full width again — no
+            `max-w`/`mx-auto`/`px-6` on this outer wrapper. The
+            `TranscriptSessionSeparator` row (the sticky "N Messages |
+            #contactId · date" bar) renders edge-to-edge across the full
+            scrollable width instead of being boxed into the same centered
+            1200px column as the message bubbles below it — that row picked
+            its own `px-6` back up directly on its root (see that
+            component's own doc comment) since it no longer inherits an
+            inset from this now-unconstrained parent. The 1200px-centered
+            column lives on a new wrapper around just the message content,
+            per session (see `sessionContentDimmed`'s own wrapper div
+            further down) — message bubbles are unaffected visually, still
+            centered at the same width as before; only the separator row
+            above them is full width. Sticky-STACKING behavior is
+            unaffected either way — `position: sticky` resolves against the
             nearest scrolling ancestor (the `overflow-y-auto` div above),
-            so this max-width change has no bearing on the sticky-STACKING
-            behavior between multiple sessions' separators — each still
-            sticks at `top-0` in source order exactly as before; it just
-            means the sticky bar itself now renders edge-to-edge instead of
-            only as wide as the message column below it. */}
+            not against this width constraint. */}
         <div className="w-full">
           {sessionsToRender.map((session) => {
             // Falls back to `[]` for the synthetic "just launched" session
@@ -2471,11 +2462,14 @@ export function InteractionTranscript({
                     `TranscriptSessionSeparator` above (a SIBLING of this
                     div, same as before) — so its own `sticky top-0` keeps
                     working exactly as already documented there.
-                    `w-full max-w-[1200px] mx-auto px-6` — the 1200px-
-                    centered column the whole per-session block (separator
-                    included) used to share now lives ONLY here, around the
-                    message content, per the max-width change described on
-                    the outer scroll container above.
+                    `w-full max-w-[1200px] mx-auto px-6` — per the
+                    un-revert back to full width (see the outer scroll
+                    container's own doc comment above), the 1200px-centered
+                    column moved back down onto THIS wrapper, around just
+                    the message content — message bubbles are unaffected
+                    visually, still centered at the same width and
+                    alignment as before; only the separator row above them
+                    is full width again.
                     `pb-9` (36px), LAST session only — per explicit follow-up
                     request ("increase the padding-bottom of the
                     conversation container... so the bottom comments are not

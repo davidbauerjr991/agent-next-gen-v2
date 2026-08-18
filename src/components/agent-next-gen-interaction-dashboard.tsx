@@ -162,6 +162,42 @@ export interface Thread {
    *  (`handleOpenAssignmentFromNotification`'s seeded `initialInteraction`)
    *  don't build a `Thread` through any of the handlers that set this. */
   contactId?: string;
+  /** True for a Thread that was just opened by the agent with no real prior
+   *  conversation behind it — a brand-new outbound channel (`handleStartCall`/
+   *  `handleQuickDial`/`handleRedial`) or an ad-hoc "+" Add Channel launch
+   *  (`handleAddAdHocChannel`) — so `InteractionTranscript` shows it as an
+   *  empty draft (`isFreshLaunch`) instead of falling back to the shared mock
+   *  `TRANSCRIPT_SESSIONS`/`_VOICE`/`_EMAIL` log. Left unset (falsy) for a
+   *  Thread that genuinely represents pre-existing history being resumed —
+   *  `handleReopenContactHistoryEntry`, `handleOpenInteractionRow`,
+   *  `handleOpenAssignmentFromNotification` all deliberately omit this field
+   *  for exactly that reason (see each handler's own doc comment).
+   *
+   *  Per explicit follow-up request ("whenever a new channel is open unless
+   *  it is re-opening a channel it should open as a draft — you can see if
+   *  you go to 2.0 and open an interaction from the search then add a
+   *  channel it populates the content"): this is deliberately a PER-THREAD
+   *  flag, not a reuse of `Interaction.startedFresh` (which only describes
+   *  whether the WHOLE interaction/card was just created by an outbound
+   *  launch). A card resumed from Search/Contact History has
+   *  `Interaction.startedFresh` unset from the moment it's created — correct
+   *  for its own original channel, which really does have real history — but
+   *  every render site that gated "should this look like an empty draft?" on
+   *  that single interaction-wide flag also silently applied it to any
+   *  ad-hoc channel added to that same card LATER, which has no history at
+   *  all and should have shown empty regardless of what the interaction's
+   *  own origin was. Every read site that used to check
+   *  `activeInteraction.startedFresh`/`interaction.startedFresh` for
+   *  per-channel "is this fresh" questions now reads the relevant Thread's
+   *  own `startedFresh` instead — see `AgentNextGenPage.tsx`'s
+   *  `activeChannelIsNewOutboundThread`/`isFreshLaunch` call sites and their
+   *  own doc comments for the full before/after. `Interaction.startedFresh`
+   *  itself is untouched and still means what it always did (whether the
+   *  interaction/card as a whole was born from an outbound launch) — it's
+   *  still read by `CustomerInfoHoverPreview`/`CustomerInformationSidePanel`'s
+   *  own `startedFresh` prop for the unrelated "is this a brand-new/possibly
+   *  unmatched customer record" question, which really is interaction-wide. */
+  startedFresh?: boolean;
   /** REMOVED (was `interactionId?: string`) — a plain synthesized digit
    *  shown on this Thread's `ChannelToggle` tooltip as "#{interactionId}",
    *  genuinely redundant now that `Contact.contactId` exists as the real,
