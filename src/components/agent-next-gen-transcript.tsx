@@ -12,6 +12,7 @@ import {
   PanelHeader,
   WarningIconSolid,
   Menu,
+  KebabMenuButton,
   Select,
   DispositionSelect,
   Textarea,
@@ -25,6 +26,7 @@ import {
   type ChannelType,
   type QuickReplyField,
   type QuickReplyMenuItem,
+  type MenuEntry,
 } from "@nicecxone/lyra-ui";
 import {
   Copy,
@@ -42,6 +44,8 @@ import {
   Zap,
   FileText,
   Send,
+  FileDown,
+  Languages,
   Trash2,
 } from "lucide-react";
 import {
@@ -1165,9 +1169,36 @@ export function TranscriptSessionSeparator({
       collapsible
       value={open ? session.id : ""}
       onValueChange={() => {}}
-      className="sticky top-0 z-[1] bg-lyra-bg-surface-base"
+      // `px-6` moved directly onto this root (was applied via a wrapping
+      // `<div className="w-full px-6">` at the call site) — per explicit
+      // bug report ("the only problem is it's not sticky at the top
+      // anymore"): a sticky element's stickiness bounds are constrained to
+      // its own CONTAINING BLOCK, which for a plain (non-positioned)
+      // element is its immediate parent's padding box. Wrapping this root
+      // in a div that held ONLY the separator gave it a containing block
+      // with zero extra height beyond the separator's own — nowhere to
+      // "stick" as the page scrolled, exactly the same class of bug this
+      // component's OWN call site doc comment already documents for why
+      // live messages have to share this session's container (see
+      // `InteractionTranscript`'s own "Live messages" comment). Padding
+      // applied here instead keeps this root a DIRECT sibling of the
+      // per-session message content again (both children of the same
+      // `<div key={session.id}>`, which has real height to scroll through)
+      // while still getting the full-width, no-max-width look the
+      // call site's own doc comment describes.
+      //
+      className="sticky top-0 z-[1] bg-lyra-bg-surface-base px-6"
     >
-      <AccordionPrimitive.Item value={session.id}>
+      {/* `border-b border-lyra-border-subtle` lives on this `Item`, not the
+          sticky `Root` above (a first attempt there didn't render — see
+          `Root`'s own comment history) and not the collapsed row `div`
+          below (an intermediate attempt there put the border right after
+          the row's text, ABOVE the expanded "Session Details" panel when
+          open — per explicit follow-up request "put the border ... below
+          the session information when it is open," it needed to sit below
+          BOTH the collapsed row AND `Content` when expanded, i.e. at the
+          bottom of the whole Item, not the row alone). */}
+      <AccordionPrimitive.Item value={session.id} className="border-b border-lyra-border-subtle">
         <div className="flex flex-wrap items-center justify-between gap-3 py-2">
           {/* Flat, left-aligned case info — no wrapping pill border/
               background and no flanking divider lines (per earlier design
@@ -1484,6 +1515,46 @@ export function TranscriptSessionSeparator({
                 </Button>
               )
             ))}
+            {/* Kebab (Send/Download/Translate) — per explicit request
+                (mockup's "Kebab Menu" callout), the same consolidated
+                "More Options" trigger each page's own record-header cluster
+                now renders (see those files' own header `actions` call
+                sites) also belongs down here once it's THIS row, not the
+                header, carrying the action cluster — i.e. once 2+ channels
+                are open (`showActionCluster` true) and this is a live,
+                non-draft session. Same `!isClosed && !isNewThread` gate as
+                Consult/Transfer and Outcome right above — a closed session
+                or a still-draft thread has nothing to send/download/
+                translate yet either. 3 decorative, unwired items, same as
+                every other copy of this menu in this app. */}
+            {!isClosed && !isNewThread && (
+              <KebabMenuButton
+                ariaLabel="More Options"
+                align="right"
+                items={
+                  [
+                    {
+                      id: "send-transcript",
+                      label: "Send Transcript",
+                      icon: <Send className="h-4 w-4" strokeWidth={1.5} />,
+                      onClick: () => {},
+                    },
+                    {
+                      id: "download-transcript",
+                      label: "Download Transcript",
+                      icon: <FileDown className="h-4 w-4" strokeWidth={1.5} />,
+                      onClick: () => {},
+                    },
+                    {
+                      id: "translate-messages",
+                      label: "Translate Messages",
+                      icon: <Languages className="h-4 w-4" strokeWidth={1.5} />,
+                      onClick: () => {},
+                    },
+                  ] satisfies MenuEntry[]
+                }
+              />
+            )}
             {/* Status tag — moved to the far right of the Consult/Transfer +
                 Outcome cluster (was previously the leading element at the
                 far left of this row) per explicit request. Same Popover/
@@ -1491,17 +1562,29 @@ export function TranscriptSessionSeparator({
                 and, since a later request, extracted into its own
                 `ChannelStatusTag` (above) so `AgentNextGenPage.tsx`'s
                 record header can render the identical control once this
-                row's own copy is hidden there (2.0 only). */}
-            <ChannelStatusTag
-              status={session.status}
-              menuOpen={statusMenuOpen}
-              menuView={statusMenuView}
-              onMenuOpenChange={onStatusMenuOpenChange}
-              onSelectStatus={onSelectStatus}
-              onConfirmClose={onConfirmClose}
-              onCancelClose={onCancelClose}
-              disabled={isClosed}
-            />
+                row's own copy is hidden there (2.0 only).
+                Per explicit follow-up request, also hidden for a brand-new
+                outbound thread (`isNewThread`) — same reasoning as
+                Consult/Transfer/Outcome/the kebab right above: a genuine,
+                never-launched draft has no real status yet either, so this
+                session row collapses down to ONLY the Delete Draft trash
+                button (further below) once `isNewThread`, matching the
+                mockup's 2+-channel draft state exactly. Previously this was
+                the one piece of the cluster that stayed visible regardless
+                of `isNewThread` — a real, confirmed bug fixed here
+                alongside the header's own identical fix. */}
+            {!isNewThread && (
+              <ChannelStatusTag
+                status={session.status}
+                menuOpen={statusMenuOpen}
+                menuView={statusMenuView}
+                onMenuOpenChange={onStatusMenuOpenChange}
+                onSelectStatus={onSelectStatus}
+                onConfirmClose={onConfirmClose}
+                onCancelClose={onCancelClose}
+                disabled={isClosed}
+              />
+            )}
             {/* Unassign & Dismiss — immediately right of the status tag, per
                 explicit request. Same icon/action `ChannelTab`'s own kebab
                 entry uses for this channel (see `onDismiss`'s own doc
@@ -1523,6 +1606,19 @@ export function TranscriptSessionSeparator({
                 this row's OTHER buttons (`icon-sm`, also 24px), unlike the
                 header's own copy which sizes up to `md` (32px) to match
                 that row's taller buttons instead.
+                Per a later explicit follow-up request ("use a ghost button
+                error variant"): `variant="outline"` (bordered) →
+                `variant="ghost"` with the `border-lyra-status-critical-
+                strong`/`hover:border-lyra-status-critical-strong` classes
+                dropped — same critical-red icon color and
+                `hover:bg-lyra-status-critical-subtle`/`active:bg-lyra-
+                status-critical-medium` background states as before, just
+                borderless now. Exactly the same `outline` → `ghost`
+                treatment the record-header's own copy of this button
+                already got (there's still no named `ghost`+`critical`
+                `Button` variant, so this remains composed via `className`
+                the same way — see that call site's own doc comment,
+                AgentNextGenPage.tsx).
                 For a brand-new outbound thread (`isNewThread`), this real
                 button is swapped for a red trash-icon "Delete Draft"
                 button instead — per explicit request, since closing a
@@ -1561,10 +1657,10 @@ export function TranscriptSessionSeparator({
                   // pattern the `isNewThread` close button just above
                   // already uses (`title="Close"`).
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon-sm"
                     title="Unassign & Dismiss"
-                    className="shrink-0 border-lyra-status-critical-strong text-lyra-status-critical-strong hover:bg-lyra-status-critical-subtle hover:border-lyra-status-critical-strong active:bg-lyra-status-critical-medium"
+                    className="shrink-0 text-lyra-status-critical-strong hover:bg-lyra-status-critical-subtle hover:text-lyra-status-critical-strong active:bg-lyra-status-critical-medium"
                     onClick={onDismiss}
                   >
                     <UserX className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -2218,7 +2314,31 @@ export function InteractionTranscript({
         onScroll={handleTranscriptScroll}
         className="h-full overflow-y-auto"
       >
-        <div className="w-full max-w-[1200px] mx-auto px-6">
+        {/* Per explicit follow-up request ("make the session row not have
+            a max-width... this may affect the sticky effect of multiple
+            session rows so take that into account"): this outer wrapper
+            used to be `max-w-[1200px] mx-auto px-6`, constraining BOTH the
+            `TranscriptSessionSeparator` row and the message bubbles under
+            it to the same centered 1200px column — visibly narrower than
+            the full-width record header above it once the window got wide
+            enough. Now full width, unconstrained; the 1200px-centered
+            column moved down onto a new wrapper around just the message
+            content, per session (see `sessionContentDimmed`'s own wrapper
+            div further down) — `TranscriptSessionSeparator` itself picked
+            up its own `px-6` directly on its root instead (see that
+            component's own doc comment for why it's applied there rather
+            than via a wrapping div — a first attempt at exactly that broke
+            its `sticky top-0` stickiness, since a sticky element is
+            confined to its own immediate parent's box, and a wrapper
+            holding ONLY the separator has no extra height for it to stick
+            through). `position: sticky` itself resolves against the
+            nearest scrolling ancestor (the `overflow-y-auto` div above),
+            so this max-width change has no bearing on the sticky-STACKING
+            behavior between multiple sessions' separators — each still
+            sticks at `top-0` in source order exactly as before; it just
+            means the sticky bar itself now renders edge-to-edge instead of
+            only as wide as the message column below it. */}
+        <div className="w-full">
           {sessionsToRender.map((session) => {
             // Falls back to `[]` for the synthetic "just launched" session
             // (not seeded into `sessionMessages` at mount, since it isn't
@@ -2249,6 +2369,15 @@ export function InteractionTranscript({
             const sessionContentDimmed = session.id !== lastSessionId || dimmed;
             return (
               <div key={session.id} className="flex flex-col">
+                {/* No wrapping div around this root — per explicit bug fix
+                    ("not sticky at the top anymore"), this must stay a
+                    DIRECT child of the per-session `<div key={session.id}>`
+                    below, a sibling of the message content div further
+                    down, so its containing block has real height to
+                    "stick" through as the page scrolls. Its own `px-6` (and
+                    full-width, no `max-w`) is applied directly on its root
+                    className now instead — see that component's own doc
+                    comment. */}
                 <TranscriptSessionSeparator
                   session={sessionWithCurrentStatus}
                   open={openSessionIds.has(session.id)}
@@ -2341,8 +2470,43 @@ export function InteractionTranscript({
                     wrapper. Plain wrapper div, not an ancestor of
                     `TranscriptSessionSeparator` above (a SIBLING of this
                     div, same as before) — so its own `sticky top-0` keeps
-                    working exactly as already documented there. */}
-                <div className={cn(sessionContentDimmed && "opacity-50 transition-opacity")}>
+                    working exactly as already documented there.
+                    `w-full max-w-[1200px] mx-auto px-6` — the 1200px-
+                    centered column the whole per-session block (separator
+                    included) used to share now lives ONLY here, around the
+                    message content, per the max-width change described on
+                    the outer scroll container above.
+                    `pb-9` (36px), LAST session only — per explicit follow-up
+                    request ("increase the padding-bottom of the
+                    conversation container... so the bottom comments are not
+                    covered by the fade"): the composer's own soft fade
+                    overlay (`-top-8 h-8`, 32px, see that div's own doc
+                    comment further down) paints OVER the last ~32px of
+                    whichever content is scrolled to the very bottom of the
+                    transcript — with only the message blocks' own `py-4`
+                    (16px) below the last bubble, the fade's 32px reached up
+                    into the actual text of the last message once scrolled
+                    all the way down. 36px (a touch more than the fade's own
+                    32px) clears it with a little room to spare. Scoped to
+                    `session.id === lastSessionId` specifically — every
+                    OLDER session already has real content (this session's
+                    own separator, or the next session's) sitting below it
+                    in the scroll, so only the truly last block in the
+                    document needs the extra clearance; adding it to every
+                    session would just insert an oversized, unexplained gap
+                    above each one's own separator instead. Whichever
+                    sub-block actually renders last for this session (canned
+                    `messages`, the Voice/Email placeholder, or live
+                    messages — see the three blocks below) is covered
+                    either way, since this padding lives on their shared
+                    parent, not on any one of them individually. */}
+                <div
+                  className={cn(
+                    "w-full max-w-[1200px] mx-auto px-6",
+                    sessionContentDimmed && "opacity-50 transition-opacity",
+                    session.id === lastSessionId && "pb-9"
+                  )}
+                >
                 {messages.length > 0 && (
                   <div className="flex min-w-0 flex-col gap-5 py-4">
                     {messages.map((message) => (

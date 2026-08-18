@@ -46,6 +46,7 @@ import {
   TabList,
   Tab,
   ChannelTab,
+  ToggleGroup,
   Popover,
   Toast,
   ToastContainer,
@@ -66,9 +67,6 @@ import {
   type DraggableVariant,
   type EmbeddablePanelContent,
   type MenuEntry,
-  useOutcomePopoverState,
-  buildOutcomePopoverSlots,
-  ConsultTransferIcon,
   CHANNEL_TYPE_META,
 } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_CUSTOMERS, type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
@@ -99,7 +97,6 @@ import {
   CUSTOMER_AUTO_REPLY_POOL,
   InteractionTranscript,
   InteractionComposer,
-  ChannelStatusTag,
   TRANSCRIPT_SESSIONS,
   TRANSCRIPT_SESSIONS_VOICE,
   TRANSCRIPT_SESSIONS_EMAIL,
@@ -168,6 +165,7 @@ import {
 // this follows (build new things locally, promote to lyra-ui only once
 // explicitly asked).
 import { CollapsedChannelBadge } from "@/components/CollapsedChannelBadge";
+import { AddChannelAdHocButton } from "@/components/agent-next-gen-add-channel-button";
 import appIcon from "@/assets/app-icon.svg";
 import {
   MessageSquare,
@@ -194,12 +192,6 @@ import {
   IdCard,
   PhoneOutgoing,
   RotateCcw,
-  UserX,
-  Send,
-  FileDown,
-  Languages,
-  CircleCheck,
-  Trash2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -527,6 +519,80 @@ function resolveActiveChannelDateTimeLabel(
   return formatCompactDateTime(`${lastSession.date} ${lastSession.startTime}`);
 }
 
+/** Finds the most recent real customer-response timestamp across EVERY
+ *  thread on an interaction (not just the active one) and formats it with
+ *  `formatCompactDateTime` — feeds the record-header subtitle's
+ *  "{N} channels open | Last Customer Response: {date/time}" pattern below,
+ *  per explicit follow-up request, shown once 2+ channels are open in place
+ *  of the single active channel's own "{icon} {label} | {date}" line (that
+ *  line stops meaning much once several channels are live at once — this
+ *  answers "when did the customer last actually say something," across
+ *  whichever channel that happened on).
+ *
+ *  Resolution per thread, most authoritative first:
+ *  1. `lastCustomerMessageTick` — set the instant a real (or simulated)
+ *     customer reply lands on THIS session (`handleSendMessage`'s reply
+ *     timeout). It's a `clockTick` value — real elapsed seconds since this
+ *     page mounted (`clockTick`'s own 1-per-second `setInterval`, see that
+ *     state's doc comment above) — so `pageMountTimeMs + tick * 1000` gives
+ *     an exact, real wall-clock `Date`, not a mock string.
+ *  2. `reopenedContacts` — a thread reopened from Contact History carries a
+ *     real historical date/time of its own even with no live reply yet.
+ *  3. A genuinely fresh (`interaction.startedFresh`) thread with neither of
+ *     the above has had NO customer response at all — skipped outright,
+ *     deliberately NOT falling through to canned session data (that would
+ *     surface stale, unrelated mock history for a channel the customer
+ *     hasn't touched, the same "isFreshLaunch short-circuits before the
+ *     canned branch" reasoning `resolveActiveChannelDateTimeLabel` above
+ *     already applies).
+ *  4. Otherwise (a pre-existing/real customer channel, no live activity
+ *     this session) — that channel type's last canned session's own last
+ *     CUSTOMER-sender message timestamp (chat/sms/whatsapp only; Voice/
+ *     Email's canned sessions ship an empty `messages: []`, so those fall
+ *     back to the session's own `startTime`, same as
+ *     `resolveActiveChannelDateTimeLabel`'s own base-session fallback).
+ *
+ *  Returns `undefined` (not a broken "Last Customer Response: undefined"
+ *  string) when NONE of the interaction's threads have any qualifying
+ *  response yet — the subtitle then reads just "{N} channels open" with no
+ *  trailing clause. */
+function resolveInteractionLastCustomerResponseLabel(
+  interaction: Interaction,
+  pageMountTimeMs: number
+): string | undefined {
+  let latest: Date | undefined;
+  const consider = (candidate: Date | undefined) => {
+    if (candidate && !Number.isNaN(candidate.getTime()) && (!latest || candidate.getTime() > latest.getTime())) {
+      latest = candidate;
+    }
+  };
+  for (const c of interaction.threads) {
+    if (c.lastCustomerMessageTick !== undefined) {
+      consider(new Date(pageMountTimeMs + c.lastCustomerMessageTick * 1000));
+      continue;
+    }
+    const reopened = c.reopenedContacts?.[c.reopenedContacts.length - 1];
+    if (reopened) {
+      consider(new Date(`${reopened.date} ${reopened.startTime}`));
+      continue;
+    }
+    if (interaction.startedFresh) continue;
+    const baseSessions =
+      c.type === "email"
+        ? TRANSCRIPT_SESSIONS_EMAIL
+        : c.type === "voice"
+          ? TRANSCRIPT_SESSIONS_VOICE
+          : c.type === "chat" || c.type === "sms" || c.type === "whatsapp"
+            ? TRANSCRIPT_SESSIONS
+            : undefined;
+    const lastSession = baseSessions?.[baseSessions.length - 1];
+    if (!lastSession) continue;
+    const lastCustomerMessage = [...lastSession.messages].reverse().find((m) => m.sender === "customer");
+    consider(new Date(`${lastSession.date} ${lastCustomerMessage?.timestamp ?? lastSession.startTime}`));
+  }
+  return latest ? formatCompactDateTime(latest) : undefined;
+}
+
 export function AgentWorkspaceAdvancedPage({
   showPageHeader = false,
   showPanelToggle = false,
@@ -800,51 +866,13 @@ export function AgentWorkspaceAdvancedPage({
     setOutcomeDraftKey(null);
     setOutcomeDraftSource(null);
   };
-  // Own `resolutionMenuOpen`/`resolutionMenuView` state for the record-
-  // header's icon-button-cluster Outcome popover, only rendered while
-  // `showChannelTabRow` reads `false` for the active interaction (see that
-  // const's own doc comment) — built with the same `useOutcomePopoverState`/
-  // `buildOutcomePopoverSlots` helpers Agent Workspace 2.0's identical
-  // header cluster already uses (AgentNextGenPage.tsx), exported from
-  // lyra-ui specifically so this exact popover-composition doesn't need to
-  // be hand-rolled a third time here.
-  const headerOutcomePopoverState = useOutcomePopoverState();
-  /* ── Header status chip (only while `showChannelTabRow` is `false` for
-     the active interaction — see that const's own doc comment) ──
-     Own local Popover open/view state, mirroring Agent Workspace 2.0's
-     identical `headerStatusMenuOpen`/`headerStatusMenuView` pair
-     (AgentNextGenPage.tsx) — a single header instance never has more than
-     one of itself on screen, so a lone `useState` pair is enough, no id/
-     key needed. Renders via `ChannelStatusTag` (agent-next-gen-
-     transcript.tsx), the same component `TranscriptSessionSeparator` uses
-     for its own copy. */
-  const [headerStatusMenuOpen, setHeaderStatusMenuOpen] = useState(false);
-  const [headerStatusMenuView, setHeaderStatusMenuView] = useState<"menu" | "confirm">("menu");
-  const handleHeaderStatusMenuOpenChange = (open: boolean) => {
-    setHeaderStatusMenuOpen(open);
-    setHeaderStatusMenuView("menu");
-  };
-  const handleHeaderSelectStatus = (status: string) => {
-    if (status === "Closed") {
-      setHeaderStatusMenuView("confirm");
-      return;
-    }
-    if (activeInteraction && activeChannel) {
-      handleInteractionStatusChange(activeInteraction.id, activeChannel.id, status);
-    }
-    setHeaderStatusMenuOpen(false);
-  };
-  const handleHeaderConfirmCloseStatus = () => {
-    if (activeInteraction && activeChannel) {
-      handleInteractionStatusChange(activeInteraction.id, activeChannel.id, "Closed");
-    }
-    setHeaderStatusMenuOpen(false);
-    setHeaderStatusMenuView("menu");
-  };
-  const handleHeaderCancelCloseStatus = () => {
-    setHeaderStatusMenuOpen(false);
-    setHeaderStatusMenuView("menu");
-  };
+  // Formerly drove the record header's own icon-button-cluster Outcome
+  // popover and status chip (Consult/Transfer, Outcome, kebab, status
+  // chip) — that header cluster no longer exists (see the channel-
+  // controls-always-in-session-row change); dead state/handlers removed
+  // rather than left unused. `InteractionTranscript`'s own session-row
+  // status popover (`statusMenuOpenId`/`statusMenuView`) is the only copy
+  // of this left.
   const contactHistoryByRange = useMemo(
     () => buildContactHistoryByRange(dismissedContactHistory),
     [dismissedContactHistory]
@@ -1127,21 +1155,37 @@ export function AgentWorkspaceAdvancedPage({
     ? CREATE_NEW_CUSTOMERS.some((c) => c.id === activeInteraction.id) ||
       createdCustomerRecords.some((c) => c.id === activeInteraction.id)
     : true;
-  // Per explicit request: for a brand-new outbound assignment NOT
-  // associated with a real customer record, this tier gets the SAME
-  // no-tab-row header treatment Agent Workspace 2.0 always uses (see that
-  // file's own `showChannelTabRow` doc comment) — there's no real customer
-  // database behind a synthetic id here either, and with only ever the one
-  // channel such an interaction can have, the tab row has nothing useful
-  // to show. Unlike 2.0's hardcoded `false`, this is per-INTERACTION here:
-  // an interaction genuinely tied to a real customer
-  // (`activeInteractionIsRealCustomer`) keeps the full tab row exactly as
-  // before — per explicit follow-up, that half of this tier's behavior is
-  // unchanged for now. Whole-lifetime, not just while `startedFresh` — an
-  // old reopened synthetic Contact History entry gets this treatment too,
-  // for as long as it's never actually a real customer record, not just
-  // while freshly launched.
-  const showChannelTabRow = !activeInteraction || activeInteractionIsRealCustomer;
+  // Per explicit follow-up request (superseding the customer-identity
+  // version this used to be — see git history for that prior condition):
+  // now keyed purely on how many channels/threads this interaction
+  // actually has open, for EVERY customer interaction, real or unknown.
+  // With only one channel open there's nothing for a tab row to
+  // disambiguate between, so this tier collapses to the same compact,
+  // no-tab-row header treatment Agent Workspace 2.0 always uses (that
+  // file's own `showChannelTabRow` doc comment) — this only affects the
+  // tab row itself now. Per explicit follow-up request ("let's update the
+  // channel controls to always be in the session row..."), the record-
+  // header's own former action cluster (Consult/Transfer, Outcome, kebab,
+  // status chip, Unassign & Dismiss/Delete Draft) no longer exists at
+  // all — that cluster lives permanently in `TranscriptSessionSeparator`'s
+  // own session-row cluster now (`showSessionActionCluster`, unconditional
+  // at the `<InteractionTranscript>` call site below), regardless of
+  // channel count.
+  // `activeInteractionIsRealCustomer` (above) is now a fully independent
+  // signal — it no longer feeds this at all, and continues to gate ONLY
+  // Customer Information's own tab set / customer-matching UI, per
+  // explicit request.
+  const showChannelTabRow = !activeInteraction || activeInteraction.threads.length >= 2;
+  // Captured once, this component's real mount instant — lets
+  // `resolveInteractionLastCustomerResponseLabel` (below) convert a
+  // `lastCustomerMessageTick` value (real elapsed seconds since mount,
+  // since `clockTick`, declared further down, ticks once per real second —
+  // see that state's own doc comment) back into an exact real `Date`,
+  // rather than a mock/relative string. Declared here (ahead of
+  // `clockTick` itself) purely so it's available before
+  // `lastCustomerResponseLabel` reads it a few lines below — it doesn't
+  // actually depend on `clockTick`'s own state.
+  const pageMountTimeRef = useRef(Date.now());
   // Duplicated verbatim from AgentNextGenPage.tsx (Agent Workspace 2.0) per
   // this codebase's "no shared sync" convention — the launch timestamp
   // (see `threadLaunchTimestamps`'s own doc comment above) for THIS active
@@ -1158,6 +1202,16 @@ export function AgentWorkspaceAdvancedPage({
     activeChannel,
     activeChannelLaunchedAt
   );
+  // Per explicit follow-up request: once 2+ channels are open
+  // (`showChannelTabRow`), the record-header subtitle switches from the
+  // single active channel's own "{icon} {label} | {date}" line (still used
+  // for the 1-channel case above) to "{N} channels open | Last Customer
+  // Response: {date/time}" instead — see
+  // `resolveInteractionLastCustomerResponseLabel`'s own doc comment for the
+  // full per-thread resolution order.
+  const lastCustomerResponseLabel = activeInteraction
+    ? resolveInteractionLastCustomerResponseLabel(activeInteraction, pageMountTimeRef.current)
+    : undefined;
   // The full pool the unknown-contact matching flow (below) checks against
   // — the static directory plus anything `createdCustomerRecords` has
   // added this session (see that state's own doc comment for why a
@@ -2170,6 +2224,46 @@ export function AgentWorkspaceAdvancedPage({
     setElapsedSeconds(0);
   };
 
+  // Auto "Working" status while on a live voice call, per explicit request
+  // ("when an agent is in a call the status should change to 'working'").
+  // `"working"` (lyra-ui's `AgentStatus`, agent-profile.tsx) is deliberately
+  // NOT in that component's own `allStatuses` picker list — an agent never
+  // selects it by hand, only this effect ever sets it, exactly the way the
+  // request specified ("do not add this as a selectable status").
+  // `isOnVoiceCall` — true whenever ANY still-open (`!closed`) interaction
+  // has a voice `Thread` whose own `threadStatuses` entry isn't `"Closed"`
+  // — not just the interaction currently being VIEWED, so switching over to
+  // check on a different customer's chat mid-call doesn't incorrectly clear
+  // "Working" the instant the voice call scrolls out of view.
+  // `preCallStatusRef` remembers whatever status was active the moment the
+  // call started, so hanging up restores it (Available/Unavailable/a
+  // specific reason code) instead of always falling back to one hardcoded
+  // default — same "restore what was there before" pattern
+  // `connectAgentLegSignal`'s own effect (agent-profile.tsx) already uses
+  // for a comparable "external signal drives an internal transition"
+  // shape. Deliberately keyed only on `isOnVoiceCall` (not `agentStatus`
+  // too) — this is an edge-triggered effect reacting to the call actually
+  // starting/ending, not something that should re-fire just because
+  // `agentStatus` itself changed for some unrelated reason.
+  const isOnVoiceCall = interactions.some(
+    (i) => !i.closed && i.threads.some((t) => t.type === "voice" && i.threadStatuses?.[t.id] !== "Closed")
+  );
+  const preCallStatusRef = useRef<AgentStatus | null>(null);
+  useEffect(() => {
+    if (isOnVoiceCall) {
+      if (agentStatus !== "working") {
+        preCallStatusRef.current = agentStatus;
+        setAgentStatus("working");
+        setElapsedSeconds(0);
+      }
+    } else if (agentStatus === "working") {
+      setAgentStatus(preCallStatusRef.current ?? "unavailable");
+      preCallStatusRef.current = null;
+      setElapsedSeconds(0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnVoiceCall]);
+
   /* ── Launching interactions from CreateNew ──
      Overrides OUTBOUND_CONFIG's default onStartCall/onQuickDial (which just
      console.log) so this page actually surfaces what gets launched as
@@ -2548,6 +2642,57 @@ export function AgentWorkspaceAdvancedPage({
     });
     switchActiveInteraction(id);
     if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
+  };
+
+  // Record header's "+" Add Channel fallback (`AddChannelAdHocButton`,
+  // agent-next-gen-add-channel-button.tsx) — per explicit follow-up request
+  // ("add the '+' to the unknown interactions in premium and advanced"),
+  // covers the interactions `getHeaderAction` (below) still can't: it looks
+  // up the interaction's own id in the combined `outboundConfig.groups` +
+  // `contact-history` group (see `getHeaderAction`'s own call site's doc
+  // comment), and returns `null` — no button at all — for any id that isn't
+  // registered in EITHER of those (a genuinely ad-hoc/unknown interaction,
+  // same "no real customer database" gap Agent Workspace 2.0 has for every
+  // single one of its interactions). This is the exact same ad-hoc-only
+  // component AND the exact same handler shape 2.0's own copy uses
+  // (AgentNextGenPage.tsx) — adds a brand-new, unknown channel directly onto
+  // the interaction that's CURRENTLY open, unlike `handleStartCall`, which
+  // is keyed by CONTACT id and would start a whole separate new card for a
+  // typed address with no real contact record behind it. There's no
+  // skill/detail-form step in this ad-hoc flow (see that button's own doc
+  // comment for why), so this builds the simplest correct `Thread` directly
+  // — same shape `handleStartCall`'s own `newChannel` builds, minus the
+  // fields that only exist because THAT flow goes through a real `CreateNew`
+  // contact/skill pick (`preview`/`reopenedContacts`).
+  const handleAddAdHocChannel = (query: string, channel: ChannelType) => {
+    if (!activeInteraction) return;
+    const interactionId = activeInteraction.id;
+    const channelId = `${channel}:${query}`;
+    const newChannel: Thread = {
+      id: channelId,
+      type: channel,
+      startTick: clockTick,
+      value: query,
+      addressLabel: query,
+      messageCount: channel === "voice" ? undefined : 0,
+      contactId: generateContactId(),
+    };
+    setInteractions((prev) =>
+      prev.map((interaction) => {
+        if (interaction.id !== interactionId) return interaction;
+        const chIdx = interaction.threads.findIndex((c) => c.id === channelId);
+        const threads =
+          chIdx === -1
+            ? [...interaction.threads, newChannel]
+            : interaction.threads.map((c, j) => (j === chIdx ? newChannel : c));
+        return {
+          ...interaction,
+          threads,
+          currentThreadId: newChannel.id,
+          threadStatuses: withoutChannelStatus(interaction.threadStatuses, newChannel.id),
+        };
+      })
+    );
   };
 
   /** Fired by the "Re-open" button on a Contact History entry's summary
@@ -3195,7 +3340,7 @@ export function AgentWorkspaceAdvancedPage({
   // (run through `buildOpenChannelTagger`, same as `outboundConfig`'s own
   // groups above) is used here instead of the raw, untagged
   // `CONTACT_HISTORY_OUTBOUND_CONTACTS` constant.
-  const { getHeaderAction, getAvailableChannels } = useOutboundAddButton({
+  const { getHeaderAction } = useOutboundAddButton({
     ...outboundConfig,
     groups: [
       ...outboundConfig.groups,
@@ -4949,23 +5094,43 @@ export function AgentWorkspaceAdvancedPage({
             <div className="flex flex-1 overflow-hidden min-h-0">
               <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
 
-                {/* Below 768px with a docked panel open: a second tab
+                {/* Below 768px with a docked panel open: a second region
                     (`activePanelContent.title`, e.g. "Notifications") sits
-                    alongside this main region's own tab, and this whole
-                    container becomes the shared surface both regions toggle
-                    inside of instead of the panel docking beside it. Same
-                    `TabList`/`Tab` composition as the Dashboard's own tab row
-                    below (and everywhere else in this file) — not a new
-                    component. */}
+                    alongside this main region, and this whole container
+                    becomes the shared surface both toggle inside of instead
+                    of the panel docking beside it. Per explicit follow-up
+                    request ("use toggle buttons instead of tabs for the
+                    combined panels"): switched from the `TabList`/`Tab`
+                    composition (still used everywhere else in this file,
+                    e.g. the Dashboard's own tab row below) to `ToggleGroup`
+                    — a two-item single-select segmented control reads more
+                    like "which surface is showing" (a view switch) than
+                    "which sub-page am I on" (what tabs usually mean), and
+                    it visually sets this switch apart from the record
+                    header's OWN channel `TabList` that can render directly
+                    underneath it once `narrowActiveRegion === "main"`
+                    lands on an active interaction — two adjacent real tab
+                    rows would have read as one continuous 3+-tab strip. */}
                 {isCombinedPanelMode && (
-                  <TabList fullWidth className="bg-lyra-bg-surface-base shrink-0">
-                    <Tab active={narrowActiveRegion === "main"} onClick={() => setNarrowActiveRegion("main")}>
-                      {mainRegionTabLabel}
-                    </Tab>
-                    <Tab active={narrowActiveRegion === "panel"} onClick={() => setNarrowActiveRegion("panel")}>
-                      {activePanelContent?.title}
-                    </Tab>
-                  </TabList>
+                  <div className="bg-lyra-bg-surface-base p-2 shrink-0 border-b border-lyra-border-subtle">
+                    <ToggleGroup
+                      fullWidth
+                      items={[
+                        { value: "main", label: mainRegionTabLabel },
+                        { value: "panel", label: activePanelContent?.title ?? "" },
+                      ]}
+                      value={narrowActiveRegion}
+                      // `ToggleGroup`'s single-select mode deselects on
+                      // re-click of the already-active item (empty string)
+                      // — this switch should always have exactly one side
+                      // active, so an empty next value is ignored rather
+                      // than passed through (same guard SchedulePanel.tsx's
+                      // own Day/Week `ToggleGroup` already uses).
+                      onValueChange={(next) => {
+                        if (next === "main" || next === "panel") setNarrowActiveRegion(next);
+                      }}
+                    />
+                  </div>
                 )}
 
                 {/* Content column: PageHeader + page body */}
@@ -5105,26 +5270,73 @@ export function AgentWorkspaceAdvancedPage({
                         the docked panel is closed). */}
                     <PageHeader
                       ref={recordHeaderRef}
+                      // Per explicit follow-up request: this record header
+                      // sits directly above the session row
+                      // (`TranscriptSessionSeparator`/the channel tab row),
+                      // which already draws its own `border-b` right
+                      // underneath — this header's own default border just
+                      // doubled that into two parallel lines with an odd
+                      // gap between them. `compact` shrinks the row from
+                      // the default `min-h-[68px]`/`py-4` down to
+                      // `min-h-[54px]` with the bottom padding dropped, so
+                      // the whole thing reads as one tightly-packed header
+                      // instead of two stacked bordered rows (see both
+                      // props' own doc comments, page-header.tsx).
+                      bordered={false}
+                      compact
                       title={activeInteraction.customerName ?? "Customer"}
-                      // Per explicit follow-up request: an unknown-contact
-                      // interaction (`!showChannelTabRow` — see that
-                      // const's own doc comment above) gets the SAME
-                      // "{icon} {Channel label} | {date/time or Draft}"
-                      // subtitle Agent Workspace 2.0 always shows
+                      // Per explicit follow-up request (mockup's own 4
+                      // states — even State 2/4, with the full tab row
+                      // showing, still read the ACTIVE tab's own "{icon}
+                      // {Channel label} | {Draft/date}" subtitle, e.g.
+                      // "Email | Draft" — not the plain customer-ID text):
+                      // this is now UNCONDITIONAL, every customer
+                      // interaction, regardless of `showChannelTabRow`/
+                      // channel count. Previously gated on
+                      // `!showChannelTabRow` (back when that const meant
+                      // "unknown contact," not "channel count") — now that
+                      // it's channel-count-based, gating this on it too
+                      // would have made the subtitle flip back to the
+                      // plain customer ID the moment a second channel
+                      // opened, which the mockup explicitly does NOT want.
+                      // Same "{icon} {Channel label} | {date/time or
+                      // Draft}" format Agent Workspace 2.0 always shows
                       // (AgentNextGenPage.tsx — see `CHANNEL_TYPE_META`/
                       // `resolveActiveChannelDateTimeLabel`'s own doc
-                      // comments above for where each half comes from),
-                      // instead of this tier's own plain customer-ID text.
-                      // A real-customer interaction keeps the plain
-                      // customer ID unchanged — per explicit request, that
-                      // half of this tier's behavior stays as-is.
+                      // comments above for where each half comes from).
                       // `undefined` (not a bare channel label with nothing
                       // after it) whenever either half is missing —
                       // `PageHeader`'s own `{subtitle && ...}` guard
                       // (page-header.tsx) then skips the subtitle row
-                      // entirely, same fallback 2.0 uses.
+                      // entirely, same fallback 2.0 uses. Falls back to the
+                      // plain customer ID only when there's genuinely no
+                      // active channel to describe (shouldn't normally
+                      // happen while `activeInteraction` is set, but keeps
+                      // this defensive rather than rendering nothing).
+                      //
+                      // Per a later explicit follow-up request: once 2+
+                      // channels are open (`showChannelTabRow`), the single
+                      // active tab's own "{icon} {label} | {date}" line
+                      // above stops answering the question that actually
+                      // matters with several channels live at once — this
+                      // branch takes over instead, reading "{N} channels
+                      // open | Last Customer Response: {date/time}" (count =
+                      // `activeInteraction.threads.length`, matching
+                      // `showChannelTabRow`'s own threshold/definition; see
+                      // `resolveInteractionLastCustomerResponseLabel`'s own
+                      // doc comment for how that timestamp is resolved
+                      // across every thread, not just the active one). If
+                      // NO thread has a qualifying response yet, the
+                      // trailing clause is simply omitted rather than
+                      // printing a broken "Last Customer Response:" with
+                      // nothing after it.
                       subtitle={
-                        !showChannelTabRow && activeChannelType && activeChannelDateTime ? (
+                        showChannelTabRow && activeInteraction.threads.length >= 2 ? (
+                          <span className="truncate">
+                            {activeInteraction.threads.length} channels open
+                            {lastCustomerResponseLabel ? ` | Last Customer Response: ${lastCustomerResponseLabel}` : ""}
+                          </span>
+                        ) : activeChannelType && activeChannelDateTime ? (
                           <span className="flex items-center gap-1.5 min-w-0">
                             <span className="shrink-0 text-lyra-fg-secondary" aria-hidden="true">
                               {CHANNEL_TYPE_META[activeChannelType].icon}
@@ -5152,179 +5364,63 @@ export function AgentWorkspaceAdvancedPage({
                       badgeColor={activeInteraction.closed ? "slate" : "green"}
                       actions={
                         <>
-                          {/* Per explicit request: for a brand-new outbound
-                              assignment NOT associated with a real customer
-                              record (`!showChannelTabRow` — see that const's
-                              own doc comment above), this tier gets the
-                              SAME record-header icon-button cluster Agent
-                              Workspace 2.0 always shows in place of its
-                              (always-hidden there) tab row — ported
-                              verbatim from that file's own `actions` render
-                              site, including the "new outbound thread"
-                              close-only collapse
-                              (`activeChannelIsNewOutboundThread`) and the
-                              status chip/Unassign & Dismiss restyle. An
-                              interaction WITH a real customer record never
-                              renders this — its tab row (below) already
-                              carries these same six actions in its own
-                              per-tab kebab, unchanged. */}
-                          {!showChannelTabRow && activeChannel && (
-                            <>
-                              {!activeChannelIsNewOutboundThread && (
-                              <>
-                              <Tooltip content="Consult / Transfer" placement="bottom" asLabel>
-                                <ActionIconButton
-                                  aria-label="Consult / Transfer"
-                                  size="sm"
-                                  className="text-lyra-fg-secondary hover:text-lyra-fg-secondary"
-                                >
-                                  <ConsultTransferIcon />
-                                </ActionIconButton>
-                              </Tooltip>
-                              <Popover
-                                open={outcomeDraftKey === activeChannelOutcomeKey && outcomeDraftSource === "header"}
-                                onOpenChange={(open) =>
-                                  activeChannelOutcomeKey && handleOutcomeOpenChange(activeChannelOutcomeKey, open, "header")
-                                }
-                                placement="bottom"
-                                align="end"
-                                className="z-[10003] w-80"
-                                onCloseAutoFocus={(e) => e.preventDefault()}
-                                {...buildOutcomePopoverSlots(
-                                  {
-                                    open: outcomeDraftKey === activeChannelOutcomeKey && outcomeDraftSource === "header",
-                                    onOpenChange: (open) =>
-                                      activeChannelOutcomeKey && handleOutcomeOpenChange(activeChannelOutcomeKey, open, "header"),
-                                    resolutionOptions: TRANSCRIPT_SESSION_STATUS_OPTIONS,
-                                    resolution: activeInteraction.threadStatuses?.[activeChannel.id] ?? "Open",
-                                    onResolutionChange: (value) =>
-                                      handleInteractionStatusChange(activeInteraction.id, activeChannel.id, value),
-                                    tagOptions: OUTCOME_TAG_OPTIONS,
-                                    selectedTags: outcomeDraft.tags,
-                                    onTagsChange: (tags) => setOutcomeDraft((d) => ({ ...d, tags })),
-                                    dispositionOptions: OUTCOME_DISPOSITION_OPTIONS,
-                                    dispositionCode: outcomeDraft.dispositionCode,
-                                    onDispositionChange: (value) => setOutcomeDraft((d) => ({ ...d, dispositionCode: value })),
-                                    summary: outcomeDraft.summary,
-                                    onSummaryChange: (value) => setOutcomeDraft((d) => ({ ...d, summary: value })),
-                                    onSave: handleOutcomeSave,
-                                    onCancel: handleOutcomeCancel,
-                                  } satisfies ChannelOutcomeConfig,
-                                  headerOutcomePopoverState
-                                )}
-                              >
-                                <ActionIconButton
-                                  title="Outcome"
-                                  aria-label="Outcome"
-                                  size="sm"
-                                  className="text-lyra-fg-secondary hover:text-lyra-fg-secondary"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <CircleCheck className="h-4 w-4 text-lyra-status-info-strong" strokeWidth={1.5} />
-                                </ActionIconButton>
-                              </Popover>
-                              <Tooltip content="Send Transcript" placement="bottom" asLabel>
-                                <ActionIconButton
-                                  aria-label="Send Transcript"
-                                  size="sm"
-                                  className="text-lyra-fg-secondary hover:text-lyra-fg-secondary"
-                                >
-                                  <Send className="h-4 w-4" strokeWidth={1.5} />
-                                </ActionIconButton>
-                              </Tooltip>
-                              <Tooltip content="Download Transcript" placement="bottom" asLabel>
-                                <ActionIconButton
-                                  aria-label="Download Transcript"
-                                  size="sm"
-                                  className="text-lyra-fg-secondary hover:text-lyra-fg-secondary"
-                                >
-                                  <FileDown className="h-4 w-4" strokeWidth={1.5} />
-                                </ActionIconButton>
-                              </Tooltip>
-                              <Tooltip content="Translate Messages" placement="bottom" asLabel>
-                                <ActionIconButton
-                                  aria-label="Translate Messages"
-                                  size="sm"
-                                  className="text-lyra-fg-secondary hover:text-lyra-fg-secondary"
-                                >
-                                  <Languages className="h-4 w-4" strokeWidth={1.5} />
-                                </ActionIconButton>
-                              </Tooltip>
-                              </>
-                              )}
-                              {/* Per explicit request: an agent-to-agent
-                                  voice call has no real disposition to log
-                                  against a colleague — see
-                                  `activeInteractionIsAgentCall`'s own doc
-                                  comment above. */}
-                              {!activeInteractionIsAgentCall && (
-                              <ChannelStatusTag
-                                status={activeChannelStatus ?? "Open"}
-                                menuOpen={headerStatusMenuOpen}
-                                menuView={headerStatusMenuView}
-                                onMenuOpenChange={handleHeaderStatusMenuOpenChange}
-                                onSelectStatus={handleHeaderSelectStatus}
-                                onConfirmClose={handleHeaderConfirmCloseStatus}
-                                onCancelClose={handleHeaderCancelCloseStatus}
-                                disabled={activeChannelStatus === "Closed"}
-                              />
-                              )}
-                              <Separator orientation="vertical" className="h-5 mx-1" />
-                            </>
-                          )}
-                          {recordHeaderWidth >= 768 ? (
-                            // One icon button per still-addable channel —
-                            // same bordered/outline look Customer
-                            // Information's own icon-collapsed state uses
-                            // (`border-lyra-border-default`/
-                            // `bg-lyra-bg-control`/`text-lyra-fg-action`,
-                            // button.tsx's own `outline` variant tokens),
-                            // not the solid primary blue this "Add Channel"
-                            // slot used to be — a whole row of solid blue
-                            // buttons reads as louder than a set of
-                            // equally-weighted quick actions should. Voice
-                            // is the one exception — per explicit request,
-                            // it's now a labeled solid-primary "Call" button
-                            // (same `bg-lyra-bg-primary`/`text-lyra-fg-on-
-                            // primary` tokens the collapsed-header "Add
-                            // Channel" trigger below already uses) instead
-                            // of an equally-weighted outline icon like every
-                            // other channel here — starting a call is
-                            // singled out as the one channel action worth
-                            // that extra visual weight/label.
-                            getAvailableChannels(activeInteraction.id).map((channel) => (
-                              <React.Fragment key={channel.id}>
-                                {channel.id === "voice" ? (
-                                  getHeaderAction(
-                                    activeInteraction.id,
-                                    "h-8 w-auto px-3 bg-lyra-bg-primary text-lyra-fg-on-primary hover:bg-lyra-state-hover-primary active:bg-lyra-state-pressed-primary",
-                                    {
-                                      label: "Call",
-                                      showLabel: true,
-                                      icon: channel.icon,
-                                      initialChannel: channel.id,
-                                    }
-                                  )
-                                ) : (
-                                  getHeaderAction(
-                                    activeInteraction.id,
-                                    "h-8 w-8 border border-lyra-border-default bg-lyra-bg-control text-lyra-fg-action hover:bg-lyra-state-hover active:bg-lyra-state-pressed",
-                                    {
-                                      label: channel.label,
-                                      showLabel: false,
-                                      icon: channel.icon,
-                                      initialChannel: channel.id,
-                                    }
-                                  )
-                                )}
-                              </React.Fragment>
-                            ))
-                          ) : (
-                            getHeaderAction(
-                              activeInteraction.id,
-                              "h-8 w-8 px-0 bg-lyra-bg-primary text-lyra-fg-on-primary hover:bg-lyra-state-hover-primary active:bg-lyra-state-pressed-primary",
-                              { label: "Add Channel", showLabel: false }
-                            )
+                          {/* Per explicit follow-up request ("let's update
+                              the channel controls to always be in the
+                              session row - even if there is only one
+                              channel open (no tabs) - moving them around is
+                              confusing"): the record-header icon-button
+                              cluster that used to render here whenever
+                              `!showChannelTabRow` (Consult/Transfer,
+                              Outcome, kebab, status chip) is gone — this
+                              cluster now lives permanently in the session
+                              row instead (`InteractionTranscript`'s
+                              `showSessionActionCluster`, further down),
+                              regardless of channel count. */}
+                          {/* Per explicit follow-up request: the per-channel
+                              Add Channel icon row (and the custom ad-hoc "+"
+                              popup, `AddChannelAdHocButton`) that used to sit
+                              next to the customer's name are gone — back to
+                              a single combined "+" trigger (lyra-ui's own
+                              stock `OutboundAddButton` flow: Select Channel
+                              radios, Select Phone/Outbound Skill, Start
+                              Interaction — no `initialChannel` lock), the
+                              same call this used for its old narrow-width
+                              (<768px) `titleSuffix` fallback, now used
+                              unconditionally and moved here into `actions`,
+                              immediately left of Customer Information —
+                              always rendered regardless of
+                              `showChannelTabRow`/channel count, unlike the
+                              cluster above it.
+                              Per explicit follow-up request ("add the '+' to
+                              the unknown interactions in premium and
+                              advanced"): `getHeaderAction` returns `null` —
+                              no button at all — for any interaction id it
+                              can't resolve to a contact in `contactsById`
+                              (the combined `outboundConfig.groups` +
+                              `contact-history` group built above), which is
+                              exactly the state a genuinely ad-hoc/unknown
+                              interaction is in (no real `CREATE_NEW_
+                              CUSTOMERS` record, and never routed through
+                              `handleRedial`/`handleReopenContactHistoryEntry`'s
+                              own synthetic-id registration). `?? (...)`
+                              falls back to `AddChannelAdHocButton` — the
+                              exact same directory-independent "Enter Email
+                              Or Phone Number" popup Agent Workspace 2.0 uses
+                              for every single one of ITS interactions (see
+                              that button's own doc comment) — feeding
+                              `handleAddAdHocChannel` (above) instead. Known
+                              customers still get the richer stock picker
+                              exactly as before; only genuinely unknown ones
+                              fall through to the simpler ad-hoc field. */}
+                          {getHeaderAction(
+                            activeInteraction.id,
+                            "h-8 w-8 px-0 bg-lyra-bg-primary text-lyra-fg-on-primary hover:bg-lyra-state-hover-primary active:bg-lyra-state-pressed-primary",
+                            { label: "Add Channel", showLabel: false }
+                          ) ?? (
+                            <AddChannelAdHocButton
+                              onLaunch={handleAddAdHocChannel}
+                              className="h-8 w-8 px-0 bg-lyra-bg-primary text-lyra-fg-on-primary hover:bg-lyra-state-hover-primary active:bg-lyra-state-pressed-primary"
+                            />
                           )}
                           {/* Same hover-preview `Popover` + toggle `Button`
                               this row used to have before the tab row (see
@@ -5510,66 +5606,6 @@ export function AgentWorkspaceAdvancedPage({
                             </Button>
                           </Popover>
                           )}
-                          {/* Per explicit follow-up request: moved to the
-                              FAR RIGHT of this whole actions row, past the
-                              Add Channel buttons and the Customer
-                              Information toggle — previously sat
-                              immediately after the status chip/Separator,
-                              directly following the icon cluster. Still
-                              gated on the same `!showChannelTabRow &&
-                              activeChannel` condition as that cluster
-                              (own comment above) — an interaction WITH a
-                              real customer record never renders this
-                              here either. */}
-                          {!showChannelTabRow && activeChannel && (
-                            // Per explicit follow-up request: a genuine,
-                            // never-launched draft's close button reads as a
-                            // red trash icon/"Delete Draft" instead of a
-                            // plain "Close" — closing an untouched draft
-                            // actually deletes it outright (no Contact
-                            // History entry gets logged — see
-                            // `handleDismissInteraction`'s own
-                            // `everSentAgentMessage` check), matching the
-                            // same treatment `TranscriptSessionSeparator`'s
-                            // own `isNewThread` mode and lyra-ui's own
-                            // `removable`/`removeVariant`/`showMenu`
-                            // delete-draft fallback already use on the other
-                            // "new thread" surfaces.
-                            activeChannelIsNewOutboundThread ? (
-                              <Tooltip content="Delete Draft" placement="bottom" asLabel>
-                                <ActionIconButton
-                                  aria-label="Delete Draft"
-                                  size="sm"
-                                  className="text-lyra-status-critical-strong hover:text-lyra-status-critical-strong"
-                                  onClick={() => {
-                                    if (activeInteraction.threads.length > 1) {
-                                      handleDismissChannel(activeInteraction.id, activeChannel);
-                                    } else {
-                                      handleDismissInteraction(activeInteraction.id);
-                                    }
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4" strokeWidth={1.5} />
-                                </ActionIconButton>
-                              </Tooltip>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="icon-md"
-                                title="Unassign & Dismiss"
-                                className="shrink-0 border-lyra-status-critical-strong text-lyra-status-critical-strong hover:bg-lyra-status-critical-subtle hover:border-lyra-status-critical-strong active:bg-lyra-status-critical-medium"
-                                onClick={() => {
-                                  if (activeInteraction.threads.length > 1) {
-                                    handleDismissChannel(activeInteraction.id, activeChannel);
-                                  } else {
-                                    handleDismissInteraction(activeInteraction.id);
-                                  }
-                                }}
-                              >
-                                <UserX className="h-4 w-4" strokeWidth={1.5} />
-                              </Button>
-                            )
-                          )}
                         </>
                       }
                     />
@@ -5662,7 +5698,25 @@ export function AgentWorkspaceAdvancedPage({
                           the chevron/scroll treatment entirely for the
                           common 1-tab case (`hasScrollableOverflow`,
                           tabs.tsx). */}
-                      <TabList overflowMenu overflowBreakpoint="compact" growToFillRow className="flex-1 min-w-0 self-stretch border-b-0">
+                      {/* `tabPaddingX="3"` — per explicit follow-up request
+                          ("update the tab padding... so the tabs left align
+                          better"): `TabList` normally forces `px-5` onto
+                          every tab regardless of `Tab`'s own smaller `px-3`
+                          base (tabs.tsx) — scoped to THIS `TabList` only via
+                          the prop rather than changing that shared default,
+                          which would have rippled into every other
+                          `TabList` in the app (Customer Information panel
+                          tabs, Dashboard tabs, etc. — see that prop's own
+                          doc comment). Lines this row's first tab up
+                          flush(er) with the record header's own tighter
+                          insets above it. */}
+                      <TabList
+                        overflowMenu
+                        overflowBreakpoint="compact"
+                        growToFillRow
+                        tabPaddingX="3"
+                        className="flex-1 min-w-0 self-stretch border-b-0"
+                      >
                         {activeInteraction.threads.map((c) => {
                           const key = c.id ?? c.type;
                           // Same `${interactionId}:${channelKey}` scheme the
@@ -5999,21 +6053,20 @@ export function AgentWorkspaceAdvancedPage({
                           // see `activeChannelIsNewOutboundThread`'s own
                           // doc comment above for the full reasoning.
                           isNewThread={activeChannelIsNewOutboundThread}
-                          // Per explicit follow-up (screenshot report): once
-                          // the record header's own icon-button cluster took
-                          // over for a non-real-customer interaction
-                          // (`!showChannelTabRow` — see that const's own doc
-                          // comment above), this session row's OWN copy of
-                          // the same cluster (status chip, Consult/Transfer,
-                          // Outcome, Unassign & Dismiss/close) became a
-                          // redundant duplicate directly underneath it —
-                          // same reasoning Agent Workspace 2.0's own
-                          // hardcoded `showSessionActionCluster = false`
-                          // doc comment lays out, just keyed dynamically
-                          // here instead of a permanent constant, since this
-                          // tier's tab row/header-cluster substitution
-                          // itself is per-interaction, not permanent.
-                          showSessionActionCluster={showChannelTabRow}
+                          // Per explicit follow-up request ("let's update
+                          // the channel controls to always be in the
+                          // session row - even if there is only one channel
+                          // open (no tabs) - moving them around is
+                          // confusing"): was `showChannelTabRow` — this
+                          // cluster used to relocate up into the record
+                          // header whenever there was only 1 channel open
+                          // and only live here once a 2nd channel made the
+                          // real tab row appear. Now always on — this
+                          // session row is the single, permanent home for
+                          // these controls regardless of channel count; the
+                          // header's own now-removed copy is gone (see the
+                          // record-header `actions` call site above).
+                          showSessionActionCluster
                           reopenedContacts={activeChannel?.reopenedContacts}
                           liveMessages={activeInteraction.liveMessages?.[activeChannelKey] ?? []}
                           // Same union of conditions the "closed
