@@ -430,6 +430,7 @@ export function CustomerChannelPopoverButton({
   available,
   onStartInteraction,
   alwaysVisible = false,
+  overlay = false,
 }: {
   row: CustomerListRecord;
   channel: ChannelType;
@@ -448,6 +449,18 @@ export function CustomerChannelPopoverButton({
    *  invisible. Default `false` (unchanged fade-reveal behavior) for the
    *  Customers table's own existing per-row usage. */
   alwaysVisible?: boolean;
+  /** Renders as a plain, unbordered icon — no chip background, no ring,
+   *  no per-icon fade of its own — meant for `CustomerChannelStack`'s
+   *  hover-revealed leading overlay (see that component's own doc
+   *  comment), where visibility and background are already handled by
+   *  the *shared overlay strip* all these icons sit inside, not by each
+   *  icon individually. Distinct from `alwaysVisible` (permanently
+   *  visible bordered pill, used where there's no row to hover) and from
+   *  the default (each icon fades in on its own row-hover) — this one
+   *  is "always rendered as visible" from its OWN point of view (no
+   *  opacity classes at all) because the icon never renders unless its
+   *  parent overlay is already showing. */
+  overlay?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const meta = CHANNEL_ICON_META[channel];
@@ -466,7 +479,9 @@ export function CustomerChannelPopoverButton({
           aria-expanded={open}
           onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.stopPropagation()}
           className={cn(
-            alwaysVisible
+            overlay
+              ? "text-lyra-fg-action hover:bg-lyra-state-hover active:bg-lyra-state-pressed"
+              : alwaysVisible
               ? "border border-lyra-border-default bg-lyra-bg-control text-lyra-fg-action hover:bg-lyra-state-hover active:bg-lyra-state-pressed"
               : cn(
                   "transition-opacity",
@@ -656,6 +671,94 @@ export function CustomerChannelCell({
   );
 }
 
+/** Hover-only leading overlay of a row's supported channel icons — per
+ *  explicit request/follow-up (with screenshots), NOT a fixed leading
+ *  column: pinned to the row's own left edge via `position: absolute`
+ *  (needs `leadingChannelStack`'s own `TableRow` to be `relative` — see
+ *  that prop's own doc comment) rather than a real flex child, so it
+ *  reserves zero layout space of its own — no extra header cell, no extra
+ *  column width — and instead paints directly over whichever cell(s)
+ *  happen to sit at the row's leading edge (`Contact Number`, currently)
+ *  only while that row is actually hovered/focused. A first version of
+ *  this reserved a real fixed-width leading column and rendered the icons
+ *  as an always-visible overlapping "avatar stack" — corrected per
+ *  explicit follow-up ("I don't want the channels to display until the
+ *  agent hovers on the row - then also you have them overlapping each
+ *  other which is not desirable - also remove the extra column space in
+ *  the header - these icons should overlay whatever content is in the row
+ *  when they display") to this hover-only, non-overlapping, zero-reserved-
+ *  space version instead.
+ *
+ *  Each icon is still the same real `CustomerChannelPopoverButton` (own
+ *  launch popover, own click handler), now with the plain `overlay`
+ *  variant (see that prop's own doc comment) — no chip background/ring of
+ *  its own, since the *shared strip* this returns supplies one opaque
+ *  background and one `group-hover`-driven fade for the whole cluster.
+ *  Icons are laid out with a plain `gap-1.5` (no negative margin/overlap)
+ *  per the "overlapping... is not desirable" correction above. Sizing per
+ *  a further explicit follow-up ("make the padding-left/right 4px for the
+ *  channel icon button container, make the full border radius 6px and add
+ *  4px margin-left so it feels contained within the row" — with a
+ *  screenshot): `rounded-lyra-sm` (the design system's 6px radius token, on
+ *  all four corners — the earlier version only rounded the trailing edge),
+ *  `ml-1` (4px) so the strip doesn't sit flush against the row's own left
+ *  edge. A later follow-up (another screenshot) swapped the original
+ *  `pl-1`/`pr-1` (4px horizontal padding) for `my-1` (4px vertical margin,
+ *  top and bottom) instead — the strip is `inset-y-0` (top:0/bottom:0)
+ *  against the row, so vertical margin on top of that shrinks it to a
+ *  shorter pill centered in the row with a visible gap above/below, rather
+ *  than padding widening its horizontal footprint around the icons. Only
+ *  rendered when
+ *  `CustomersListView` is given `leadingChannelStack` (Premium/Advanced
+ *  call sites only) — NOT a replacement for `CustomerChannelCell` itself,
+ *  which stays exactly as-is for every other consumer. */
+export function CustomerChannelStack({
+  row,
+  onStartInteraction,
+}: {
+  row: CustomerListRecord;
+  onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
+}) {
+  const available = CUSTOMER_CHANNEL_ORDER.filter((c) => row.channels.includes(c));
+  if (available.length === 0) {
+    return null;
+  }
+  return (
+    <div
+      className={cn(
+        "absolute inset-y-0 left-0 z-10 flex items-center gap-1.5 my-1 ml-1",
+        "rounded-lyra-sm",
+        "opacity-0 pointer-events-none transition-opacity",
+        "group-hover:opacity-100 group-hover:pointer-events-auto",
+        "group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
+        // Solid (fully opaque) white background, sized to the icon cluster
+        // itself (not stretched across the row) — per explicit follow-up:
+        // `lyra-state-hover` (tried first) turned out to be a translucent
+        // "opacity" token (`--lyra-color-state-bg-hover-opacity`), so the
+        // underlying cell's own text showed faintly through the icons on
+        // hover instead of being fully covered. `lyra-bg-surface-base` is a
+        // real opaque color (`#fff` light / dark-surface dark), not an
+        // alpha overlay, so it actually hides what's underneath. Also adds
+        // a subtle shadow so the now fully-opaque overlay still reads as
+        // "lifted" above the row rather than looking like a plain edit to
+        // the cell's own background.
+        "bg-lyra-bg-surface-base shadow-sm"
+      )}
+    >
+      {available.map((c) => (
+        <CustomerChannelPopoverButton
+          key={c}
+          row={row}
+          channel={c}
+          available={available}
+          onStartInteraction={onStartInteraction}
+          overlay
+        />
+      ))}
+    </div>
+  );
+}
+
 // Proportional `flex-[n]` ratios — same shape as DataManagement.stories.tsx's
 // own `columnConfig` — so the table shrinks/grows to fill exactly whatever
 // width is available. `minWidth`/`minWidthPx` are a per-column readability
@@ -737,6 +840,7 @@ export function CustomersListView({
   onSort,
   sortedRows,
   openRowId,
+  leadingChannelStack = false,
 }: {
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
   // Filter state is a controlled prop, not local `useState`, so it lives on
@@ -771,8 +875,34 @@ export function CustomersListView({
    *  (or `null`), so that row can show as selected/highlighted in the
    *  table itself while its panel is open. */
   openRowId: string | null;
+  /** Per explicit request (with screenshots) — renders the row's channel
+   *  icons as `CustomerChannelStack`'s hover-only leading overlay instead
+   *  of `CustomerChannelCell`'s row-of-icons living inside a normal,
+   *  reorderable/toggleable "Channels" column. The overlay reserves zero
+   *  layout space of its own (`position: absolute`, painted over whichever
+   *  cell sits at the row's leading edge, only while that row is
+   *  hovered/focused — see `CustomerChannelStack`'s own doc comment for
+   *  why, including the correction from an earlier always-visible/
+   *  overlapping-avatar-stack version), so no extra header cell or column
+   *  width is added anywhere. Defaults `false` (fully unchanged existing
+   *  behavior) — only Agent Workspace 2.0 Premium's and Advanced's own
+   *  `<CustomersListView>` call sites pass `true`; 2.0's own Desk-tab usage
+   *  and the Search panel's usage (`agent-next-gen-search-panel.tsx`) were
+   *  out of scope for this request and stay on the original "Channels"
+   *  column. */
+  leadingChannelStack?: boolean;
 }) {
-  const [visibleCols, setVisibleCols] = useState<Set<string>>(new Set(CUSTOMER_ALL_COLUMN_KEYS));
+  // `"channels"` is dropped from the column system entirely in
+  // `leadingChannelStack` mode — it's no longer a normal column at all
+  // (see `leadingChannelStack`'s own doc comment above), so it can't be
+  // reordered via drag or shown/hidden via `ColumnToggle`.
+  const columnKeys = leadingChannelStack
+    ? CUSTOMER_ALL_COLUMN_KEYS.filter((k) => k !== "channels")
+    : CUSTOMER_ALL_COLUMN_KEYS;
+  const columnDefs = leadingChannelStack
+    ? CUSTOMER_ALL_COLUMN_DEFS.filter((d) => d.key !== "channels")
+    : CUSTOMER_ALL_COLUMN_DEFS;
+  const [visibleCols, setVisibleCols] = useState<Set<string>>(new Set(columnKeys));
 
   // Which fields the agent has actually added via the "+ Filter" menu below
   // — only these get rendered as live `FilterChip`s / applied to `filtered`.
@@ -794,7 +924,7 @@ export function CustomersListView({
   };
 
   const { columnOrder: allColumnOrder, dragOverKey, dragHandlers } = useColumnReorder<CustomerColKey>(
-    CUSTOMER_ALL_COLUMN_KEYS
+    columnKeys
   );
   const columnOrder = allColumnOrder.filter((k: CustomerColKey) => visibleCols.has(k));
 
@@ -894,7 +1024,7 @@ export function CustomersListView({
         ]}
         actions={
           <ColumnToggle
-            columns={CUSTOMER_ALL_COLUMN_DEFS}
+            columns={columnDefs}
             visibleColumns={visibleCols}
             onVisibilityChange={setVisibleCols}
           />
@@ -932,10 +1062,33 @@ export function CustomersListView({
             {pageRows.map((row) => (
               <TableRow
                 key={row.contactNumber}
-                className="group cursor-pointer"
+                // `selectable` — lyra-ui's `TableRow` now handles row-level
+                // keyboard focus/ADA ring/Enter-Space-selection and
+                // `TableBody`'s own built-in ArrowUp/ArrowDown row
+                // navigation itself (table.tsx); this used to be hand-rolled
+                // here (a local `handleBodyKeyDown` + manual `tabIndex`/
+                // focus-ring/`data-contact-number` plumbing) before that
+                // behavior was generalized into the shared component so
+                // every consumer gets it, not just this table — see
+                // `TableRow`'s own `selectable` doc comment for the full
+                // behavior.
+                selectable
+                className={cn(
+                  "group cursor-pointer",
+                  // `relative` — only needed so `CustomerChannelStack`'s own
+                  // `absolute inset-y-0 left-0` overlay positions itself
+                  // against THIS row instead of the nearest other
+                  // positioned ancestor. See that component's own doc
+                  // comment for why it's an absolutely-positioned overlay
+                  // (reserving zero column width) rather than a real cell.
+                  leadingChannelStack && "relative"
+                )}
                 data-state={row.contactNumber === openRowId ? "selected" : undefined}
                 onClick={() => onRowClick(row)}
               >
+                {leadingChannelStack && (
+                  <CustomerChannelStack row={row} onStartInteraction={onStartInteraction} />
+                )}
                 {/* `stopPropagation` below — same reason the channel popover
                     buttons already stop it (see `CustomerChannelCell`):
                     without it, clicking this row's delete button would ALSO

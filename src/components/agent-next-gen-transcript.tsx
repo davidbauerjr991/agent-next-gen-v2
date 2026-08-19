@@ -707,6 +707,55 @@ export function TranscriptMessageBubble({
   );
 }
 
+/** "Customer is typing" bubble — shown in place of the next message while a
+ *  simulated customer reply is pending (chat/SMS/WhatsApp only, per explicit
+ *  request; see `InteractionTranscript`'s own `isCustomerTyping` doc comment
+ *  for how the caller derives/times this). Deliberately built off
+ *  `TranscriptMessageBubble`'s own customer-side markup rather than a new
+ *  one-off shape — same avatar sizing/color (`bg-lyra-accent-green-soft`/
+ *  `text-lyra-accent-green-strong`), same `rounded-lyra-lg ... rounded-tl-
+ *  none bg-lyra-state-hover` bubble a real customer message renders in — so
+ *  the indicator reads as "the next one of these bubbles is on its way," not
+ *  a differently-styled system notice. `displayInitials` — the same real-
+ *  customer-name substitution `InteractionTranscript` already applies to
+ *  every actual customer message (see that component's own doc comment) —
+ *  is threaded in here too, so the indicator's avatar matches whichever
+ *  initials the customer's real messages are showing, not the hardcoded
+ *  mock "C" placeholder.
+ *  Three dots, `animate-bounce` (Tailwind's stock keyframe) with a staggered
+ *  `animationDelay` per dot (0ms/150ms/300ms) — the standard "typing"
+ *  cadence, rather than a bespoke keyframe just for this one usage. */
+function TypingIndicator({ initials, narrow = false }: { initials: string; narrow?: boolean }) {
+  return (
+    <div className="flex flex-col items-start" aria-live="polite" aria-label="Customer is typing">
+      <div className={cn("flex items-start gap-2", narrow ? "max-w-full" : "max-w-[70%]")}>
+        {!narrow && (
+          <span
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-lyra-accent-green-soft text-lyra-accent-green-strong lyra-body-sm-emphasis"
+            aria-hidden="true"
+          >
+            {initials}
+          </span>
+        )}
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="rounded-lyra-lg rounded-tl-none border border-transparent bg-lyra-state-hover px-4 py-3.5">
+            <div className="flex items-center gap-1">
+              {[0, 150, 300].map((delayMs) => (
+                <span
+                  key={delayMs}
+                  className="block h-1.5 w-1.5 animate-bounce rounded-full bg-lyra-fg-secondary"
+                  style={{ animationDelay: `${delayMs}ms` }}
+                  aria-hidden="true"
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── TranscriptSessionDetails ──
    The "Session Details" card a session separator expands to (reference
    screenshot 2) — Contact ID/Date, Start/End, Channel/Skill, Agent/Status,
@@ -1621,23 +1670,39 @@ export function TranscriptSessionSeparator({
                 genuine, untouched draft (no message sent yet) actually
                 deletes it outright rather than just dismissing a live
                 assignment (see `onDismiss`'s own caller for the matching
-                "skip Contact History" branch that pairs with this). Markup
-                mirrors lyra-ui's own delete-draft close-button fallback
-                verbatim (`ChannelRow`'s `removeVariant="delete-draft"`
-                state, channel-row.tsx) for visual consistency with the
-                other two "new thread" surfaces (LeftNav card kebab,
-                record-header tab kebab) that already fall back to this
-                exact same treatment. */}
+                "skip Contact History" branch that pairs with this).
+                Per a later explicit follow-up request ("make the delete
+                icons in the session rows ghost button error variants that
+                say 'Delete Draft'"): `variant="icon"` (icon-only, label
+                only in the `title` tooltip) → `variant="ghost"` with the
+                label rendered as visible text alongside the icon — same
+                `text-lyra-status-critical-strong`/`hover:bg-lyra-status-
+                critical-subtle`/`active:bg-lyra-status-critical-medium`
+                "ghost + critical" color treatment the Unassign & Dismiss
+                button just below already uses (there's still no named
+                `ghost`+`critical` `Button` variant, so this stays composed
+                via `className`). `size="sm"` (24px, labeled) instead of
+                `size="icon-sm"` (also 24px, but icon-only) — the row has
+                room for it since this button fully replaces the rest of
+                the cluster for a draft thread (see this branch's own
+                `isNewThread` gating above). `title` dropped since the
+                label is visible text now, not just a tooltip. This ONE
+                session-row copy only, per the request's own wording — the
+                LeftNav card kebab and record-header tab kebab's matching
+                `removeVariant="delete-draft"` fallback (channel-row.tsx)
+                intentionally kept their original icon-only treatment,
+                since neither was mentioned and both are much tighter
+                spaces (a card row / a tab) than this session row has. */}
             {isNewThread
               ? onDismiss && !isClosed && (
                   <Button
-                    variant="icon"
-                    size="icon-sm"
-                    title="Delete Draft"
-                    className="h-6 shrink-0 text-lyra-status-critical-strong hover:text-lyra-status-critical-strong"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 shrink-0 text-lyra-status-critical-strong hover:bg-lyra-status-critical-subtle hover:text-lyra-status-critical-strong active:bg-lyra-status-critical-medium"
                     onClick={onDismiss}
                   >
                     <Trash2 className="h-4 w-4" strokeWidth={1.5} />
+                    Delete Draft
                   </Button>
                 )
               : onDismiss && !isClosed && (
@@ -1703,6 +1768,7 @@ export function InteractionTranscript({
   dimmed,
   showSessionActionCluster = true,
   isNewThread = false,
+  isCustomerTyping = false,
 }: {
   /** Which channel's content to show — see this component's own doc
    *  comment above. Undefined (no active interaction/channel yet) renders
@@ -1867,6 +1933,20 @@ export function InteractionTranscript({
    *  existing call site is unaffected until the caller starts computing a
    *  real value. */
   isNewThread?: boolean;
+  /** True while a simulated customer reply is pending on the ACTIVE channel
+   *  (`handleSendMessage`'s 2.5s reply timeout, main component — set the
+   *  instant the agent's own message is sent, cleared the moment the
+   *  customer's reply actually lands) — renders a `TypingIndicator` bubble
+   *  right after the live-message list of the CURRENT session (same
+   *  `lastSessionId` scoping `outcomeOpen`/`showSessionActionCluster` use
+   *  above; a typing indicator only ever makes sense for whichever
+   *  conversation is actually live). Per explicit request, only meaningful
+   *  for `isTextChannel` (chat/SMS/WhatsApp) — Voice has no message concept
+   *  to "type," and Email's reply cadence isn't a live back-and-forth the
+   *  way the other three are; the render check below gates on both. Defaults
+   *  `false`; every existing call site is unaffected until the caller starts
+   *  computing a real value. */
+  isCustomerTyping?: boolean;
 }) {
   // A freshly-launched Chat/SMS/WhatsApp interaction (see `isFreshLaunch`'s
   // own doc comment) shows just a single synthesized "Session Details"
@@ -2159,20 +2239,11 @@ export function InteractionTranscript({
     setLiveMessageTags((prev) => ({ ...prev, [messageId]: [] }));
   };
 
-  // Scroll to the latest message on open — every SMS/chat transcript should
-  // land on the newest message (bottom of the last session) rather than the
-  // very first one from potentially days ago. `useLayoutEffect` (not
-  // `useEffect`) so this happens before the browser paints the first frame
-  // — no visible flash of the top of the transcript before it jumps to the
-  // bottom. Empty deps: fires once when this transcript mounts (i.e. an
-  // interaction is opened), not on every re-render — adding a tag or
-  // toggling a session's details shouldn't yank an agent's scroll position
-  // back to the bottom while they're reading further up.
+  // Scroll container ref — see the `useLayoutEffect` further below (after
+  // `isAtBottom` is declared, which it also resets) for the actual
+  // scroll-to-latest-on-open/on-channel-switch behavior. Declared up here
+  // since the `ResizeObserver` effect right below also needs it.
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = scrollContainerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, []);
 
   // Below 400px of this transcript's own rendered width: drop each
   // message's sender avatar, and let the bubble itself grow from 70% to
@@ -2220,6 +2291,39 @@ export function InteractionTranscript({
   useEffect(() => {
     isAtBottomRef.current = isAtBottom;
   }, [isAtBottom]);
+
+  // Scroll to the latest message on open — every SMS/chat transcript should
+  // land on the newest message (bottom of the last session) rather than the
+  // very first one from potentially days ago. `useLayoutEffect` (not
+  // `useEffect`) so this happens before the browser paints the first frame
+  // — no visible flash of the top of the transcript before it jumps to the
+  // bottom.
+  // Depends on `contactId` — the ACTIVE channel's own base Contact id (see
+  // that prop's own doc comment; unique per Thread, so it changes every
+  // time the agent switches to a different channel tab) — not an empty
+  // array. Per explicit bug report: `InteractionTranscript` is one long-
+  // lived component instance for the whole interaction (never remounted as
+  // the agent flips between its channel tabs — no `key` at the call site),
+  // so an empty-deps effect only ever fired once, the very first time this
+  // interaction's transcript opened. Every LATER channel switch left
+  // `scrollContainerRef`'s raw `scrollTop` pixel value untouched while the
+  // DOM underneath it was completely replaced with a different channel's
+  // (usually differently-sized) content — the agent would land wherever
+  // that stale pixel offset happened to fall in the new content, which
+  // read as "goes to the top" for a multi-session chat/SMS thread far more
+  // often than not. Re-running this on every `contactId` change re-lands on
+  // the bottom every time, matching the original "land on open" intent but
+  // now firing on every channel switch, not just the very first one.
+  // `setIsAtBottom(true)` alongside it — same "as if they'd clicked Scroll
+  // To Latest" reset `scrollToLatest`/the agent's-own-just-sent-message
+  // branch below already do — so the "N new" chip/count (which otherwise
+  // would've kept comparing against whatever channel was last read) starts
+  // clean for the newly-viewed channel too.
+  useLayoutEffect(() => {
+    const el = scrollContainerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    setIsAtBottom(true);
+  }, [contactId]);
 
   const BOTTOM_THRESHOLD_PX = 24;
   const handleTranscriptScroll = () => {
@@ -2574,8 +2678,12 @@ export function InteractionTranscript({
                     not sticky"). */}
                 {(() => {
                   const sessionLiveMessages = liveMessagesBySessionId[session.id] ?? [];
+                  // Only the CURRENT session's own trailing edge — see
+                  // `isCustomerTyping`'s own doc comment above for the full
+                  // `lastSessionId`/`isTextChannel` scoping reasoning.
+                  const showTypingIndicator = session.id === lastSessionId && isTextChannel && isCustomerTyping;
                   return (
-                    sessionLiveMessages.length > 0 && (
+                    (sessionLiveMessages.length > 0 || showTypingIndicator) && (
                       <div className="flex flex-col gap-5 py-4">
                         {sessionLiveMessages.map((message) => (
                           <TranscriptMessageBubble
@@ -2594,6 +2702,9 @@ export function InteractionTranscript({
                             narrow={transcriptNarrow}
                           />
                         ))}
+                        {showTypingIndicator && (
+                          <TypingIndicator initials={displayInitials} narrow={transcriptNarrow} />
+                        )}
                       </div>
                     )
                   );

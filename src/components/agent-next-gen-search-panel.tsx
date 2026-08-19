@@ -152,6 +152,14 @@ export function useSearchPanelContent({
             onSort={customers.onSort}
             sortedRows={customers.sortedRows}
             openRowId={customers.selectedRow?.contactNumber ?? null}
+            // Per explicit follow-up request — this branch only ever
+            // renders from Agent Workspace Advanced's own Search panel (see
+            // the doc comment on `CustomerRowInfoPanel`'s `tabs` prop just
+            // below), so it should get the same leading channel-icon
+            // overlay as that page's main Customers desk tab already has.
+            // See `leadingChannelStack`'s own doc comment
+            // (agent-next-gen-customers-table.tsx) for what it does.
+            leadingChannelStack
           />
           <CustomerRowInfoPanel
             row={customers.selectedRow}

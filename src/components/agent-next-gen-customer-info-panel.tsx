@@ -31,6 +31,7 @@ import {
   Separator,
   Badge,
   PanelHeader,
+  PanelContent,
   PanelFooter,
   AIInput,
   SidePanel,
@@ -79,6 +80,7 @@ import {
   FileText,
   Minimize2,
   Maximize2,
+  SquareArrowOutUpRight,
   PanelRightClose,
   RefreshCw,
   Trash2,
@@ -3471,12 +3473,24 @@ export function CustomerInformationSidePanel({
       pinned={pinned}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      // Static "Customer Information" now (was the customer's own name +
-      // record id, `headerSubhead={recordId}` below) — per explicit
-      // request. The name/id already show again in the page header above
-      // this panel (see `PageHeader`'s own `title`/`subtitle` at the
-      // record header render site) and in this panel's own Overview tab,
-      // so this header no longer needs to repeat them a third time.
+      // Static "Customer Information" title (was the customer's own name +
+      // record id in the TITLE, `headerSubhead={recordId}` below) — per
+      // explicit request. The name/id already show again in the page
+      // header above this panel (see `PageHeader`'s own `title`/`subtitle`
+      // at the record header render site) and in this panel's own
+      // Overview tab, so the TITLE doesn't need to repeat them a third
+      // time.
+      //
+      // Per a later explicit follow-up request ("add a subhead to the
+      // customer information panel in an interaction that is {Firstname
+      // Lastname} of the customer"), the subhead itself is back — just the
+      // plain name this time, not name+id the way it briefly was before
+      // this got flattened to static text. Only for the ordinary case
+      // (real customer, no `matchState` search/create flow in progress):
+      // `matchState`'s own two steps keep their own subhead treatment
+      // exactly as before (`matchSubhead` mid-search; none at all while
+      // creating a brand-new record, since there's no confirmed customer
+      // yet for a name to describe).
       //
       // While `matchState` is set (see that prop's own doc comment), this
       // whole header instead reads either "Customer Information" (search
@@ -3486,7 +3500,13 @@ export function CustomerInformationSidePanel({
       // below is `undefined` in both match steps — neither reference
       // screenshot shows any tabs).
       headerTitle={matchState?.step === "create" ? "Create New Customer" : "Customer Information"}
-      headerSubhead={matchState && matchState.step === "search" ? matchSubhead : undefined}
+      headerSubhead={
+        matchState?.step === "search"
+          ? matchSubhead
+          : matchState?.step === "create"
+            ? undefined
+            : customerName
+      }
       headerIcon={
         matchState?.step === "create" ? (
           <ActionIconButton aria-label="Back to search" title="Back" onClick={matchState.onBackToSearch}>
@@ -3766,6 +3786,7 @@ export function CustomerRowInfoPanel({
   onStartInteraction,
   tabs,
   onAddToast,
+  onOpenFullScreenTab,
 }: {
   /** The clicked customer row, or `null` when the panel is closed. Kept as
    *  the single source of both "is it open" (`open={row !== null}`) and
@@ -3801,6 +3822,20 @@ export function CustomerRowInfoPanel({
    *  that prop's doc comment); fired on a successful Customer Overview
    *  save below. */
   onAddToast?: (toast: Omit<ToastItem, "id">) => void;
+  /**
+   * Per explicit request ("in agent workspace 2.0 premium, when an agent
+   * clicks the Full Screen [button], instead of toggling to a full screen
+   * mode, open a new tab..."): when set, this panel's Full Screen button
+   * fires this callback with the currently-open `row` instead of expanding
+   * `InteriorPanel`'s own built-in `isFullScreen` overlay — the caller is
+   * expected to open/activate a `CustomerFullScreenTabContent` tab
+   * elsewhere (see that component's own doc comment) rather than this
+   * panel growing in place. Omitted (the default) preserves the original
+   * real-fullscreen-toggle behavior verbatim — scoped to whichever
+   * consumer explicitly opts in (Agent Workspace 2.0 Premium only, per the
+   * request's own wording) rather than changing this panel's default
+   * behavior for every tier. */
+  onOpenFullScreenTab?: (row: CustomerListRecord) => void;
 }) {
   const [activeTab, setActiveTab] = useState(0);
   // Hard filter, not conditional like `CustomerInformationSidePanel`'s own
@@ -3894,7 +3929,15 @@ export function CustomerRowInfoPanel({
       // panel.tsx's own doc comment on `allowFullScreen`) — per explicit
       // request: opens as a normal docked flyout by default, with full
       // screen as an option, not the default.
-      allowFullScreen
+      //
+      // Per a later explicit follow-up request (Agent Workspace 2.0
+      // Premium only — see `onOpenFullScreenTab`'s own doc comment), that
+      // built-in toggle is suppressed here whenever a caller opts into tab
+      // mode — a custom Full Screen button rendered in `headerActions`
+      // below takes over instead, since `InteriorPanel`'s own toggle has no
+      // way to be told "call this instead of touching your own internal
+      // state."
+      allowFullScreen={!onOpenFullScreenTab}
       headerTitle={customerName ?? "Customer"}
       headerSubhead={recordId}
       // Sequential prev/next through the same filtered+sorted order the
@@ -3975,6 +4018,29 @@ export function CustomerRowInfoPanel({
           <Button variant="ghost" size="icon-md" title="Next customer" disabled={!hasNext} onClick={onNext}>
             <ChevronRight className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
           </Button>
+          {/* Stand-in for `InteriorPanel`'s own built-in fullScreenToggle
+              (suppressed above via `allowFullScreen={!onOpenFullScreenTab}`)
+              — same size/tooltip-placement/position (right after prev/next,
+              immediately before the panel's own close button) so swapping
+              which behavior this fires is visually seamless, but its own
+              icon/label per later explicit follow-up request: `Maximize2`
+              (this button never toggles an "exit" state of its own the way
+              a real fullscreen button would — clicking it hands off to a
+              desk tab instead of changing anything about THIS panel, so
+              that icon read as misleading) → `SquareArrowOutUpRight`, the
+              conventional "open in new tab/window" glyph, matching what
+              this button actually does now. Title "Open Tab" (was "Full
+              Screen") to match. */}
+          {onOpenFullScreenTab && row && (
+            <Button
+              variant="ghost"
+              size="icon-md"
+              title="Open Tab"
+              onClick={() => onOpenFullScreenTab(row)}
+            >
+              <SquareArrowOutUpRight className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+            </Button>
+          )}
         </>
       }
       headerTabs={
@@ -4061,5 +4127,164 @@ export function CustomerRowInfoPanel({
         allowOverviewEdit
       />
     </InteriorPanel>
+  );
+}
+
+/* ── CustomerFullScreenTabContent ──
+   Per explicit request ("in agent workspace 2.0 premium, when an agent
+   clicks the Full Screen [button on `CustomerRowInfoPanel`], instead of
+   toggling to a full screen mode, open a new tab... put it to the far right
+   of the tabs in the home screen container"): the content of one such
+   desk-level tab — a customer's full profile (Overview/Detail/Notes/etc.,
+   the exact same `CustomerInformationPanelBody` every other consumer of
+   this file renders), stretched across the full desk-tab content column
+   instead of docked/floating beside the Customers table.
+
+   Deliberately NOT built by reusing `CustomerRowInfoPanel` (above) with
+   `InteriorPanel`'s own `isFullScreen` state forced permanently on:
+   `isFullScreen` is genuinely internal/uncontrolled state inside
+   `InteriorPanel` (no prop exists to force it on from outside — see that
+   component's own doc comment on `allowFullScreen`), and `InteriorPanel`
+   itself is fundamentally a FLYOUT (open/close slide animation, drag-resize
+   handle, docked-vs-overlay positioning) — repurposing it to sit
+   permanently inline as an ordinary block would mean fighting all of that
+   machinery rather than using it. Instead, this composes the same lower-
+   level pieces `InteriorPanel` itself is built from — `PanelHeader` (=
+   `ContainerHeader`), `PanelContent`, `PanelFooter` — directly, exactly the
+   same way `CustomerRowInfoPanel` and `CustomerInformationSidePanel` both
+   already do internally (see interior-panel.tsx / side-panel.tsx) — so this
+   renders pixel-identical chrome (title/subhead row, tab strip, scrollable
+   body, Save/Cancel footer) with none of the flyout-only behavior this
+   context doesn't need.
+
+   Owns its own `activeTab`/`recordDraft`/`overviewEditing` state (same
+   shape `CustomerRowInfoPanel` keeps for its own instance) rather than
+   sharing state with whichever `CustomerRowInfoPanel` row might currently
+   be open on the Customers tab — the two are genuinely independent views
+   once this tab exists (the docked panel can be closed, or moved to a
+   different row, without disturbing this tab's own content), matching how
+   the caller keeps every open customer tab mounted independently (see
+   `openCustomerTabs`'s own doc comment, AgentWorkspace2WithDeskPage.tsx).
+
+   No `onClose`/header X button — closing happens via the desk tab's own
+   trailing remove control (the same `Tab` `onRemove` affordance every other
+   removable tab in this app already uses), not a second close control
+   duplicated inside the content itself. No prev/next chevrons either
+   (`CustomerRowInfoPanel`'s own, for stepping through the Customers
+   table's current sort order) — those are specific to that docked-panel
+   workflow; this tab is anchored to one specific customer, not a walkable
+   position in a list. */
+export function CustomerFullScreenTabContent({
+  row,
+  tabs,
+  onStartInteraction,
+  onAddToast,
+}: {
+  row: CustomerListRecord;
+  /** Same `tabs` concept every other consumer in this file takes — see
+   *  `CustomerRowInfoPanel`'s own doc comment on its matching param. */
+  tabs: readonly CustomerPanelTabLabel[];
+  onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
+  onAddToast?: (toast: Omit<ToastItem, "id">) => void;
+}) {
+  const [activeTab, setActiveTab] = useState(0);
+  // Same unconditional "Copilot" strip as `CustomerRowInfoPanel` — see that
+  // component's own doc comment on its matching `visibleTabs`: a customer
+  // profile view (real interaction or not) never has anything for Copilot
+  // to summarize here.
+  const visibleTabs = tabs.filter((t) => t !== "Copilot");
+
+  const customerName = `${row.firstName} ${row.lastName}`;
+  const recordId = row.contactNumber;
+  const fields = useMemo(() => buildCustomerInfoFields(customerName, recordId, []), [customerName, recordId]);
+  const latestInteraction = useMemo(() => buildLatestInteraction(customerName, recordId), [customerName, recordId]);
+  const latestNote = useMemo(() => buildLatestNote(customerName, recordId), [customerName, recordId]);
+  const copilotSummary = useMemo(() => buildCopilotSummary(customerName, recordId), [customerName, recordId]);
+  const recordDraft = useCustomerRecordDraft(fields, customerName, recordId);
+  const [overviewEditing, setOverviewEditing] = useState(false);
+
+  const recordActionItems: MenuEntry[] = [
+    { id: "refresh", label: "Refresh Record", icon: <RefreshCw className="h-4 w-4" strokeWidth={1.5} /> },
+    { id: "delete", label: "Delete Record", icon: <Trash2 className="h-4 w-4" strokeWidth={1.5} />, destructive: true },
+  ];
+
+  return (
+    <div className="flex flex-1 flex-col min-w-0 min-h-0 overflow-hidden">
+      <PanelHeader
+        title={customerName}
+        subhead={recordId}
+        actions={
+          <>
+            {/* Always the "wide" (one button per channel) shape — this tab
+                fills the full desk-tab content column, never the narrow
+                docked width `CustomerRowInfoPanel`'s own `isNarrowActions`
+                measurement exists to detect. */}
+            <CustomerAddChannelButton row={row} isNarrow={false} onStartInteraction={onStartInteraction} />
+            <KebabMenuButton
+              items={recordActionItems}
+              ariaLabel="Record actions"
+              className="h-8 w-8"
+              icon={<MoreVertical className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
+            />
+          </>
+        }
+        tabs={
+          <TabList className="px-4" overflowMenu>
+            {visibleTabs.map((label) => (
+              <Tab
+                key={label}
+                active={activeTab === CUSTOMER_PANEL_TABS.indexOf(label)}
+                onClick={() => setActiveTab(CUSTOMER_PANEL_TABS.indexOf(label))}
+              >
+                {label}
+              </Tab>
+            ))}
+          </TabList>
+        }
+      />
+      <PanelContent>
+        <CustomerInformationPanelBody
+          activeTab={activeTab}
+          customerName={customerName}
+          latestInteraction={latestInteraction}
+          latestNote={latestNote}
+          copilotSummary={copilotSummary}
+          recordId={recordId}
+          channels={[]}
+          onViewAllInteractions={
+            visibleTabs.includes("Interactions")
+              ? () => setActiveTab(CUSTOMER_PANEL_TABS.indexOf("Interactions"))
+              : undefined
+          }
+          draft={recordDraft.draft}
+          onDraftChange={recordDraft.updateDraft}
+          onPhoneChange={recordDraft.updatePhone}
+          onOverviewFieldChange={recordDraft.updateOverviewField}
+          overviewEditing={overviewEditing}
+          onOverviewEditingChange={setOverviewEditing}
+          allowOverviewEdit
+        />
+      </PanelContent>
+      {(recordDraft.isDirty || overviewEditing) && (
+        <PanelFooter>
+          <CustomerRecordSaveFooter
+            onSave={() => {
+              recordDraft.save();
+              setOverviewEditing(false);
+              onAddToast?.({
+                variant: "success",
+                title: "Success",
+                message: `${row.firstName} ${row.lastName} customer record saved`,
+                duration: 4000,
+              });
+            }}
+            onCancel={() => {
+              recordDraft.cancel();
+              setOverviewEditing(false);
+            }}
+          />
+        </PanelFooter>
+      )}
+    </div>
   );
 }

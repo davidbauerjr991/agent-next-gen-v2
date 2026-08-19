@@ -129,7 +129,6 @@ import {
   LATEST_CONTACTS_STATIC,
   type DeskTabKey,
   DESK_TAB_LABELS,
-  PERFORMANCE_DATA_BY_RANGE,
   PerformanceBreakdownCard,
   PerformanceSummaryCard,
 } from "@/components/agent-next-gen-interaction-dashboard";
@@ -159,6 +158,7 @@ import {
   CustomerInfoHoverPreview,
   CustomerInformationSidePanel,
   CustomerRowInfoPanel,
+  CustomerFullScreenTabContent,
   CUSTOMER_PANEL_TABS,
   buildCustomerInfoFields,
   useCustomerRecordDraft,
@@ -194,6 +194,9 @@ import {
   History,
   Maximize2,
   Minimize2,
+  User,
+  Headphones,
+  X,
   IdCard,
   PhoneOutgoing,
   RotateCcw,
@@ -583,6 +586,14 @@ export function AgentWorkspace2WithDeskPage({
   const [interactions, setInteractions] = useState<Interaction[]>(
     () => (initialInteraction ? [initialInteraction] : [])
   );
+  // Real "Assignments resolved today" count for the dashboard header badge
+  // (see that `PageHeader`'s own `actions` doc comment) — per explicit
+  // request, starts at 0 every session (a freshly-logged-in agent hasn't
+  // resolved anything yet) rather than reading a static mock figure off
+  // `PERFORMANCE_DATA_BY_RANGE`, and increments live as `handleInteraction-
+  // StatusChange` below actually marks a channel "Resolved", instead of
+  // staying frozen until the next full page reload.
+  const [resolvedTodayCount, setResolvedTodayCount] = useState(0);
   // Keeps `agent-next-gen-case-database.ts`'s own local "database" in sync
   // with every live interaction's TRUE current state — see this same
   // effect's own doc comment in AgentNextGenPage.tsx for the full
@@ -755,6 +766,12 @@ export function AgentWorkspace2WithDeskPage({
    *  (`!showChannelTabRow`) — a real-customer interaction keeps this tier's
    *  plain customer-ID subtitle, which never consults this. */
   const [threadLaunchTimestamps, setThreadLaunchTimestamps] = useState<Record<string, string>>({});
+  /** Per explicit request ("add a customer typing animation when a customer
+   *  is responding to a sms/chat/whatsapp") — mirrors Agent Workspace 2.0's
+   *  identical state (AgentNextGenPage.tsx, see that file's own doc comment
+   *  for the full reasoning): `true` while a simulated customer reply is in
+   *  flight on a given channel, keyed `${interactionId}:${channelKey}`. */
+  const [customerTyping, setCustomerTyping] = useState<Record<string, boolean>>({});
   /* ── Unknown-contact customer matching (per explicit request) ──
      When the docked Customer Information panel is showing an unknown-
      contact interaction (`!activeInteractionIsRealCustomer`, below), it now
@@ -1117,7 +1134,25 @@ export function AgentWorkspace2WithDeskPage({
   // signal — it no longer feeds this at all, and continues to gate ONLY
   // Customer Information's own tab set / customer-matching UI, per
   // explicit request.
-  const showChannelTabRow = !activeInteraction || activeInteraction.threads.length >= 2;
+  // Was `!activeInteraction || activeInteraction.threads.length >= 2` —
+  // hid this row outright for a single-channel interaction. Per explicit
+  // follow-up request ("if only one interaction tab is open, display the
+  // tab instead of removing it"), now always shows whenever there's a real
+  // active interaction — a single open channel renders as its own one-tab
+  // row instead of disappearing. Safe to widen this far: the ONLY other
+  // consumer this constant used to also gate, `showSessionActionCluster`
+  // at the `<InteractionTranscript>` call site below, is already
+  // unconditional regardless of channel count (see the comment right
+  // above this one) — it no longer reads this constant at all.
+  const showChannelTabRow = !!activeInteraction;
+  // Per explicit request ("hide the subhead from the interaction header
+  // under the user's name for now - I may bring it back") — mirrors Agent
+  // Workspace 2.0's identical flag (AgentNextGenPage.tsx, see that file's
+  // own doc comment for the full reasoning): gates the record-header
+  // `PageHeader`'s own `subtitle` prop, below. The underlying derivation is
+  // left completely untouched — flipping this back to `true` restores the
+  // exact same subtitle with no other changes needed.
+  const SHOW_RECORD_HEADER_SUBTITLE = false;
   // Captured once, this component's real mount instant — lets
   // `resolveInteractionLastCustomerResponseLabel` (below) convert a
   // `lastCustomerMessageTick` value (real elapsed seconds since mount,
@@ -1313,7 +1348,7 @@ export function AgentWorkspace2WithDeskPage({
   const [clockTick, setClockTick] = useState(0);
   // Mirrors `clockTick` for code that needs the CURRENT tick inside a
   // callback that itself fires later (`handleSendMessage`'s simulated
-  // customer-reply `setTimeout`, 2.5s after the call that scheduled it) —
+  // customer-reply `setTimeout`, 2s after the call that scheduled it) —
   // reading the `clockTick` state variable there would close over its
   // stale value from scheduling time, not whatever it's actually
   // incremented to by the time that timeout fires. Updated in the same
@@ -1341,7 +1376,87 @@ export function AgentWorkspace2WithDeskPage({
   const activeChannelAwaitingSeverity: "success" | "warning" | "critical" | undefined = activeChannel?.awaitingResponse
     ? getAwaitingSeverity(clockTick - (activeChannel.lastCustomerMessageTick ?? activeChannel.startTick))
     : undefined;
-  const [activeDeskTab, setActiveDeskTab] = useState<"home" | "customers" | "accounts" | "tickets" | "wem" | "interactions">("home");
+  // Widened from the plain `DeskTabKey` union (still the base type: "home" |
+  // "customers" | "accounts" | "tickets" | "wem" | "interactions") to also
+  // allow a `customer:${contactNumber}` id — one of the dynamic tabs
+  // `openCustomerTabs` tracks below (see that state's own doc comment). A
+  // template-literal type here (rather than just widening to plain
+  // `string`) keeps every existing `activeDeskTab === "customers"`-style
+  // comparison against a real `DeskTabKey` literal still meaningfully
+  // typed, while still accepting the dynamic ids.
+  const [activeDeskTab, setActiveDeskTab] = useState<DeskTabKey | `customer:${string}`>("home");
+  // Per explicit request ("in agent workspace 2.0 premium, when an agent
+  // clicks the Full Screen [button], instead of toggling to a full screen
+  // mode, open a new tab with a customer icon on the left of the tab, the
+  // customer name in the center and an 'x' button to remove the tab — put
+  // it to the far right of the tabs in the home screen container"):
+  // customer profiles opened this way each get their own persistent tab —
+  // several can be open simultaneously (confirmed explicitly: multiple
+  // tabs, not a single slot that gets replaced) — appended after
+  // `deskTabOrder`'s fixed tabs in the same `TabList` (render site further
+  // down). `id` is always `customer:${row.contactNumber}` — see
+  // `handleOpenCustomerFullScreenTab`'s own doc comment for why this
+  // doubles as the dedupe key AND the `activeDeskTab` value that activates
+  // it, so no separate lookup/mapping is needed anywhere this is read.
+  const [openCustomerTabs, setOpenCustomerTabs] = useState<
+    { id: `customer:${string}`; name: string; row: CustomerListRecord }[]
+  >([]);
+  // Which fixed `DeskTabKey` to return to once every open customer tab is
+  // closed — captured the moment the FIRST customer tab opens (see
+  // `handleOpenCustomerFullScreenTab` below) and deliberately not
+  // overwritten while additional customer tabs open on top of it, so
+  // closing back down to zero always lands wherever the agent actually
+  // started from (almost always "customers", since that's the only place
+  // `onOpenFullScreenTab` is wired below — but read from `activeDeskTab` at
+  // open time rather than hardcoded, in case that ever changes). A `ref`,
+  // not state — this is scratch bookkeeping the render output never reads
+  // directly, only `handleCloseCustomerTab` does, imperatively.
+  const returnDeskTabRef = useRef<DeskTabKey>("customers");
+
+  // Opens (or, if already open, just re-activates) a customer's full-screen
+  // tab — wired to `CustomerRowInfoPanel`'s new `onOpenFullScreenTab` prop
+  // below. Dedupes by `row.contactNumber`: re-clicking Full Screen on a
+  // customer who already has a tab open just switches to it rather than
+  // creating a duplicate — the same "no duplicate tabs for the same real
+  // thing" rule `handleChannelSelect`/`handleStartCall` already enforce
+  // elsewhere in this file, applied here to customer identity instead of
+  // channel identity.
+  const handleOpenCustomerFullScreenTab = (row: CustomerListRecord) => {
+    const id = `customer:${row.contactNumber}` as const;
+    setOpenCustomerTabs((prev) => (prev.some((t) => t.id === id) ? prev : [...prev, { id, name: `${row.firstName} ${row.lastName}`, row }]));
+    // Only remember a return tab while NOT already on a customer tab — see
+    // `returnDeskTabRef`'s own doc comment: opening a SECOND customer tab
+    // while already viewing a first one must not overwrite the real
+    // "where the agent actually came from" value with `customer:...` itself.
+    setActiveDeskTab((current) => {
+      if (!current.startsWith("customer:")) {
+        returnDeskTabRef.current = current as DeskTabKey;
+      }
+      return id;
+    });
+  };
+
+  // Removes a customer tab (the desk tab row's own trailing `onRemove`
+  // control, per lyra-ui's established "every removable tab renders the
+  // same `Trash2` glyph, full stop" convention — see `Tab`'s own
+  // `removeVariant` doc comment, tabs.tsx — rather than a bespoke "×").
+  // Only changes `activeDeskTab` when the CLOSED tab was the active one:
+  // closing a background tab shouldn't steal focus away from whichever tab
+  // the agent is actually looking at.
+  const handleCloseCustomerTab = (id: `customer:${string}`) => {
+    setOpenCustomerTabs((prev) => {
+      const next = prev.filter((t) => t.id !== id);
+      if (activeDeskTab === id) {
+        // Land on whichever customer tab is now last in the remaining
+        // list (the most recently opened survivor) if any are still open,
+        // matching a plain "closed tab, pick a neighboring one" browser-tab
+        // convention; otherwise fall back to wherever the agent actually
+        // came from before the first customer tab ever opened.
+        setActiveDeskTab(next.length > 0 ? next[next.length - 1].id : returnDeskTabRef.current);
+      }
+      return next;
+    });
+  };
   // Desk-tab display order — separate from `activeDeskTab` above (which
   // one is selected), so the user can click-and-drag reorder the Home/
   // Customers/Accounts/Tickets/WEM tabs (via `TabList`'s `reorderable`/
@@ -2410,10 +2525,12 @@ export function AgentWorkspace2WithDeskPage({
   // its stable `aria-label` (`title`, i.e. "New Outbound") — no JSX
   // wrapper, `CreateNew` stays `pinnedHeader`'s sole direct child. Once the
   // popover's open transition has settled, it finds the outbound search
-  // field by its placeholder (`OUTBOUND_CONFIG.searchPlaceholder`, defined
-  // below), suppresses the browser's own autofill suggestions on it (see
-  // inline comment), and focuses it directly. A closing click just fails
-  // the query harmlessly (nothing to focus once the content's unmounted).
+  // field by its stable `id` (`#new-outbound-search`, set on lyra-ui's own
+  // `CreateNew` — see that component's own doc comment on why it's a fixed
+  // id rather than the field's default auto-generated one), suppresses the
+  // browser's own autofill suggestions on it (see inline comment), and
+  // focuses it directly. A closing click just fails the query harmlessly
+  // (nothing to focus once the content's unmounted).
   useEffect(() => {
     const CREATE_NEW_TRIGGER_LABEL = "New Outbound";
     const onDocumentClick = (e: MouseEvent) => {
@@ -2423,15 +2540,15 @@ export function AgentWorkspace2WithDeskPage({
       if (!trigger) return;
       requestAnimationFrame(() => {
         setTimeout(() => {
-          const input = document.querySelector<HTMLInputElement>(
-            `input[placeholder="${OUTBOUND_CONFIG.searchPlaceholder}"]`
-          );
+          const input = document.querySelector<HTMLInputElement>("#new-outbound-search");
           if (!input) return;
-          // The placeholder text itself contains "email" (part of
-          // OUTBOUND_CONFIG.searchPlaceholder's own copy, "Enter phone,
-          // email or search term"), which is enough for some browsers'
-          // autofill heuristics to treat this as a saved-address field and
-          // show a suggestions dropdown the moment it's focused. Chrome
+          // The field's own label text contains "email" (part of
+          // OUTBOUND_CONFIG.searchLabel's own copy, "Enter phone, email or
+          // search term" — rendered as a real `<label>`, not placeholder
+          // text, but still read by the same autofill heuristics), which
+          // is enough for some browsers' autofill heuristics to treat this
+          // as a saved-address field and show a suggestions dropdown the
+          // moment it's focused. Chrome
           // ignores this plain autocomplete="off" for that category (a
           // stronger readonly-at-focus workaround was tried and reverted —
           // not worth the added complexity), but it's kept because Safari
@@ -3017,6 +3134,16 @@ export function AgentWorkspace2WithDeskPage({
           interactionAtSend.threads[interactionAtSend.threads.length - 1].type
         : undefined) ??
       "channel";
+    // Same key `applyToChannel`/`customerTyping` below share — see
+    // `customerTyping`'s own doc comment. Only chat/SMS/WhatsApp ever gets a
+    // "customer is typing" bubble (`InteractionTranscript`'s own
+    // `isTextChannel` render gate covers this too, but resolving the type
+    // here as well avoids ever setting the flag for voice/email in the
+    // first place).
+    const channelTypeAtSend = interactionAtSend?.threads.find((c) => (c.id ?? c.type) === channelKeyAtSend)?.type;
+    const isTextChannelAtSend =
+      channelTypeAtSend === "chat" || channelTypeAtSend === "sms" || channelTypeAtSend === "whatsapp";
+    const typingKey = `${interactionId}:${channelKeyAtSend}`;
 
     // Per explicit follow-up request (mirrors Agent Workspace 2.0's
     // identical block — AgentNextGenPage.tsx, see `threadLaunchTimestamps`'s
@@ -3064,6 +3191,23 @@ export function AgentWorkspace2WithDeskPage({
       )
     );
 
+    // "Customer is typing" — see `customerTyping`'s own doc comment. Per
+    // explicit follow-up request ("do not display the typing indicator
+    // until 2s after the agent message is sent"), no longer set the
+    // instant the agent's own message goes out — behind its own 2000ms
+    // `window.setTimeout` instead, so the bubble only appears starting 2s
+    // after the agent sends a message, not immediately. Still cleared (and
+    // the actual reply lands) at the original 2500ms mark below — this
+    // narrows the indicator's own visible window to the LAST 500ms before
+    // the reply lands, rather than changing the total reply delay itself
+    // (a separate, unrelated earlier misreading of this same request —
+    // reverted).
+    if (isTextChannelAtSend) {
+      window.setTimeout(() => {
+        setCustomerTyping((prev) => ({ ...prev, [typingKey]: true }));
+      }, 2000);
+    }
+
     // Simulated customer reply — canned text, not a real conversation
     // engine. "Customer"/"C" here are placeholders: `InteractionTranscript`
     // already swaps every customer-sender message's name/initials for this
@@ -3071,6 +3215,9 @@ export function AgentWorkspace2WithDeskPage({
     // so this reads correctly without needing the real name threaded
     // through here too.
     window.setTimeout(() => {
+      if (isTextChannelAtSend) {
+        setCustomerTyping((prev) => ({ ...prev, [typingKey]: false }));
+      }
       const customerMessage: TranscriptMessage = {
         id: `live-${Date.now()}-customer`,
         sender: "customer",
@@ -3114,11 +3261,19 @@ export function AgentWorkspace2WithDeskPage({
   // every status click read as excessive rather than helpful.
   const handleInteractionStatusChange = (interactionId: string, channelId: string, status: string) => {
     setInteractions((prev) =>
-      prev.map((interaction) =>
-        interaction.id === interactionId
-          ? { ...interaction, threadStatuses: { ...interaction.threadStatuses, [channelId]: status } }
-          : interaction
-      )
+      prev.map((interaction) => {
+        if (interaction.id !== interactionId) return interaction;
+        // Live "Assignments resolved today" count (see `resolvedTodayCount`'s
+        // own doc comment above) — increments only on the actual Open/
+        // whatever→Resolved TRANSITION, not on every write to an
+        // already-Resolved channel (re-selecting the same status from the
+        // dropdown, or a second status change on a channel that's already
+        // Resolved, shouldn't inflate the count).
+        if (status === "Resolved" && interaction.threadStatuses?.[channelId] !== "Resolved") {
+          setResolvedTodayCount((n) => n + 1);
+        }
+        return { ...interaction, threadStatuses: { ...interaction.threadStatuses, [channelId]: status } };
+      })
     );
   };
 
@@ -5178,6 +5333,59 @@ export function AgentWorkspace2WithDeskPage({
                       // props' own doc comments, page-header.tsx).
                       bordered={false}
                       compact
+                      // Per explicit request ("add an icon indicating
+                      // whether the interaction is an agent or a customer
+                      // to the left of the name"): `Headphones` for
+                      // `activeInteractionIsAgentCall` (defined above —
+                      // the same "is this interaction's own `id` one of
+                      // `OUTBOUND_AGENTS`'s ids" check that already gates
+                      // Customer Information/the status chip for agent-
+                      // to-agent calls), `User` otherwise. Matches the
+                      // exact glyphs the New Outbound "Choose group"
+                      // Select already shows for these two categories
+                      // (`agentCategoryIcon`/`customerCategoryIcon`,
+                      // agent-next-gen-outbound-data.tsx) so the same icon
+                      // means the same thing in both places.
+                      //
+                      // Per explicit follow-up request ("use the avatar
+                      // variant in a circle and remove the divider"):
+                      // wrapped in `Icon` (icon.tsx) with `shape="circle"`
+                      // — a colored circle avatar shell rather than a bare
+                      // glyph, matching lyra-ui's own `PageHeader` "Record
+                      // Header (Circle Avatar, No Divider)" story
+                      // (PageHeader.stories.tsx). Once the icon is a
+                      // self-contained circle like this, the divider
+                      // `icon` renders by default between itself and the
+                      // title just doubles up on separation the circle's
+                      // own background already provides — dropped via
+                      // `iconDivider={false}` (see that prop's own doc
+                      // comment, page-header.tsx).
+                      //
+                      // `background` is driven by `activeInteractionIsAgentCall`
+                      // per a further explicit follow-up ("use a different
+                      // accent color for customer vs. agent avatar") —
+                      // "active" (blue) for an agent call, "shell" (neutral
+                      // gray) for a real customer. Not new colors: these are
+                      // the EXACT SAME `Icon` `background` values —
+                      // `agentCategoryLeadingIcon`/`customerCategoryLeadingIcon`
+                      // (agent-next-gen-outbound-data.tsx) already build by
+                      // hand for the New Outbound picker's own "Agents"/
+                      // "Customers" category rows (`bg-lyra-bg-active-subtle`/
+                      // `text-lyra-fg-active-strong` and `bg-lyra-bg-surface-
+                      // shell`/`text-lyra-fg-secondary` respectively — see
+                      // that file's own doc comment on the category color
+                      // pairing) — so the record header now reads as the
+                      // same category-to-color mapping the picker already
+                      // established, not a one-off purple used for both.
+                      icon={
+                        <Icon
+                          icon={activeInteractionIsAgentCall ? Headphones : User}
+                          background={activeInteractionIsAgentCall ? "active" : "shell"}
+                          shape="circle"
+                          size="md"
+                        />
+                      }
+                      iconDivider={false}
                       title={activeInteraction.customerName ?? "Customer"}
                       // Per explicit follow-up request (mockup's own 4
                       // states — even State 2/4, with the full tab row
@@ -5225,6 +5433,10 @@ export function AgentWorkspace2WithDeskPage({
                       // printing a broken "Last Customer Response:" with
                       // nothing after it.
                       subtitle={
+                        // See `SHOW_RECORD_HEADER_SUBTITLE`'s own doc
+                        // comment above — hidden per explicit request, the
+                        // rest of this ternary untouched underneath.
+                        !SHOW_RECORD_HEADER_SUBTITLE ? undefined :
                         showChannelTabRow && activeInteraction.threads.length >= 2 ? (
                           <span className="truncate">
                             {activeInteraction.threads.length} channels open
@@ -5542,7 +5754,7 @@ export function AgentWorkspace2WithDeskPage({
                         a real customer record keeps this row exactly as
                         before. */}
                     {showChannelTabRow && (
-                    <div className="flex min-w-0 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6">
+                    <div className="flex min-w-0 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-3">
                       {/* Now just the channel `TabList` on its own — the
                           Customer Information toggle icon/divider that used
                           to sit before it (and the "+" Add Channel button
@@ -5982,6 +6194,11 @@ export function AgentWorkspace2WithDeskPage({
                           showSessionActionCluster
                           reopenedContacts={activeChannel?.reopenedContacts}
                           liveMessages={activeInteraction.liveMessages?.[activeChannelKey] ?? []}
+                          // See `customerTyping`'s own doc comment above —
+                          // scoped to whichever channel is ACTIVE right now,
+                          // same reasoning `applyToChannel` itself already
+                          // uses for `channelKeyAtSend`.
+                          isCustomerTyping={!!customerTyping[`${activeInteraction.id}:${activeChannelKey}`]}
                           // Same union of conditions the "closed
                           // interaction"/"channel closed" banners just above
                           // this transcript already gate on — see `dimmed`'s
@@ -6047,40 +6264,38 @@ export function AgentWorkspace2WithDeskPage({
                 </div>
               ) : (
                 <div key="dashboard" className="flex flex-1 flex-col min-w-0 overflow-hidden animate-in fade-in-0 duration-200">
+                  {/* Per explicit follow-up request, the greeting
+                      `PageHeader` that used to sit here (above the tab
+                      row) no longer does — it moved DOWN into the
+                      dashboard body itself, below the tabs
+                      (`activeDeskTab === "home"` branch, above
+                      `DashboardQueue`; see its own doc comment there),
+                      so it scrolls with the rest of the dashboard's
+                      content instead of pinning above the tab row. Only
+                      the `TabList` (desk tabs + any open customer
+                      full-screen tabs) still renders in this header slot
+                      — no longer wrapped in a `<>...</>` fragment with
+                      `PageHeader` now that it's the sole child here. */}
                   {showPageHeader && (
-                    <>
-                      {/* Page header — main title is the same time-of-day
-                          greeting the dashboard body used to render by hand
-                          (`lyra-heading-2xl` "Good {period}, {name}"), now a
-                          real `PageHeader` sitting above the tab row instead
-                          of below it.
-
-                          `actions` holds a `Badge` reading the "today"
-                          Assignments Resolved count straight off
-                          `PerformanceSummaryCard`'s own data source
-                          (`PERFORMANCE_DATA_BY_RANGE.today.casesResolved`)
-                          so the two numbers can't drift out of sync —
-                          hardcoded to the "today" range regardless of
-                          whatever range that card's own `DateFilterChip`
-                          currently has selected, since this badge's copy is
-                          always "resolved today", not date-filterable
-                          itself. Floats to the header's right side the same
-                          way the "New Outbound" `CreateNew` trigger it
-                          replaced did — `actions` is always the right-hand
-                          slot in `PageHeader`'s own title/actions row. */}
-                      <PageHeader
-                        title={`Good ${getGreetingPeriod()}, ${CURRENT_AGENT_FIRST_NAME}`}
-                        subtitle={formatHeaderDateTime()}
-                        actions={
-                          <Badge color="green" variant="subtle">
-                            {PERFORMANCE_DATA_BY_RANGE.today.casesResolved} Assignments resolved today
-                          </Badge>
-                        }
-                      />
                       <TabList
                         overflowMenu
                         reorderable
-                        onReorder={(order) => setDeskTabOrder(order as DeskTabKey[])}
+                        // Filtered rather than a bare cast: `reorderable`
+                        // reports back the FULL dragged order, including any
+                        // customer tabs interspersed among the fixed ones —
+                        // only the fixed `DeskTabKey` entries are real,
+                        // persistable `deskTabOrder` state (see that state's
+                        // own doc comment); a customer tab dragged elsewhere
+                        // in the row just snaps back to its fixed
+                        // far-right position on the next render regardless
+                        // (this `TabList`'s own children are always rendered
+                        // `deskTabOrder` first, `openCustomerTabs` after —
+                        // see that state's own doc comment on why it's
+                        // deliberately never reorderable itself, per the
+                        // request's own "put it to the far right" wording).
+                        onReorder={(order) =>
+                          setDeskTabOrder(order.filter((key): key is DeskTabKey => !String(key).startsWith("customer:")))
+                        }
                         className="px-6 bg-lyra-bg-surface-base shrink-0"
                       >
                         {deskTabOrder.map((key) => (
@@ -6088,8 +6303,36 @@ export function AgentWorkspace2WithDeskPage({
                             {DESK_TAB_LABELS[key]}
                           </Tab>
                         ))}
+                        {/* Customer full-screen tabs — always after every
+                            fixed `deskTabOrder` tab, per explicit request
+                            ("put it to the far right of the tabs"). Leading
+                            `User` icon (a customer, not a fixed desk
+                            section); trailing `onRemove` uses `Tab`'s own
+                            built-in close affordance.
+                            `removeIcon` — per a later explicit follow-up
+                            request ("make the trash icons 'x' for the
+                            customer info tabs so they don't look like
+                            delete"): overrides the app-wide default
+                            `Trash2` glyph (see `removeIcon`'s own doc
+                            comment, tabs.tsx) with a plain `X` for these
+                            tabs specifically — closing one of these just
+                            stops viewing the customer, it doesn't delete
+                            anything, unlike the draft-thread tabs the
+                            trash-can convention was actually built for. */}
+                        {openCustomerTabs.map((tab) => (
+                          <Tab
+                            key={tab.id}
+                            active={activeDeskTab === tab.id}
+                            onClick={() => setActiveDeskTab(tab.id)}
+                            icon={<User className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
+                            onRemove={() => handleCloseCustomerTab(tab.id)}
+                            removeIcon={<X className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
+                            removeLabel={`Close ${tab.name}`}
+                          >
+                            {tab.name}
+                          </Tab>
+                        ))}
                       </TabList>
-                    </>
                   )}
               {/* Body row: main content + interior panel */}
               <div className="relative flex flex-1 overflow-hidden">
@@ -6207,6 +6450,11 @@ export function AgentWorkspace2WithDeskPage({
                   onSort={handleCustomerSort}
                   sortedRows={customerSortedRows}
                   openRowId={selectedCustomerRow?.contactNumber ?? null}
+                  // Per explicit request (with screenshots) — leading
+                  // overlapping channel-icon stack instead of the "Channels"
+                  // column, Premium/Advanced only. See `leadingChannelStack`'s
+                  // own doc comment (agent-next-gen-customers-table.tsx).
+                  leadingChannelStack
                 />
                 <CustomerRowInfoPanel
                   row={selectedCustomerRow}
@@ -6220,9 +6468,42 @@ export function AgentWorkspace2WithDeskPage({
                   }
                   tabs={CUSTOMER_PANEL_TABS}
                   onAddToast={addToast}
+                  onOpenFullScreenTab={handleOpenCustomerFullScreenTab}
                 />
               </div>
-              {activeDeskTab !== "customers" && (activeDeskTab === "interactions" ? (
+              {/* Customer full-screen tabs (`openCustomerTabs`, see that
+                  state's own doc comment) — same always-mounted opacity-0/
+                  inert treatment as the "customers" block just above,
+                  applied per open tab rather than once: since several can
+                  be open simultaneously and each keeps its own independent
+                  `activeTab`/draft/edit state (`CustomerFullScreenTabContent`
+                  owns all of that itself, not lifted here), switching
+                  between them must not remount either one — the exact same
+                  "why not `display:none`/`visibility:hidden`" reasoning
+                  documented at length on the "customers" block above
+                  applies identically here, just multiplied across however
+                  many tabs happen to be open. */}
+              {openCustomerTabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  className={
+                    activeDeskTab === tab.id
+                      ? "relative flex flex-1 overflow-hidden animate-in fade-in-0 duration-200"
+                      : "absolute inset-0 flex overflow-hidden opacity-0"
+                  }
+                  inert={activeDeskTab !== tab.id}
+                >
+                  <CustomerFullScreenTabContent
+                    row={tab.row}
+                    tabs={CUSTOMER_PANEL_TABS}
+                    onStartInteraction={(contact, channel, phone, skillId) =>
+                      handleStartCall({ contact, channel, phone, skillId })
+                    }
+                    onAddToast={addToast}
+                  />
+                </div>
+              ))}
+              {activeDeskTab !== "customers" && !activeDeskTab.startsWith("customer:") && (activeDeskTab === "interactions" ? (
                 // Interactions — a real view (InteractionsListView, see
                 // agent-next-gen-interactions-table.tsx), not the "Coming
                 // soon" placeholder Accounts/Tickets/WEM still fall through
@@ -6257,6 +6538,55 @@ export function AgentWorkspace2WithDeskPage({
                 <>
                 <div key={activeDeskTab} className="flex flex-1 flex-col min-w-0 overflow-y-auto px-6 py-6 animate-in fade-in-0 duration-200">
                   <div className="w-full max-w-[1200px] mx-auto lyra-container-grid-wrap">
+                    {showPageHeader && (
+                      // Greeting header — per explicit follow-up request,
+                      // moved down into the dashboard body, below the tab
+                      // row (was previously a separate, non-scrolling
+                      // header slot ABOVE the tabs — see that slot's own
+                      // doc comment, above). Title is the same time-of-day
+                      // greeting the dashboard body used to render by hand
+                      // (`lyra-heading-2xl` "Good {period}, {name}").
+                      //
+                      // `actions` holds a `Badge` reading the live
+                      // `resolvedTodayCount` (see its own doc comment,
+                      // above) — starts at 0 every session and increments
+                      // live off `handleInteractionStatusChange`'s own
+                      // real Resolved-transition writes, so this badge and
+                      // `PerformanceSummaryCard`'s own "today" figure can
+                      // legitimately disagree (that card is still mock
+                      // data) — an acceptable, explicitly-requested trade,
+                      // not a bug.
+                      //
+                      // `-mx-6` cancels out `PageHeader`'s own baked-in
+                      // `px-6` (page-header.tsx) so its title text lines up
+                      // flush with the cards below (`DashboardQueue` etc.,
+                      // which have no side padding of their own and rely on
+                      // this body div's own `px-6`) instead of sitting
+                      // visibly indented past them.
+                      <div className="-mx-6 mb-6">
+                        <PageHeader
+                          title={`Good ${getGreetingPeriod()}, ${CURRENT_AGENT_FIRST_NAME}`}
+                          subtitle={formatHeaderDateTime()}
+                          // `bordered={false}` per earlier explicit
+                          // request — same opt-out lyra-ui's own "Record
+                          // Header (Compact, Borderless)" Storybook story
+                          // demonstrates, applied here to drop the
+                          // header's `border-b` (no `compact`, this header
+                          // keeps its normal padding).
+                          bordered={false}
+                          // `titleSize="2xl"` per explicit request — bumps
+                          // the title from `PageHeader`'s own default
+                          // `.lyra-heading-lg` up to `.lyra-heading-2xl`
+                          // (see that prop's own doc comment, page-header.tsx).
+                          titleSize="2xl"
+                          actions={
+                            <Badge color="green" variant="subtle">
+                              {resolvedTodayCount} Assignments resolved today
+                            </Badge>
+                          }
+                        />
+                      </div>
+                    )}
                     {/* ── Queue widgets ──
                         `DashboardQueue` ("cards" variant, its default) —
                         the numbers come straight from `latestContacts`
@@ -6910,15 +7240,14 @@ export function AgentWorkspace2WithDeskPage({
           title={`Good morning, ${CURRENT_AGENT_FIRST_NAME} ${CURRENT_AGENT_LAST_NAME}`}
           lastLogin={WELCOME_MODAL_LAST_LOGIN}
           onPrimaryClick={handleGoAvailable}
-          // "Start Offline" per explicit request — overrides AgentWelcomeMessage's
-          // own default "Start Unavailable" label just for this app, rather than
-          // changing the shared lyra-ui default (see CLAUDE.md's lyra-ui rules).
-          // Still calls handleStartUnavailable, which still sets the agent's
-          // real AgentStatus to "unavailable" — lyra-ui's AgentStatus type has
-          // no distinct "offline" value (dropped "offline" a while back, see
-          // handleStartUnavailable's own doc comment above), so this is a
-          // label-only rename, not a new status.
-          secondaryLabel="Start Offline"
+          // Uses AgentWelcomeMessage's own default "Start Unavailable" label
+          // (no secondaryLabel override — see CLAUDE.md's lyra-ui rules).
+          // Per explicit follow-up request, reverted from a prior app-only
+          // "Start Offline" override back to this default. Still calls
+          // handleStartUnavailable, which sets the agent's real AgentStatus
+          // to "unavailable" — lyra-ui's AgentStatus type has no distinct
+          // "offline" value (dropped "offline" a while back, see
+          // handleStartUnavailable's own doc comment above).
           onSecondaryClick={handleStartUnavailable}
         />
       </Modal>

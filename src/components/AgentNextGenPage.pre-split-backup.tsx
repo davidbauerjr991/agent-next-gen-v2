@@ -340,9 +340,9 @@ const OUTBOUND_CONFIG: CreateNewOutboundConfig = {
   // identically no matter which group filter is selected, so a
   // placeholder that changed per group (e.g. "Search Agents") falsely
   // implied switching the filter changed what the box searched for. See
-  // `CreateNewOutboundConfig.searchPlaceholder`'s own doc comment in
+  // `CreateNewOutboundConfig.searchLabel`'s own doc comment in
   // create-new.tsx.
-  searchPlaceholder: "Enter phone, email or search term",
+  searchLabel: "Enter phone, email or search term",
   // Per explicit request: the New Outbound picker's contact list isn't
   // ready to show yet — hide it (and its pagination footer) for every
   // group, leaving just the group dropdown ("Choose group" — Favorites/
@@ -10732,11 +10732,11 @@ export function AgentNextGenPage({
       requestAnimationFrame(() => {
         setTimeout(() => {
           const input = document.querySelector<HTMLInputElement>(
-            `input[placeholder="${OUTBOUND_CONFIG.searchPlaceholder}"]`
+            `input[placeholder="${OUTBOUND_CONFIG.searchLabel}"]`
           );
           if (!input) return;
           // The placeholder text itself contains "email" (part of
-          // OUTBOUND_CONFIG.searchPlaceholder's own copy, "Enter phone,
+          // OUTBOUND_CONFIG.searchLabel's own copy, "Enter phone,
           // email or search term"), which is enough for some browsers'
           // autofill heuristics to treat this as a saved-address field and
           // show a suggestions dropdown the moment it's focused. Chrome

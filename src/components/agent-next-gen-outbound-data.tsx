@@ -8,7 +8,7 @@ import { type AppMenuGroup, type CreateNewOutboundConfig, type CreateNewOutbound
 import { CREATE_NEW_AGENTS } from "@nicecxone/lyra-ui/agents-data";
 import { CREATE_NEW_CUSTOMERS } from "@nicecxone/lyra-ui/customers-data";
 import type { ReactNode } from "react";
-import { Phone, Mail, MessageSquare, MessageCircle, User, Headphones, Share2, Users } from "lucide-react";
+import { Phone, Mail, MessageSquare, MessageCircle, User, Headphones, Share2, Users, LayoutGrid } from "lucide-react";
 
 /* ── Category icons ──
    Shared between the "New Outbound" picker's "Choose group" dropdown
@@ -24,6 +24,20 @@ const agentCategoryIcon = () => <Headphones className="h-4 w-4" strokeWidth={1.5
 const teamCategoryIcon = () => <Users className="h-4 w-4" strokeWidth={1.5} />;
 const skillCategoryIcon = () => <Share2 className="h-4 w-4" strokeWidth={1.5} />;
 const customerCategoryIcon = () => <User className="h-4 w-4" strokeWidth={1.5} />;
+// Dial Pad's own icon — a grid glyph, matching the small ghost button's
+// reference mockup and the same `LayoutGrid` glyph already used
+// app-wide for grid/dashboard-style nav items (AgentNextGenPage.tsx,
+// AgentWorkspace2WithDeskPage.tsx, AgentWorkspaceAdvancedPage.tsx,
+// Sidebar.tsx). Unlike the four categories above, this one is never
+// consumed by the "Choose group" dropdown's own icon slot (see
+// `OUTBOUND_GROUPS`'s `dialpad` entry below — that group is filtered
+// out of the Select entirely, create-new.tsx) — it's read by the Dial
+// Pad ghost button instead (`dialpadGroup.icon`, same file), which
+// falls back to a hardcoded `LayoutGrid` of its own if a consumer's
+// dialpad-kind group has no icon set. Kept as its own function (not a
+// shared JSX constant) for the same one-element-per-render-site reason
+// as the four category icons above.
+const dialpadCategoryIcon = () => <LayoutGrid className="h-4 w-4" strokeWidth={1.5} />;
 
 /** Wraps a bare category icon in the same colored circle shell lyra-ui's
  *  own `ListItem` "With leading icon" story hand-builds for each of its
@@ -297,13 +311,17 @@ export const OUTBOUND_SKILLS: NonNullable<CreateNewOutboundConfig["groups"][numb
   { id: "s2", name: "Technical Support", initials: "TS", subtitle: "SKL-03", avatarClassName: "bg-lyra-accent-blue-soft text-lyra-accent-blue-strong",   channels: ["voice", "email"], status: "busy",      queueCount: 7, waitTimeSeconds: 95, categoryIcon: skillCategoryLeadingIcon(), quickLaunch: true },
 ];
 
-// Every group the "New Outbound" filter dropdown COULD show — kept as its
-// own named constant, separate from `OUTBOUND_CONFIG.groups` below, so
-// "Dial Pad" can be hidden from the dropdown without deleting it: per
-// explicit request ("hide it don't destroy it"), the group definition
-// itself stays fully intact here, just filtered out before being handed
-// to `CreateNew`. Restoring it later is a one-line revert (drop the
-// `.filter(...)` below), not re-authoring the group from scratch.
+// Every group the "New Outbound" flow could show — kept as its own named
+// constant, separate from `OUTBOUND_CONFIG.groups` below, so any group can
+// be hidden from the "Choose group" dropdown without deleting it: per
+// explicit request ("hide it don't destroy it"), a hidden group's
+// definition stays fully intact here, just filtered out (by id, via
+// `HIDDEN_OUTBOUND_GROUP_IDS` below) before being handed to `CreateNew`.
+// Restoring one later is a one-line revert (add/remove its id in that
+// array), not re-authoring the group from scratch. "Dial Pad" (below) used
+// to be this mechanism's only example — it's no longer hidden this way
+// (see its own doc comment), but the mechanism itself stays in place for
+// any future group that needs it.
 export const OUTBOUND_GROUPS: CreateNewOutboundConfig["groups"] = [
   // No dedicated "Favorites" entry in the group dropdown, per explicit
   // request — this "all" entry replaces it as the DEFAULT/starting
@@ -327,28 +345,42 @@ export const OUTBOUND_GROUPS: CreateNewOutboundConfig["groups"] = [
   // Skills, and a single person for Customers. `h-4 w-4` here is purely
   // defensive/self-documenting — `Select`'s own icon slot already forces
   // every option icon to that size (select.tsx) regardless of what's
-  // authored on the element itself. "All" (above) and "Dial Pad" (below,
-  // hidden from the dropdown anyway) intentionally have no icon — neither
-  // was part of the requested set, and the plain "All" row reads fine
-  // unadorned as the default/catch-all option.
+  // authored on the element itself. "All" (above) intentionally has no
+  // icon — it wasn't part of the requested set, and the plain "All" row
+  // reads fine unadorned as the default/catch-all option. "Dial Pad"
+  // (below) DOES have its own icon (`dialpadCategoryIcon`) despite never
+  // reaching this same dropdown — see that group's own doc comment.
   { id: "agents", label: "Agents", contacts: OUTBOUND_AGENTS, icon: agentCategoryIcon() },
   { id: "teams", label: "Teams", contacts: OUTBOUND_TEAMS, icon: teamCategoryIcon() },
   { id: "skills", label: "Skills", contacts: OUTBOUND_SKILLS, icon: skillCategoryIcon() },
   { id: "customers", label: "Customers", contacts: OUTBOUND_CUSTOMERS, icon: customerCategoryIcon() },
-  // Hidden from the dropdown below (`HIDDEN_OUTBOUND_GROUP_IDS`), per
-  // explicit request — NOT deleted. Still a complete, valid group
-  // definition; `onQuickDial`/`handleQuickDial` (this config's own
-  // handler, further down) are untouched and still wired up, they just
-  // have no dropdown entry to reach this group's own dialpad UI through
-  // right now.
-  { id: "dialpad", label: "Dial Pad", kind: "dialpad" },
+  // No longer hidden via `HIDDEN_OUTBOUND_GROUP_IDS` (see that constant's
+  // updated doc comment below) — per explicit follow-up request, this
+  // group is reachable again, just via a small ghost button below the
+  // "Choose group" Select instead of a dropdown entry. lyra-ui's own
+  // create-new.tsx filters `kind === "dialpad"` out of the Select's
+  // `options` specifically (not this array), so this group still flows
+  // through to `outbound.groups` for that ghost button (and
+  // `activeGroup`/`onQuickDial`/`handleQuickDial` below) to find, it just
+  // never appears as a Select option. `icon` now set (`dialpadCategoryIcon`)
+  // so the ghost button renders the same grid glyph the reference mockup
+  // showed, reusing the group's own icon like every other group already
+  // does rather than hardcoding one in create-new.tsx.
+  { id: "dialpad", label: "Dial Pad", kind: "dialpad", icon: dialpadCategoryIcon() },
 ];
 
 // Group ids hidden from the "New Outbound" filter dropdown without being
 // removed from `OUTBOUND_GROUPS` above — see that constant's own doc
 // comment for why. Add/remove ids here to hide/restore a group; the
-// group's own definition never needs to change.
-export const HIDDEN_OUTBOUND_GROUP_IDS: string[] = ["dialpad"];
+// group's own definition never needs to change. Empty for now — "dialpad"
+// was the only entry here, and per the most recent explicit request it's
+// no longer hidden from `OUTBOUND_CONFIG.groups` (see that group's own
+// updated doc comment above); it's excluded from the Select's own
+// dropdown options a different way now (lyra-ui's create-new.tsx, keyed
+// off `kind` rather than this array). Kept in place, not deleted, as the
+// general-purpose "hide a group from the dropdown without deleting it"
+// mechanism for any future group that needs it.
+export const HIDDEN_OUTBOUND_GROUP_IDS: string[] = [];
 
 export const OUTBOUND_CONFIG: CreateNewOutboundConfig = {
   outboundTitle: "New Outbound",
@@ -357,14 +389,15 @@ export const OUTBOUND_CONFIG: CreateNewOutboundConfig = {
   // now opens on the "All" filter (favorited contacts idle, full-database
   // search once typed) by default instead of Agents.
   defaultGroupId: "all",
-  // One placeholder for the whole flow, not per-group — per explicit
+  // One label for the whole flow, not per-group — per explicit
   // request/confirmed UX bug: search matches name/subtitle/phone/email
-  // identically no matter which group filter is selected, so a
-  // placeholder that changed per group (e.g. "Search Agents") falsely
-  // implied switching the filter changed what the box searched for. See
-  // `CreateNewOutboundConfig.searchPlaceholder`'s own doc comment in
-  // create-new.tsx.
-  searchPlaceholder: "Enter phone, email or search term",
+  // identically no matter which group filter is selected, so text that
+  // changed per group (e.g. "Search Agents") falsely implied switching
+  // the filter changed what the box searched for. Rendered as a real
+  // `<label>` above the field, not placeholder text, per a further
+  // explicit follow-up. See `CreateNewOutboundConfig.searchLabel`'s own
+  // doc comment in create-new.tsx.
+  searchLabel: "Enter phone, email or search term",
   // Per explicit request: the New Outbound picker's contact list isn't
   // ready to show yet — hide it (and its pagination footer) for every
   // group, leaving just the group dropdown ("Choose group" — Favorites/

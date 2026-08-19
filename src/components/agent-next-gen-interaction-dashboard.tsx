@@ -1275,12 +1275,20 @@ export function PerformanceBreakdownCard() {
                     </Tooltip>
                   )}
                 </span>
-                <span className="lyra-body-md-emphasis tabular-nums text-lyra-fg-default">{row.time}</span>
+                {/* No `tabular-nums` here — see this row's doc comment in
+                    BEHAVIOR.md §54: Inter's TABULAR digit glyphs (used by
+                    `tabular-nums`) are drawn differently from its
+                    PROPORTIONAL ones (used everywhere else, e.g. the
+                    neighboring "Assignments Resolved" count) — same
+                    typeface, visibly different numeral shapes, which reads
+                    as "a different font" at a glance. Dropped in favor of
+                    matching the rest of the UI, per explicit request. */}
+                <span className="lyra-body-md-emphasis text-lyra-fg-default">{row.time}</span>
               </div>
               {/* Team comparison row */}
               <div className="flex items-center justify-between gap-3 pl-6">
                 <span className="lyra-body-sm text-lyra-fg-secondary">Team ({row.teamPercent}%)</span>
-                <span className="lyra-body-sm tabular-nums text-lyra-fg-secondary">{row.teamTime}</span>
+                <span className="lyra-body-sm text-lyra-fg-secondary">{row.teamTime}</span>
               </div>
             </div>
           );

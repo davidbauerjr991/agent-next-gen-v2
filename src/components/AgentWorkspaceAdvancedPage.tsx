@@ -127,7 +127,6 @@ import {
   AGENTS_COUNT_BY_QUEUE,
   QUEUE_WAIT_BASE_SECONDS,
   LATEST_CONTACTS_STATIC,
-  PERFORMANCE_DATA_BY_RANGE,
   PerformanceBreakdownCard,
   PerformanceSummaryCard,
 } from "@/components/agent-next-gen-interaction-dashboard";
@@ -192,6 +191,8 @@ import {
   IdCard,
   PhoneOutgoing,
   RotateCcw,
+  User,
+  Headphones,
   type LucideIcon,
 } from "lucide-react";
 
@@ -641,6 +642,14 @@ export function AgentWorkspaceAdvancedPage({
   const [interactions, setInteractions] = useState<Interaction[]>(
     () => (initialInteraction ? [initialInteraction] : [])
   );
+  // Real "Assignments resolved today" count for the dashboard header badge
+  // (see that `PageHeader`'s own `actions` doc comment) — per explicit
+  // request, starts at 0 every session (a freshly-logged-in agent hasn't
+  // resolved anything yet) rather than reading a static mock figure off
+  // `PERFORMANCE_DATA_BY_RANGE`, and increments live as `handleInteraction-
+  // StatusChange` below actually marks a channel "Resolved", instead of
+  // staying frozen until the next full page reload.
+  const [resolvedTodayCount, setResolvedTodayCount] = useState(0);
   // Keeps `agent-next-gen-case-database.ts`'s own local "database" in sync
   // with every live interaction's TRUE current state — see this same
   // effect's own doc comment in AgentNextGenPage.tsx for the full
@@ -813,6 +822,12 @@ export function AgentWorkspaceAdvancedPage({
   // string "Draft" until that first message is sent, then freezes on the
   // real send time instead of ticking with `new Date()` forever.
   const [threadLaunchTimestamps, setThreadLaunchTimestamps] = useState<Record<string, string>>({});
+  /** Per explicit request ("add a customer typing animation when a customer
+   *  is responding to a sms/chat/whatsapp") — duplicated verbatim from
+   *  AgentNextGenPage.tsx per this codebase's "no shared sync" convention:
+   *  `true` while a simulated customer reply is in flight on a given
+   *  channel, keyed `${interactionId}:${channelKey}`. */
+  const [customerTyping, setCustomerTyping] = useState<Record<string, boolean>>({});
   /* ── Unknown-contact customer matching (per explicit request) ──
      When the docked Customer Information panel is showing an unknown-
      contact interaction (`!activeInteractionIsRealCustomer`, below), it now
@@ -1189,7 +1204,25 @@ export function AgentWorkspaceAdvancedPage({
   // signal — it no longer feeds this at all, and continues to gate ONLY
   // Customer Information's own tab set / customer-matching UI, per
   // explicit request.
-  const showChannelTabRow = !activeInteraction || activeInteraction.threads.length >= 2;
+  // Was `!activeInteraction || activeInteraction.threads.length >= 2` —
+  // hid this row outright for a single-channel interaction. Per explicit
+  // follow-up request ("if only one interaction tab is open, display the
+  // tab instead of removing it"), now always shows whenever there's a real
+  // active interaction — a single open channel renders as its own one-tab
+  // row instead of disappearing. Safe to widen this far: the ONLY other
+  // consumer this constant used to also gate, `showSessionActionCluster`
+  // at the `<InteractionTranscript>` call site below, is already
+  // unconditional regardless of channel count (see the comment right
+  // above this one) — it no longer reads this constant at all.
+  const showChannelTabRow = !!activeInteraction;
+  // Per explicit request ("hide the subhead from the interaction header
+  // under the user's name for now - I may bring it back") — mirrors Agent
+  // Workspace 2.0's identical flag (AgentNextGenPage.tsx, see that file's
+  // own doc comment for the full reasoning): gates the record-header
+  // `PageHeader`'s own `subtitle` prop, below. The underlying derivation is
+  // left completely untouched — flipping this back to `true` restores the
+  // exact same subtitle with no other changes needed.
+  const SHOW_RECORD_HEADER_SUBTITLE = false;
   // Captured once, this component's real mount instant — lets
   // `resolveInteractionLastCustomerResponseLabel` (below) convert a
   // `lastCustomerMessageTick` value (real elapsed seconds since mount,
@@ -1379,7 +1412,7 @@ export function AgentWorkspaceAdvancedPage({
   const [clockTick, setClockTick] = useState(0);
   // Mirrors `clockTick` for code that needs the CURRENT tick inside a
   // callback that itself fires later (`handleSendMessage`'s simulated
-  // customer-reply `setTimeout`, 2.5s after the call that scheduled it) —
+  // customer-reply `setTimeout`, 2s after the call that scheduled it) —
   // reading the `clockTick` state variable there would close over its
   // stale value from scheduling time, not whatever it's actually
   // incremented to by the time that timeout fires. Updated in the same
@@ -2520,10 +2553,12 @@ export function AgentWorkspaceAdvancedPage({
   // its stable `aria-label` (`title`, i.e. "New Outbound") — no JSX
   // wrapper, `CreateNew` stays `pinnedHeader`'s sole direct child. Once the
   // popover's open transition has settled, it finds the outbound search
-  // field by its placeholder (`OUTBOUND_CONFIG.searchPlaceholder`, defined
-  // below), suppresses the browser's own autofill suggestions on it (see
-  // inline comment), and focuses it directly. A closing click just fails
-  // the query harmlessly (nothing to focus once the content's unmounted).
+  // field by its stable `id` (`#new-outbound-search`, set on lyra-ui's own
+  // `CreateNew` — see that component's own doc comment on why it's a fixed
+  // id rather than the field's default auto-generated one), suppresses the
+  // browser's own autofill suggestions on it (see inline comment), and
+  // focuses it directly. A closing click just fails the query harmlessly
+  // (nothing to focus once the content's unmounted).
   useEffect(() => {
     const CREATE_NEW_TRIGGER_LABEL = "New Outbound";
     const onDocumentClick = (e: MouseEvent) => {
@@ -2533,15 +2568,15 @@ export function AgentWorkspaceAdvancedPage({
       if (!trigger) return;
       requestAnimationFrame(() => {
         setTimeout(() => {
-          const input = document.querySelector<HTMLInputElement>(
-            `input[placeholder="${OUTBOUND_CONFIG.searchPlaceholder}"]`
-          );
+          const input = document.querySelector<HTMLInputElement>("#new-outbound-search");
           if (!input) return;
-          // The placeholder text itself contains "email" (part of
-          // OUTBOUND_CONFIG.searchPlaceholder's own copy, "Enter phone,
-          // email or search term"), which is enough for some browsers'
-          // autofill heuristics to treat this as a saved-address field and
-          // show a suggestions dropdown the moment it's focused. Chrome
+          // The field's own label text contains "email" (part of
+          // OUTBOUND_CONFIG.searchLabel's own copy, "Enter phone, email or
+          // search term" — rendered as a real `<label>`, not placeholder
+          // text, but still read by the same autofill heuristics), which
+          // is enough for some browsers' autofill heuristics to treat this
+          // as a saved-address field and show a suggestions dropdown the
+          // moment it's focused. Chrome
           // ignores this plain autocomplete="off" for that category (a
           // stronger readonly-at-focus workaround was tried and reverted —
           // not worth the added complexity), but it's kept because Safari
@@ -3127,6 +3162,16 @@ export function AgentWorkspaceAdvancedPage({
           interactionAtSend.threads[interactionAtSend.threads.length - 1].type
         : undefined) ??
       "channel";
+    // Same key `applyToChannel`/`customerTyping` below share — see
+    // `customerTyping`'s own doc comment. Only chat/SMS/WhatsApp ever gets a
+    // "customer is typing" bubble (`InteractionTranscript`'s own
+    // `isTextChannel` render gate covers this too, but resolving the type
+    // here as well avoids ever setting the flag for voice/email in the
+    // first place).
+    const channelTypeAtSend = interactionAtSend?.threads.find((c) => (c.id ?? c.type) === channelKeyAtSend)?.type;
+    const isTextChannelAtSend =
+      channelTypeAtSend === "chat" || channelTypeAtSend === "sms" || channelTypeAtSend === "whatsapp";
+    const typingKey = `${interactionId}:${channelKeyAtSend}`;
 
     // Duplicated verbatim from AgentNextGenPage.tsx (Agent Workspace 2.0)
     // per this codebase's "no shared sync" convention — captures the real
@@ -3170,6 +3215,23 @@ export function AgentWorkspaceAdvancedPage({
       )
     );
 
+    // "Customer is typing" — see `customerTyping`'s own doc comment. Per
+    // explicit follow-up request ("do not display the typing indicator
+    // until 2s after the agent message is sent"), no longer set the
+    // instant the agent's own message goes out — behind its own 2000ms
+    // `window.setTimeout` instead, so the bubble only appears starting 2s
+    // after the agent sends a message, not immediately. Still cleared (and
+    // the actual reply lands) at the original 2500ms mark below — this
+    // narrows the indicator's own visible window to the LAST 500ms before
+    // the reply lands, rather than changing the total reply delay itself
+    // (a separate, unrelated earlier misreading of this same request —
+    // reverted).
+    if (isTextChannelAtSend) {
+      window.setTimeout(() => {
+        setCustomerTyping((prev) => ({ ...prev, [typingKey]: true }));
+      }, 2000);
+    }
+
     // Simulated customer reply — canned text, not a real conversation
     // engine. "Customer"/"C" here are placeholders: `InteractionTranscript`
     // already swaps every customer-sender message's name/initials for this
@@ -3177,6 +3239,9 @@ export function AgentWorkspaceAdvancedPage({
     // so this reads correctly without needing the real name threaded
     // through here too.
     window.setTimeout(() => {
+      if (isTextChannelAtSend) {
+        setCustomerTyping((prev) => ({ ...prev, [typingKey]: false }));
+      }
       const customerMessage: TranscriptMessage = {
         id: `live-${Date.now()}-customer`,
         sender: "customer",
@@ -3220,11 +3285,19 @@ export function AgentWorkspaceAdvancedPage({
   // every status click read as excessive rather than helpful.
   const handleInteractionStatusChange = (interactionId: string, channelId: string, status: string) => {
     setInteractions((prev) =>
-      prev.map((interaction) =>
-        interaction.id === interactionId
-          ? { ...interaction, threadStatuses: { ...interaction.threadStatuses, [channelId]: status } }
-          : interaction
-      )
+      prev.map((interaction) => {
+        if (interaction.id !== interactionId) return interaction;
+        // Live "Assignments resolved today" count (see `resolvedTodayCount`'s
+        // own doc comment above) — increments only on the actual Open/
+        // whatever→Resolved TRANSITION, not on every write to an
+        // already-Resolved channel (re-selecting the same status from the
+        // dropdown, or a second status change on a channel that's already
+        // Resolved, shouldn't inflate the count).
+        if (status === "Resolved" && interaction.threadStatuses?.[channelId] !== "Resolved") {
+          setResolvedTodayCount((n) => n + 1);
+        }
+        return { ...interaction, threadStatuses: { ...interaction.threadStatuses, [channelId]: status } };
+      })
     );
   };
 
@@ -5326,6 +5399,59 @@ export function AgentWorkspaceAdvancedPage({
                       // props' own doc comments, page-header.tsx).
                       bordered={false}
                       compact
+                      // Per explicit request ("add an icon indicating
+                      // whether the interaction is an agent or a customer
+                      // to the left of the name"): `Headphones` for
+                      // `activeInteractionIsAgentCall` (defined above —
+                      // the same "is this interaction's own `id` one of
+                      // `OUTBOUND_AGENTS`'s ids" check that already gates
+                      // Customer Information/the status chip for agent-
+                      // to-agent calls), `User` otherwise. Matches the
+                      // exact glyphs the New Outbound "Choose group"
+                      // Select already shows for these two categories
+                      // (`agentCategoryIcon`/`customerCategoryIcon`,
+                      // agent-next-gen-outbound-data.tsx) so the same icon
+                      // means the same thing in both places.
+                      //
+                      // Per explicit follow-up request ("use the avatar
+                      // variant in a circle and remove the divider"):
+                      // wrapped in `Icon` (icon.tsx) with `shape="circle"`
+                      // — a colored circle avatar shell rather than a bare
+                      // glyph, matching lyra-ui's own `PageHeader` "Record
+                      // Header (Circle Avatar, No Divider)" story
+                      // (PageHeader.stories.tsx). Once the icon is a
+                      // self-contained circle like this, the divider
+                      // `icon` renders by default between itself and the
+                      // title just doubles up on separation the circle's
+                      // own background already provides — dropped via
+                      // `iconDivider={false}` (see that prop's own doc
+                      // comment, page-header.tsx).
+                      //
+                      // `background` is driven by `activeInteractionIsAgentCall`
+                      // per a further explicit follow-up ("use a different
+                      // accent color for customer vs. agent avatar") —
+                      // "active" (blue) for an agent call, "shell" (neutral
+                      // gray) for a real customer. Not new colors: these are
+                      // the EXACT SAME `Icon` `background` values —
+                      // `agentCategoryLeadingIcon`/`customerCategoryLeadingIcon`
+                      // (agent-next-gen-outbound-data.tsx) already build by
+                      // hand for the New Outbound picker's own "Agents"/
+                      // "Customers" category rows (`bg-lyra-bg-active-subtle`/
+                      // `text-lyra-fg-active-strong` and `bg-lyra-bg-surface-
+                      // shell`/`text-lyra-fg-secondary` respectively — see
+                      // that file's own doc comment on the category color
+                      // pairing) — so the record header now reads as the
+                      // same category-to-color mapping the picker already
+                      // established, not a one-off purple used for both.
+                      icon={
+                        <Icon
+                          icon={activeInteractionIsAgentCall ? Headphones : User}
+                          background={activeInteractionIsAgentCall ? "active" : "shell"}
+                          shape="circle"
+                          size="md"
+                        />
+                      }
+                      iconDivider={false}
                       title={activeInteraction.customerName ?? "Customer"}
                       // Per explicit follow-up request (mockup's own 4
                       // states — even State 2/4, with the full tab row
@@ -5373,6 +5499,10 @@ export function AgentWorkspaceAdvancedPage({
                       // printing a broken "Last Customer Response:" with
                       // nothing after it.
                       subtitle={
+                        // See `SHOW_RECORD_HEADER_SUBTITLE`'s own doc
+                        // comment above — hidden per explicit request, the
+                        // rest of this ternary untouched underneath.
+                        !SHOW_RECORD_HEADER_SUBTITLE ? undefined :
                         showChannelTabRow && activeInteraction.threads.length >= 2 ? (
                           <span className="truncate">
                             {activeInteraction.threads.length} channels open
@@ -5682,7 +5812,7 @@ export function AgentWorkspaceAdvancedPage({
                         2.0 always makes. An interaction WITH a real customer
                         record keeps this row exactly as before. */}
                     {showChannelTabRow && (
-                    <div className="flex min-w-0 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-6">
+                    <div className="flex min-w-0 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-3">
                       {/* Now just the channel `TabList` on its own — the
                           Customer Information toggle icon/divider that used
                           to sit before it (and the "+" Add Channel button
@@ -6122,6 +6252,11 @@ export function AgentWorkspaceAdvancedPage({
                           showSessionActionCluster
                           reopenedContacts={activeChannel?.reopenedContacts}
                           liveMessages={activeInteraction.liveMessages?.[activeChannelKey] ?? []}
+                          // See `customerTyping`'s own doc comment above —
+                          // scoped to whichever channel is ACTIVE right now,
+                          // same reasoning `applyToChannel` itself already
+                          // uses for `channelKeyAtSend`.
+                          isCustomerTyping={!!customerTyping[`${activeInteraction.id}:${activeChannelKey}`]}
                           // Same union of conditions the "closed
                           // interaction"/"channel closed" banners just above
                           // this transcript already gate on — see `dimmed`'s
@@ -6187,39 +6322,16 @@ export function AgentWorkspaceAdvancedPage({
                 </div>
               ) : (
                 <div key="dashboard" className="flex flex-1 flex-col min-w-0 overflow-hidden animate-in fade-in-0 duration-200">
-                  {showPageHeader && (
-                    // Page header — main title is the same time-of-day
-                    // greeting the dashboard body used to render by hand
-                    // (`lyra-heading-2xl` "Good {period}, {name}").
-                    //
-                    // `actions` holds a `Badge` reading the "today"
-                    // Assignments Resolved count straight off
-                    // `PerformanceSummaryCard`'s own data source
-                    // (`PERFORMANCE_DATA_BY_RANGE.today.casesResolved`) so
-                    // the two numbers can't drift out of sync — hardcoded
-                    // to the "today" range regardless of whatever range
-                    // that card's own `DateFilterChip` currently has
-                    // selected, since this badge's copy is always
-                    // "resolved today", not date-filterable itself. Floats
-                    // to the header's right side the same way the "New
-                    // Outbound" `CreateNew` trigger it replaced did —
-                    // `actions` is always the right-hand slot in
-                    // `PageHeader`'s own title/actions row.
-                    //
-                    // The Home/Customers/Accounts/Tickets/WEM `TabList` row
-                    // that used to sit directly below this (and the `<>...
-                    // </>` fragment wrapping the two together) is gone —
-                    // see `activeDeskTab`'s own doc comment, above, for why.
-                    <PageHeader
-                      title={`Good ${getGreetingPeriod()}, ${CURRENT_AGENT_FIRST_NAME}`}
-                      subtitle={formatHeaderDateTime()}
-                      actions={
-                        <Badge color="green" variant="subtle">
-                          {PERFORMANCE_DATA_BY_RANGE.today.casesResolved} Assignments resolved today
-                        </Badge>
-                      }
-                    />
-                  )}
+                  {/* Per explicit follow-up request, the greeting
+                      `PageHeader` (title/subtitle/resolved-today `Badge`,
+                      see its own doc comment below) no longer renders in
+                      this top header slot — it moved into the dashboard
+                      body itself (`activeDeskTab === "home"` branch,
+                      above `DashboardQueue`), so it scrolls with the rest
+                      of the dashboard's content instead of pinning above
+                      it. This slot has no `TabList` either (see
+                      `activeDeskTab`'s own doc comment) — nothing renders
+                      here at all now for this tier. */}
               {/* Body row: main content + interior panel */}
               <div className="relative flex flex-1 overflow-hidden">
               {/* Customers list view + row-info panel stay mounted across
@@ -6338,6 +6450,11 @@ export function AgentWorkspaceAdvancedPage({
                   onSort={handleCustomerSort}
                   sortedRows={customerSortedRows}
                   openRowId={selectedCustomerRow?.contactNumber ?? null}
+                  // Per explicit request (with screenshots) — leading
+                  // overlapping channel-icon stack instead of the "Channels"
+                  // column, Premium/Advanced only. See `leadingChannelStack`'s
+                  // own doc comment (agent-next-gen-customers-table.tsx).
+                  leadingChannelStack
                 />
                 <CustomerRowInfoPanel
                   row={selectedCustomerRow}
@@ -6375,6 +6492,55 @@ export function AgentWorkspaceAdvancedPage({
                 <>
                 <div key={activeDeskTab} className="flex flex-1 flex-col min-w-0 overflow-y-auto px-6 py-6 animate-in fade-in-0 duration-200">
                   <div className="w-full max-w-[1200px] mx-auto lyra-container-grid-wrap">
+                    {showPageHeader && (
+                      // Greeting header — per explicit follow-up request,
+                      // moved down into the dashboard body (was previously
+                      // a separate, non-scrolling header slot above the
+                      // "Body row" — see that slot's own doc comment,
+                      // above). Title is the same time-of-day greeting the
+                      // dashboard body used to render by hand
+                      // (`lyra-heading-2xl` "Good {period}, {name}").
+                      //
+                      // `actions` holds a `Badge` reading the live
+                      // `resolvedTodayCount` (see its own doc comment,
+                      // above) — starts at 0 every session and increments
+                      // live off `handleInteractionStatusChange`'s own
+                      // real Resolved-transition writes, so this badge and
+                      // `PerformanceSummaryCard`'s own "today" figure can
+                      // legitimately disagree (that card is still mock
+                      // data) — an acceptable, explicitly-requested trade,
+                      // not a bug.
+                      //
+                      // `-mx-6` cancels out `PageHeader`'s own baked-in
+                      // `px-6` (page-header.tsx) so its title text lines up
+                      // flush with the cards below (`DashboardQueue` etc.,
+                      // which have no side padding of their own and rely on
+                      // this body div's own `px-6`) instead of sitting
+                      // visibly indented past them.
+                      <div className="-mx-6 mb-6">
+                        <PageHeader
+                          title={`Good ${getGreetingPeriod()}, ${CURRENT_AGENT_FIRST_NAME}`}
+                          subtitle={formatHeaderDateTime()}
+                          // `bordered={false}` per earlier explicit
+                          // request — same opt-out lyra-ui's own "Record
+                          // Header (Compact, Borderless)" Storybook story
+                          // demonstrates, applied here to drop the
+                          // header's `border-b` (no `compact`, this header
+                          // keeps its normal padding).
+                          bordered={false}
+                          // `titleSize="2xl"` per explicit request — bumps
+                          // the title from `PageHeader`'s own default
+                          // `.lyra-heading-lg` up to `.lyra-heading-2xl`
+                          // (see that prop's own doc comment, page-header.tsx).
+                          titleSize="2xl"
+                          actions={
+                            <Badge color="green" variant="subtle">
+                              {resolvedTodayCount} Assignments resolved today
+                            </Badge>
+                          }
+                        />
+                      </div>
+                    )}
                     {/* ── Queue widgets ──
                         `DashboardQueue` ("cards" variant, its default) —
                         the numbers come straight from `latestContacts`
@@ -7032,15 +7198,14 @@ export function AgentWorkspaceAdvancedPage({
           title={`Good morning, ${CURRENT_AGENT_FIRST_NAME} ${CURRENT_AGENT_LAST_NAME}`}
           lastLogin={WELCOME_MODAL_LAST_LOGIN}
           onPrimaryClick={handleGoAvailable}
-          // "Start Offline" per explicit request — overrides AgentWelcomeMessage's
-          // own default "Start Unavailable" label just for this app, rather than
-          // changing the shared lyra-ui default (see CLAUDE.md's lyra-ui rules).
-          // Still calls handleStartUnavailable, which still sets the agent's
-          // real AgentStatus to "unavailable" — lyra-ui's AgentStatus type has
-          // no distinct "offline" value (dropped "offline" a while back, see
-          // handleStartUnavailable's own doc comment above), so this is a
-          // label-only rename, not a new status.
-          secondaryLabel="Start Offline"
+          // Uses AgentWelcomeMessage's own default "Start Unavailable" label
+          // (no secondaryLabel override — see CLAUDE.md's lyra-ui rules).
+          // Per explicit follow-up request, reverted from a prior app-only
+          // "Start Offline" override back to this default. Still calls
+          // handleStartUnavailable, which sets the agent's real AgentStatus
+          // to "unavailable" — lyra-ui's AgentStatus type has no distinct
+          // "offline" value (dropped "offline" a while back, see
+          // handleStartUnavailable's own doc comment above).
           onSecondaryClick={handleStartUnavailable}
         />
       </Modal>
