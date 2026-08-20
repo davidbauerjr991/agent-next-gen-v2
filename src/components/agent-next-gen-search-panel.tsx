@@ -85,6 +85,11 @@ export interface SearchPanelCustomersProps {
   onNextRow: () => void;
   hasPreviousRow: boolean;
   hasNextRow: boolean;
+  /** Forwarded straight through to `CustomersListView`'s own `isRowOpen` —
+   *  see that prop's own doc comment (agent-next-gen-customers-table.tsx)
+   *  for what it does. Optional/omittable like the underlying prop itself;
+   *  currently only `AgentWorkspaceAdvancedPage.tsx` passes it. */
+  isRowOpen?: (row: CustomerListRecord) => boolean;
 }
 
 export interface UseSearchPanelContentOptions {
@@ -160,6 +165,10 @@ export function useSearchPanelContent({
             // See `leadingChannelStack`'s own doc comment
             // (agent-next-gen-customers-table.tsx) for what it does.
             leadingChannelStack
+            // Same reasoning, same later follow-up ("you didn't add the
+            // icon to advanced") — the eye-icon "is this customer open"
+            // column, forwarded straight through from `customers.isRowOpen`.
+            isRowOpen={customers.isRowOpen}
           />
           <CustomerRowInfoPanel
             row={customers.selectedRow}

@@ -22,7 +22,7 @@ import {
 } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_CUSTOMERS } from "@nicecxone/lyra-ui/customers-data";
 import { type Interaction } from "@/components/agent-next-gen-interaction-dashboard";
-import { formatElapsedTime } from "@/components/agent-next-gen-shared-utils";
+import { formatElapsedTime, CURRENT_AGENT_NAME } from "@/components/agent-next-gen-shared-utils";
 import { cn } from "@/lib/utils";
 import {
   type LucideIcon,
@@ -136,6 +136,22 @@ export interface ContactHistoryEntry {
   description: string;
   caseId: string;
   /**
+   * The routing skill this contact was handled under (e.g. "Technical
+   * Support", "Billing") — per explicit follow-up, with a screenshot of the
+   * Contact History card's row list: "instead of using the Customer ID in
+   * the third row - use the Skill Name." `caseId` itself is untouched
+   * (still the real customer-id lookup key everything from redial/reopen to
+   * `agent-next-gen-case-database.ts` keys off — see that field's own doc
+   * comment) — this is purely a second, display-only field for that one
+   * row. Not one of `OUTBOUND_CONFIG.skillOptions`'s own option OBJECTS
+   * (importing from agent-next-gen-outbound-data.tsx here would be
+   * circular — that file already imports `ContactHistoryEntry`/
+   * `CONTACT_HISTORY` from this one), just a plain string matching one of
+   * that same picker's labels for cosmetic consistency with the rest of the
+   * app's skill-routing vocabulary.
+   */
+  skillName: string;
+  /**
    * This row's real originating channel — every `ChannelType` value is
    * possible here (voice/chat/sms/whatsapp/email), NOT a narrowed display
    * grouping. Previously this collapsed sms/whatsapp down into "chat" (via
@@ -243,23 +259,222 @@ export interface ContactHistoryEntry {
 }
 
 /**
- * Per-`channelType` display identity for a Contact History row once real
- * customer names are hidden (Agent Workspace 2.0 only — see
- * `ContactHistoryCard`/`ContactHistoryEntryDetail`'s own `hideCustomerNames`
- * prop doc comments) — per explicit request: Chat still shows the
- * customer's name (no separate "chat handle" concept exists to show
- * instead), WhatsApp shows the row's `whatsappHandle`, and every other
- * channel (Voice/SMS/Email) shows a real reach-back address instead of a
- * name — phone for Voice/SMS, email for Email. Falls back to `name`
- * wherever the specific field this row would need isn't populated (e.g. a
- * dismissed quick-dialed row with no captured `Thread.value`), so a row
- * never renders with no identity at all.
+ * Per-`channelType` display identity for a Contact History row — real
+ * reach-back address instead of the customer's name: WhatsApp shows the
+ * row's `whatsappHandle`, Voice/SMS shows `phone`, Email shows `email`.
+ * Chat still shows the customer's name (no separate "chat handle" concept
+ * exists to show instead). Falls back to `name` wherever the specific
+ * field this row would need isn't populated (e.g. a dismissed quick-dialed
+ * row with no captured `Thread.value`), so a row never renders with no
+ * identity at all.
+ *
+ * Two call sites, two different reasons: `ContactHistoryCard` uses this
+ * only when its own `hideCustomerNames` prop is set (Agent Workspace 2.0
+ * only — see that prop's doc comment) — masking real names entirely.
+ * `ContactHistoryEntryDetail` uses this unconditionally, in every tier —
+ * see that component's own doc comment — to avoid restating the name its
+ * caller's `InteriorPanel` `headerTitle` already shows just above it.
  */
 export function contactHistoryDisplayIdentity(entry: ContactHistoryEntry): string {
   if (entry.channelType === "chat") return entry.name;
   if (entry.channelType === "whatsapp") return entry.whatsappHandle ?? entry.name;
   if (entry.channelType === "email") return entry.email ?? entry.name;
   return entry.phone ?? entry.name;
+}
+
+/** One turn in a Contact History row's synthesized chat/SMS/WhatsApp
+ *  message thread — see `buildContactHistoryMessages` below for where this
+ *  gets built. Deliberately a separate, file-local type from
+ *  `CustomerHistoryConversationMessage` (agent-next-gen-customer-info-
+ *  panel.tsx) even though the shape is identical — importing it here would
+ *  be circular (that file already imports `ContactHistoryStatusVariant`
+ *  from this one). */
+export interface ContactHistoryMessage {
+  sender: "customer" | "agent";
+  text: string;
+  timestampDisplay: string;
+}
+
+// Per explicit follow-up request, with a screenshot of the summary panel:
+// "please display the transcript/email body content/chat below the info
+// box in the contact history interior panel." This app has no real
+// backend/transcript data for any Contact History row (same caveat this
+// file's own top-of-file doc comment already makes for its other dummy
+// data), so what shows below the info box is synthesized rather than
+// looked up — generic, plausible-reading content, not scripted to each
+// row's own `description`, picked deterministically per row
+// (`hashContactHistoryId`, not `Math.random()`) so the same row always
+// renders the same content on every open.
+//
+// Per a further explicit follow-up on a voice row's own screenshot ("for
+// voice can you have a fake transcript?"), voice rows get one too — a
+// synthesized call transcript, same bubble UI as chat/SMS/WhatsApp's own
+// message thread, just with call-appropriate pool wording and its own
+// "Transcript" section label instead of "Conversation" (see
+// `buildContactHistoryMessages`/`ContactHistoryEntryDetail` below). This
+// supersedes an earlier version of this feature that deliberately left
+// voice rows with nothing extra here, reasoning the info box's own "Call
+// Notes" already covered a call's content — per this follow-up, that
+// wasn't actually what "transcript" meant in the original request.
+const CONTACT_HISTORY_CHAT_CUSTOMER_MESSAGE_POOL = [
+  "Hi, I wanted to follow up on this.",
+  "Thanks for taking a look — let me know what you find.",
+  "Sorry, one more question before we wrap up.",
+  "That makes sense, thank you for explaining!",
+];
+const CONTACT_HISTORY_CHAT_AGENT_MESSAGE_POOL = [
+  "Of course — let me pull up your account.",
+  "I can see that here now, one moment.",
+  "You're all set. Is there anything else I can help with?",
+  "Happy to help — have a great rest of your day!",
+];
+
+// Same idea as the chat pools above, worded to read as spoken dialogue
+// rather than typed messages — a voice row's "Transcript" section picks
+// from these instead (see `buildContactHistoryMessages` below).
+const CONTACT_HISTORY_VOICE_CUSTOMER_MESSAGE_POOL = [
+  "Hi, I'm calling about the issue on my account.",
+  "Okay, that's right, thanks for confirming.",
+  "Sorry, could you repeat that last part?",
+  "Got it, that answers my question — thank you.",
+];
+const CONTACT_HISTORY_VOICE_AGENT_MESSAGE_POOL = [
+  "Thanks for calling — can I get your name and verify a couple details first?",
+  "Perfect, I have your account pulled up now.",
+  "Sure, let me walk you through that again.",
+  "You're all set. Is there anything else I can help you with today?",
+];
+
+// Fuller, generic paragraphs for the email "Body" section — deliberately
+// distinct wording from `entry.description` (the info box's own short
+// one-line summary, labeled "Email Summary"), so the two sections don't
+// just repeat each other.
+const CONTACT_HISTORY_EMAIL_BODY_POOL = [
+  "Thanks for reaching out. I've reviewed your account and confirmed the details below — let me know if anything looks off and I'll follow up right away.",
+  "Following up on our conversation — everything's been updated on our end. You should see the change reflected within the next billing cycle.",
+  "Wanted to make sure you had this in writing for your records. Please reach back out if you have any other questions in the meantime.",
+  "Thanks for your patience while we looked into this. Here's a summary of what we found and the steps we took to resolve it.",
+];
+
+/** Deterministic (`id`-keyed, not `Math.random()`) pool index — same "no
+ *  real backend" dummy-data convention as the rest of this file's fixtures,
+ *  kept local to this section since nothing else needs it. */
+function hashContactHistoryId(id: string, mod: number): number {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) % 999979;
+  return Math.abs(hash) % mod;
+}
+
+/** The message thread shown below `ContactHistoryEntryDetail`'s info box
+ *  for a voice/chat/SMS/WhatsApp row — 3-4 lines, alternating customer/
+ *  agent, starting with the customer. Voice rows pick from the
+ *  call-worded pools (`CONTACT_HISTORY_VOICE_*`); every other channel type
+ *  here picks from the typed-message pools (`CONTACT_HISTORY_CHAT_*`). See
+ *  the pools' own doc comment above for why none of this is case-specific.
+ *  Times are synthesized too (no real captured timestamps exist for these
+ *  rows), stepping forward a couple minutes per turn from a deterministic
+ *  starting time. */
+function buildContactHistoryMessages(entry: ContactHistoryEntry): ContactHistoryMessage[] {
+  const count = 3 + hashContactHistoryId(entry.id, 2); // 3 or 4 turns
+  const startHour = 9 + hashContactHistoryId(`${entry.id}-h`, 3); // 9-11
+  const startMinute = hashContactHistoryId(`${entry.id}-m`, 60);
+  const isVoice = entry.channelType === "voice";
+  const customerPool = isVoice ? CONTACT_HISTORY_VOICE_CUSTOMER_MESSAGE_POOL : CONTACT_HISTORY_CHAT_CUSTOMER_MESSAGE_POOL;
+  const agentPool = isVoice ? CONTACT_HISTORY_VOICE_AGENT_MESSAGE_POOL : CONTACT_HISTORY_CHAT_AGENT_MESSAGE_POOL;
+  return Array.from({ length: count }, (_, i) => {
+    const isCustomer = i % 2 === 0;
+    const pool = isCustomer ? customerPool : agentPool;
+    const totalMinutes = startMinute + i * 2;
+    const hour = (startHour + Math.floor(totalMinutes / 60)) % 24;
+    const minute = totalMinutes % 60;
+    const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+    return {
+      sender: isCustomer ? "customer" : "agent",
+      text: pool[hashContactHistoryId(`${entry.id}-${i}`, pool.length)],
+      timestampDisplay: `${displayHour}:${minute.toString().padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`,
+    } satisfies ContactHistoryMessage;
+  });
+}
+
+/** The "Body" text shown below `ContactHistoryEntryDetail`'s info box for
+ *  an email row — see `CONTACT_HISTORY_EMAIL_BODY_POOL`'s own doc comment
+ *  for why this is separate content from `entry.description`, not a reuse
+ *  of it. */
+function buildContactHistoryEmailBody(entry: ContactHistoryEntry): string {
+  return CONTACT_HISTORY_EMAIL_BODY_POOL[hashContactHistoryId(entry.id, CONTACT_HISTORY_EMAIL_BODY_POOL.length)];
+}
+
+/** One read-only customer/agent bubble for `ContactHistoryEntryDetail`'s
+ *  own synthesized message thread (chat/SMS/WhatsApp rows only) — same
+ *  avatar/bubble/timestamp classes as
+ *  `CustomerHistoryConversationMessageBubble` (agent-next-gen-customer-
+ *  info-panel.tsx) for visual consistency between the two "read a past
+ *  conversation" experiences in this app; redeclared locally rather than
+ *  imported, to avoid the same circular import `ContactHistoryMessage`'s
+ *  own doc comment describes. No hover toolbar (Copy/Add tag) — this is
+ *  closed history, nothing to copy/tag in-progress. */
+function ContactHistoryMessageBubble({ message }: { message: ContactHistoryMessage }) {
+  const isCustomer = message.sender === "customer";
+  return (
+    <div className={cn("flex flex-col", isCustomer ? "items-start" : "items-end")}>
+      <div className={cn("flex max-w-[85%] items-start gap-2", isCustomer ? "flex-row" : "flex-row-reverse")}>
+        <span
+          className={cn(
+            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full lyra-body-sm-emphasis lyra-transcript-avatar",
+            isCustomer
+              ? "bg-lyra-accent-green-soft text-lyra-accent-green-strong"
+              : "bg-lyra-bg-primary text-lyra-fg-on-primary"
+          )}
+          aria-hidden="true"
+        >
+          {isCustomer ? "C" : "A"}
+        </span>
+        <div className="flex min-w-0 flex-col gap-1">
+          <div
+            className={cn(
+              "rounded-lyra-lg px-4 py-3 border border-transparent",
+              isCustomer ? "rounded-tl-none bg-lyra-state-hover" : "rounded-tr-none"
+            )}
+            style={!isCustomer ? { backgroundColor: "var(--lyra-color-bg-conversation-user)" } : undefined}
+          >
+            <p className="lyra-body-md text-lyra-fg-default">{message.text}</p>
+            <span className="mt-2 block lyra-body-sm text-lyra-fg-secondary">{message.timestampDisplay}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** One turn in a voice row's synthesized call transcript
+ *  (`ContactHistoryEntryDetail`'s own "Transcript" section, voice rows
+ *  only) — per explicit follow-up, with a reference screenshot: a plain
+ *  "Name  timestamp" header line (bold name, secondary-colored time) with
+ *  the spoken line below it, stacked top-to-bottom for every turn
+ *  regardless of speaker — NOT `ContactHistoryMessageBubble`'s own chat-
+ *  style avatar/bubble/left-right layout, which the reference screenshot
+ *  explicitly doesn't use for a call transcript. Speaker name is the real
+ *  logged-in agent (`CURRENT_AGENT_NAME`, agent-next-gen-shared-utils.ts —
+ *  matches the reference screenshot's own "John Smith") for an agent turn,
+ *  this row's own customer name (`entry.name`) for a customer turn — not
+ *  generic "Agent"/"Customer" labels. */
+function ContactHistoryTranscriptLine({
+  message,
+  customerName,
+}: {
+  message: ContactHistoryMessage;
+  customerName: string;
+}) {
+  const speakerName = message.sender === "customer" ? customerName : CURRENT_AGENT_NAME;
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-baseline gap-2">
+        <span className="lyra-body-md-emphasis text-lyra-fg-default">{speakerName}</span>
+        <span className="lyra-body-sm text-lyra-fg-secondary">{message.timestampDisplay}</span>
+      </div>
+      <p className="lyra-body-md text-lyra-fg-default">{message.text}</p>
+    </div>
+  );
 }
 
 export const CONTACT_HISTORY_CHANNEL_ICON: Record<
@@ -277,35 +492,35 @@ export const CONTACT_HISTORY: ContactHistoryEntry[] = [
   {
     id: "ch1", name: "Nathan Cole", statusLabel: "Resolved", statusVariant: "success", redial: true,
     description: "Customer was locked out after 5 failed attempts. Verified identity via KBA, reset credentials, and confirmed access restored.",
-    caseId: "CST-22841", channelType: "voice", channelLabel: "Voice", timeAgo: "8m ago", duration: "8m 14s",
+    caseId: "CST-22841", skillName: "Technical Support", channelType: "voice", channelLabel: "Voice", timeAgo: "8m ago", duration: "8m 14s",
     channels: ["voice", "sms", "email"],
     phone: "(704) 555-0142", email: "nathan.cole@example.com", whatsappHandle: "@Nathan Cole",
   },
   {
     id: "ch2", name: "Priya Shah", statusLabel: "Resolved", statusVariant: "success", redial: false,
     description: "Duplicate charge dispute — $89.99 refund issued",
-    caseId: "CST-30164", channelType: "chat", channelLabel: "Chat", timeAgo: "34m ago", duration: "12m 02s",
+    caseId: "CST-30164", skillName: "Billing", channelType: "chat", channelLabel: "Chat", timeAgo: "34m ago", duration: "12m 02s",
     channels: ["email", "sms"],
     phone: "(415) 555-0178", email: "priya.shah@example.com", whatsappHandle: "@Priya Shah",
   },
   {
     id: "ch3", name: "Omar Farooq", statusLabel: "Resolved", statusVariant: "success", redial: false,
     description: "Plan upgrade confirmation & feature overview",
-    caseId: "CST-16823", channelType: "email", channelLabel: "Email", timeAgo: "2h ago", duration: "6m 30s",
+    caseId: "CST-16823", skillName: "Sales", channelType: "email", channelLabel: "Email", timeAgo: "2h ago", duration: "6m 30s",
     channels: ["email", "whatsapp"],
     phone: "(212) 555-0193", email: "omar.farooq@example.com", whatsappHandle: "@Omar Farooq",
   },
   {
     id: "ch4", name: "Lauren Briggs", statusLabel: "Escalated", statusVariant: "critical", redial: true,
     description: "Escalated fraud investigation — 4 suspicious transactions",
-    caseId: "CST-27760", channelType: "voice", channelLabel: "Voice", timeAgo: "5h ago", duration: "22m 47s",
+    caseId: "CST-27760", skillName: "Escalations", channelType: "voice", channelLabel: "Voice", timeAgo: "5h ago", duration: "22m 47s",
     channels: ["voice", "email"],
     phone: "(312) 555-0164", email: "lauren.briggs@example.com", whatsappHandle: "@Lauren Briggs",
   },
   {
     id: "ch5", name: "Mei Tanaka", statusLabel: "Resolved", statusVariant: "success", redial: false,
     description: "Shipping delay — expedited replacement dispatched",
-    caseId: "CST-31045", channelType: "chat", channelLabel: "Chat", timeAgo: "1d ago", duration: "9m 15s",
+    caseId: "CST-31045", skillName: "General Support", channelType: "chat", channelLabel: "Chat", timeAgo: "1d ago", duration: "9m 15s",
     channels: ["sms", "whatsapp", "email"],
     phone: "(206) 555-0157", email: "mei.tanaka@example.com", whatsappHandle: "@Mei Tanaka",
   },
@@ -363,6 +578,7 @@ export interface ContactHistoryTemplate {
   description: string;
   timeAgo: string;
   duration: string;
+  skillName: string;
 }
 
 /** Builds a set of Contact History rows from real `CREATE_NEW_CUSTOMERS`
@@ -450,6 +666,13 @@ export function buildDismissedContactHistoryEntry(interaction: Interaction, cloc
       ? `${primaryChannel.preview} — ${statusLabel.toLowerCase()} and dismissed by agent`
       : `${statusLabel} and dismissed by agent`,
     caseId: interaction.customerId,
+    // Nothing on `Interaction` tracks which skill it was originally routed
+    // under (channels/threads carry no such field — see `Interaction`'s own
+    // type), so a dismissed row falls back to this generic label rather
+    // than guessing. Every other `ContactHistoryEntry` construction site
+    // (the hand-authored rows above, `buildContactHistoryFromCustomers`'s
+    // templates) has a real authored value instead.
+    skillName: "General Support",
     channelType,
     channelLabel: CONTACT_HISTORY_CHANNEL_LABEL[channelType],
     timeAgo: "Just now",
@@ -497,11 +720,11 @@ export function buildDismissedContactHistoryEntry(interaction: Interaction, cloc
 // older than its own label.
 export const EXTENDED_CONTACT_HISTORY_CUSTOMER_INDEXES = [5, 12, 19, 26, 33];
 export const EXTENDED_CONTACT_HISTORY_TEMPLATES: ContactHistoryTemplate[] = [
-  { statusLabel: "Resolved", statusVariant: "success", description: "Password reset — identity verified via KBA, access restored", timeAgo: "1d ago", duration: "7m 40s" },
-  { statusLabel: "Resolved", statusVariant: "success", description: "Billing question — walked through recent charges, no refund needed", timeAgo: "1d ago", duration: "5m 18s" },
-  { statusLabel: "Escalated", statusVariant: "critical", description: "Product setup issue escalated to Tier 2 for configuration support", timeAgo: "2d ago", duration: "14m 05s" },
-  { statusLabel: "Resolved", statusVariant: "success", description: "Subscription cancellation request — retention offer accepted", timeAgo: "2d ago", duration: "10m 52s" },
-  { statusLabel: "Resolved", statusVariant: "success", description: "Shipping delay follow-up — updated delivery window provided", timeAgo: "2d ago", duration: "4m 27s" },
+  { statusLabel: "Resolved", statusVariant: "success", description: "Password reset — identity verified via KBA, access restored", timeAgo: "1d ago", duration: "7m 40s", skillName: "Technical Support" },
+  { statusLabel: "Resolved", statusVariant: "success", description: "Billing question — walked through recent charges, no refund needed", timeAgo: "1d ago", duration: "5m 18s", skillName: "Billing" },
+  { statusLabel: "Escalated", statusVariant: "critical", description: "Product setup issue escalated to Tier 2 for configuration support", timeAgo: "2d ago", duration: "14m 05s", skillName: "Escalations" },
+  { statusLabel: "Resolved", statusVariant: "success", description: "Subscription cancellation request — retention offer accepted", timeAgo: "2d ago", duration: "10m 52s", skillName: "Sales" },
+  { statusLabel: "Resolved", statusVariant: "success", description: "Shipping delay follow-up — updated delivery window provided", timeAgo: "2d ago", duration: "4m 27s", skillName: "General Support" },
 ];
 export const EXTENDED_CONTACT_HISTORY: ContactHistoryEntry[] = buildContactHistoryFromCustomers(
   EXTENDED_CONTACT_HISTORY_CUSTOMER_INDEXES,
@@ -786,7 +1009,13 @@ export function ContactHistoryCard({
                     </span>
                   </div>
                   <span className="lyra-body-md text-lyra-fg-secondary">{entry.description}</span>
-                  <span className="lyra-body-sm text-lyra-fg-secondary">{entry.caseId}</span>
+                  {/* Per explicit follow-up, with a screenshot: this row
+                      shows the routing skill instead of the customer id —
+                      `entry.caseId` itself is untouched everywhere else
+                      (redial/reopen, search, the summary panel's own
+                      subhead) — this is purely a display swap for this one
+                      line. See `skillName`'s own doc comment. */}
+                  <span className="lyra-body-sm text-lyra-fg-secondary">{entry.skillName}</span>
                 </div>
                 <div className="flex flex-col items-end gap-1.5 shrink-0">
                   {/* Channel-type pill — "purple"/"teal"/"pink" per
@@ -813,10 +1042,10 @@ export function ContactHistoryCard({
 
 /** Summary content shown in `AgentNextGenPage`'s shared right-docked
  *  `InteriorPanel` slot when a Contact History row is clicked (that file's
- *  own `selectedContactHistoryEntry` state) — same "one-line status · name
- *  · when" meta line, then a bordered card with Duration + a notes field,
- *  that the Customer Information panel's own past-session "Conversation"
- *  tab already uses for its voice entries
+ *  own `selectedContactHistoryEntry` state) — same "one-line status ·
+ *  handle · when" meta line, then a bordered card with Duration + a notes
+ *  field, that the Customer Information panel's own past-session
+ *  "Conversation" tab already uses for its voice entries
  *  (`CustomerHistoryConversationContent` in
  *  agent-next-gen-customer-info-panel.tsx), reused here for visual
  *  consistency between the two "read a past contact's summary" experiences
@@ -832,23 +1061,48 @@ export function ContactHistoryCard({
  *  voice, matching that same convention's own wording; "Chat Summary"/
  *  "Email Summary" for the other two), and the meta line uses `timeAgo`
  *  (a relative string, e.g. "8m ago") in place of that other panel's real
- *  formatted timestamp. */
-export function ContactHistoryEntryDetail({
-  entry,
-  hideCustomerNames,
-}: {
-  entry: ContactHistoryEntry;
-  /** Same flag/behavior as `ContactHistoryCard`'s own prop of this name —
-   *  see that prop's doc comment. */
-  hideCustomerNames?: boolean;
-}) {
+ *  formatted timestamp.
+ *
+ *  Per explicit follow-up request, the meta line's middle segment is
+ *  `contactHistoryDisplayIdentity(entry)` (phone/email/WhatsApp handle,
+ *  falling back to name only for Chat/unpopulated fields — see that
+ *  function's own doc comment), not `entry.name` — the panel's own
+ *  `headerTitle` (this component's caller, `AgentNextGenPage.tsx` et al.)
+ *  already shows the customer's real name immediately above this line, so
+ *  repeating it here was pure duplication (a customer's name showing up
+ *  twice back to back). Unlike `ContactHistoryCard`'s own identical-looking
+ *  swap, this one isn't gated behind `hideCustomerNames` — it always shows
+ *  the handle, in every tier, since the point here isn't masking a name but
+ *  avoiding restating one already on screen.
+ *
+ *  Per a further explicit follow-up ("please display the transcript/email
+ *  body content/chat below the info box"), a second section renders below
+ *  the Duration/notes box: voice/chat/SMS/WhatsApp rows get a synthesized
+ *  message thread (`buildContactHistoryMessages`), and email rows get a
+ *  synthesized, longer "Body" (`buildContactHistoryEmailBody`) distinct
+ *  from the info box's own short summary. See those builders' own doc
+ *  comments for why none of this is case-specific.
+ *
+ *  Per one more explicit follow-up on a voice row's own screenshot ("for
+ *  voice can you have a fake transcript?" — then, with a reference
+ *  screenshot of the desired layout: "i would prefer the voice transcript
+ *  formatting like this"), voice's own section is labeled "Transcript"
+ *  (the other three stay "Conversation") and renders each turn with
+ *  `ContactHistoryTranscriptLine` (bold name + timestamp, spoken line
+ *  below — see that component's own doc comment) instead of
+ *  `ContactHistoryMessageBubble`'s chat-bubble layout, matching that
+ *  reference screenshot exactly. */
+export function ContactHistoryEntryDetail({ entry }: { entry: ContactHistoryEntry }) {
   const notesLabel =
     entry.channelType === "voice" ? "Call Notes" : entry.channelType === "email" ? "Email Summary" : "Chat Summary";
-  const displayName = hideCustomerNames ? contactHistoryDisplayIdentity(entry) : entry.name;
+  const displayIdentity = contactHistoryDisplayIdentity(entry);
+  const isVoice = entry.channelType === "voice";
+  const isMessageChannel =
+    isVoice || entry.channelType === "chat" || entry.channelType === "sms" || entry.channelType === "whatsapp";
   return (
     <div className="flex flex-col gap-3 p-4">
       <span className="lyra-body-sm text-lyra-fg-secondary">
-        {[entry.statusLabel, displayName, entry.timeAgo].filter(Boolean).join(" · ")}
+        {[entry.statusLabel, displayIdentity, entry.timeAgo].filter(Boolean).join(" · ")}
       </span>
       <div className="rounded-lyra-md border border-lyra-border-subtle bg-lyra-bg-control-subtle overflow-hidden flex flex-col gap-3 p-4">
         <div className="flex flex-col gap-1 min-w-0">
@@ -860,6 +1114,25 @@ export function ContactHistoryEntryDetail({
           <p className="lyra-body-md text-lyra-fg-default">{entry.description}</p>
         </div>
       </div>
+      {isMessageChannel ? (
+        <div className="flex flex-col gap-2">
+          <Label label={isVoice ? "Transcript" : "Conversation"} />
+          <div className="rounded-lyra-md border border-lyra-border-subtle flex flex-col gap-4 p-4">
+            {buildContactHistoryMessages(entry).map((message, i) =>
+              isVoice ? (
+                <ContactHistoryTranscriptLine key={i} message={message} customerName={entry.name} />
+              ) : (
+                <ContactHistoryMessageBubble key={i} message={message} />
+              )
+            )}
+          </div>
+        </div>
+      ) : entry.channelType === "email" ? (
+        <div className="rounded-lyra-md border border-lyra-border-subtle bg-lyra-bg-control-subtle overflow-hidden flex flex-col gap-1 p-4">
+          <Label label="Body" />
+          <p className="lyra-body-md text-lyra-fg-default">{buildContactHistoryEmailBody(entry)}</p>
+        </div>
+      ) : null}
     </div>
   );
 }

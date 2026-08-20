@@ -70,8 +70,7 @@ import {
   getAwaitingSeverity,
   CURRENT_AGENT_FIRST_NAME,
   CURRENT_AGENT_LAST_NAME,
-  getGreetingPeriod,
-  formatHeaderDateTime,
+  formatHeaderDate,
   withoutChannelStatus,
   nextCustomerSortDirection,
   synthesizeChannelAddress,
@@ -6384,11 +6383,15 @@ export function AgentNextGenPage({
                       // `resolvedTodayCount` (see its own doc comment,
                       // above) — starts at 0 every session and increments
                       // live off `handleInteractionStatusChange`'s own
-                      // real Resolved-transition writes, so this badge and
-                      // `PerformanceSummaryCard`'s own "today" figure can
-                      // legitimately disagree (that card is still mock
-                      // data) — an acceptable, explicitly-requested trade,
-                      // not a bug.
+                      // real Resolved-transition writes. Per explicit
+                      // follow-up ("make sure the assignments resolved
+                      // matches the count in the top right chip"), this
+                      // same `resolvedTodayCount` is now also passed to
+                      // `PerformanceSummaryCard` below (its own
+                      // `liveResolvedTodayCount` prop) so that card's
+                      // "today" figure reads identically to this badge
+                      // instead of a fixed mock value — see that card's
+                      // own doc comment.
                       //
                       // `-mx-6` cancels out `PageHeader`'s own baked-in
                       // `px-6` (page-header.tsx) so its title text lines up
@@ -6398,8 +6401,8 @@ export function AgentNextGenPage({
                       // visibly indented past them.
                       <div className="-mx-6 mb-6">
                         <PageHeader
-                          title={`Good ${getGreetingPeriod()}, ${CURRENT_AGENT_FIRST_NAME}`}
-                          subtitle={formatHeaderDateTime()}
+                          title={`Welcome Back, ${CURRENT_AGENT_FIRST_NAME}`}
+                          subtitle={formatHeaderDate()}
                           // `bordered={false}` per earlier explicit
                           // request — same opt-out lyra-ui's own "Record
                           // Header (Compact, Borderless)" Storybook story
@@ -6518,7 +6521,7 @@ export function AgentNextGenPage({
                         list — one card showing it twice added nothing a
                         single card + ring didn't already cover. */}
                     <div className="mt-6 lyra-container-grid">
-                      <PerformanceSummaryCard />
+                      <PerformanceSummaryCard liveResolvedTodayCount={resolvedTodayCount} />
                       <PerformanceBreakdownCard />
                     </div>
                   </div>
@@ -6655,7 +6658,7 @@ export function AgentNextGenPage({
                         ))}
                       </div>
                     ) : selectedContactHistoryEntry ? (
-                      <ContactHistoryEntryDetail entry={selectedContactHistoryEntry} hideCustomerNames />
+                      <ContactHistoryEntryDetail entry={selectedContactHistoryEntry} />
                     ) : (
                       <div className="flex flex-col gap-4 px-4 py-4">
                         <Input label="Subject" placeholder="Enter subject" />

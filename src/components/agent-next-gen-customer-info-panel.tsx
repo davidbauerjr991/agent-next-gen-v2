@@ -87,6 +87,7 @@ import {
   MoreVertical,
   Pencil,
   ArrowLeft,
+  X,
 } from "lucide-react";
 
 /* ── InteractionTranscript ──
@@ -2877,7 +2878,25 @@ export function CustomerInfoHoverPreview({
         // explicit request that the two never show different information
         // for the same interaction.
         title={matchState?.step === "create" ? "Create New Customer" : "Customer Information"}
-        subhead={matchState && matchState.step === "search" ? matchSubhead : undefined}
+        // Per a later explicit follow-up request ("add the customer name
+        // subhead to the customer information panel when it is not
+        // docked") — this hover preview IS that "not docked" panel
+        // (`CustomerInformationSidePanel` is the docked one, which already
+        // got this same `customerName` subhead per an earlier follow-up —
+        // see that panel's own `headerSubhead` doc comment). Brings this
+        // preview to parity with the docked panel rather than leaving it
+        // as the one remaining place the name doesn't show in the header.
+        // Same three-way branch as the docked panel's `headerSubhead`:
+        // the match-search step keeps its own count subhead, the
+        // match-create step has none (no confirmed customer yet), and the
+        // ordinary case now shows `customerName`.
+        subhead={
+          matchState?.step === "search"
+            ? matchSubhead
+            : matchState?.step === "create"
+              ? undefined
+              : customerName
+        }
         icon={
           matchState?.step === "create" ? (
             <ActionIconButton aria-label="Back to search" title="Back" onClick={matchState.onBackToSearch}>
@@ -4179,6 +4198,7 @@ export function CustomerFullScreenTabContent({
   tabs,
   onStartInteraction,
   onAddToast,
+  onClose,
 }: {
   row: CustomerListRecord;
   /** Same `tabs` concept every other consumer in this file takes — see
@@ -4186,6 +4206,22 @@ export function CustomerFullScreenTabContent({
   tabs: readonly CustomerPanelTabLabel[];
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
   onAddToast?: (toast: Omit<ToastItem, "id">) => void;
+  /**
+   * Per explicit request ("keep the 'x' button in the top right of the
+   * record so agents can close it there or in the tab if they want") —
+   * this tab already has its own close control on the `Tab` itself
+   * (`removeIcon`/`onRemove`, the record-header `TabList` call site), but
+   * that's easy to miss once a customer's full-screen tab is the ACTIVE
+   * one and the agent is looking at this content, not the tab strip above
+   * it. Mirrors the closable pattern every other panel header in this
+   * file already has (`CustomerInformationSidePanel`'s `onClose`,
+   * `CustomerRowInfoPanel`'s `onClose`) — same "there's more than one
+   * reasonable place to close this from" precedent, just newly extended
+   * to this tab-content variant. Optional/undefined renders no close
+   * button at all (not every future consumer of this component need be
+   * closable this way).
+   */
+  onClose?: () => void;
 }) {
   const [activeTab, setActiveTab] = useState(0);
   // Same unconditional "Copilot" strip as `CustomerRowInfoPanel` — see that
@@ -4226,6 +4262,11 @@ export function CustomerFullScreenTabContent({
               className="h-8 w-8"
               icon={<MoreVertical className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
             />
+            {onClose && (
+              <ActionIconButton aria-label={`Close ${customerName}`} title={`Close ${customerName}`} onClick={onClose}>
+                <X className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+              </ActionIconButton>
+            )}
           </>
         }
         tabs={

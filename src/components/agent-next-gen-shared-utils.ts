@@ -172,26 +172,35 @@ const CURRENT_AGENT_NAME = "John Smith";
 
 const [CURRENT_AGENT_FIRST_NAME, CURRENT_AGENT_LAST_NAME] = CURRENT_AGENT_NAME.split(" ");
 
-/* Home tab greeting — "Good morning/afternoon/evening" based on the
-   visitor's actual local time (not the static "Good morning" the welcome
-   modal always shows), read fresh on every render. */
-function getGreetingPeriod(): "morning" | "afternoon" | "evening" {
-  const hour = new Date().getHours();
-  if (hour < 12) return "morning";
-  if (hour < 18) return "afternoon";
-  return "evening";
-}
-
-/* Dashboard page-header subtitle — "Wednesday, July 29, 2026 · 9:41 AM",
-   read fresh on every render. Ticks live for free: the main component's own
-   `clockTick` state already re-renders this whole tree once a second for
-   the open-channel elapsed timers, so this just reads `new Date()` again on
-   whichever render that produces — no separate interval needed here. */
-function formatHeaderDateTime(): string {
+/* Dashboard page-header subtitle — a bare "August 20, 2026", read fresh on
+   every render. History, in order, across several explicit follow-ups:
+   originally "Wednesday, July 29, 2026 · 9:41 AM" (date + time); the
+   time-of-day portion was dropped first ("remove the time from the date
+   subhead and just have the date"); it was then briefly replaced with a
+   full sentence wrapped around the date ("Please review your queue and
+   performance below for {Month Day, Year}", then re-worded to "Below is
+   your dashboard for {Month Day, Year}"); reverted back to the bare date
+   alone per a later explicit follow-up ("go back to the {Month Day, Year}
+   for the subhead"). Time-of-day stays dropped for the same reason the
+   header TITLE doesn't greet by time of day either (see
+   `CURRENT_AGENT_FIRST_NAME`'s own call sites: "Welcome Back, {name}", no
+   time-of-day variant): an agent's local clock/timezone isn't reliable when
+   they're connected through a VPN whose exit point sits elsewhere, so
+   nothing in this header depends on time-of-day, only the calendar date.
+   Renders without a weekday ("August 20, 2026", not "Thursday, August 20,
+   2026") — that "{Month Day, Year}" format is the one thing every version
+   of this subtitle, sentence-wrapped or bare, has kept in common. Was
+   `formatHeaderSubtitle` while it briefly held a full sentence; renamed
+   back to `formatHeaderDate` now that it's a bare date again — kept as its
+   own shared helper (rather than inlined at each of the 3 call sites) since
+   it's identical across all 3 tiers. Ticks live for free: the main
+   component's own `clockTick` state already re-renders this whole tree once
+   a second for the open-channel elapsed timers, so this just reads
+   `new Date()` again on whichever render that produces — no separate
+   interval needed here (rolls over at midnight without a page reload). */
+function formatHeaderDate(): string {
   const now = new Date();
-  const datePart = now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-  const timePart = now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  return `${datePart} · ${timePart}`;
+  return now.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
 }
 
 /* Deterministic 12-digit case-ID generator (no Math.random, so the dashboard
@@ -538,8 +547,7 @@ export {
   CURRENT_AGENT_NAME,
   CURRENT_AGENT_FIRST_NAME,
   CURRENT_AGENT_LAST_NAME,
-  getGreetingPeriod,
-  formatHeaderDateTime,
+  formatHeaderDate,
   makeCaseId,
   formatCreateDate,
   percentOfTeam,

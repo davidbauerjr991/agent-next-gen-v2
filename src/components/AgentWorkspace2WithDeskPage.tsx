@@ -81,8 +81,7 @@ import {
   getAwaitingSeverity,
   CURRENT_AGENT_FIRST_NAME,
   CURRENT_AGENT_LAST_NAME,
-  getGreetingPeriod,
-  formatHeaderDateTime,
+  formatHeaderDate,
   withoutChannelStatus,
   nextCustomerSortDirection,
   synthesizeChannelAddress,
@@ -6455,6 +6454,21 @@ export function AgentWorkspace2WithDeskPage({
                   // column, Premium/Advanced only. See `leadingChannelStack`'s
                   // own doc comment (agent-next-gen-customers-table.tsx).
                   leadingChannelStack
+                  // Per explicit request ("add a blank column header and if
+                  // a record is open as an assignment or as a tab add an
+                  // eye icon"), Premium/Advanced only — a row is "open" if
+                  // it has a live left-nav assignment card (`interactions`,
+                  // matched on `Interaction.customerId`, the same id space
+                  // as `row.contactNumber` — see `isRowOpen`'s own doc
+                  // comment, agent-next-gen-customers-table.tsx) OR is
+                  // currently showing as one of this tier's own customer
+                  // full-screen tabs (`openCustomerTabs`, Premium-only —
+                  // each tab already carries its row's full
+                  // `CustomerListRecord`, so no id translation is needed).
+                  isRowOpen={(row) =>
+                    interactions.some((i) => i.customerId === row.contactNumber) ||
+                    openCustomerTabs.some((t) => t.row.contactNumber === row.contactNumber)
+                  }
                 />
                 <CustomerRowInfoPanel
                   row={selectedCustomerRow}
@@ -6500,6 +6514,13 @@ export function AgentWorkspace2WithDeskPage({
                       handleStartCall({ contact, channel, phone, skillId })
                     }
                     onAddToast={addToast}
+                    // Per explicit request ("keep the 'x' button in the top
+                    // right of the record so agents can close it there or
+                    // in the tab if they want") — same `handleCloseCustomerTab`
+                    // the tab strip's own `onRemove` already calls (see that
+                    // `Tab` call site above), so closing from either place
+                    // behaves identically.
+                    onClose={() => handleCloseCustomerTab(tab.id)}
                   />
                 </div>
               ))}
@@ -6551,11 +6572,15 @@ export function AgentWorkspace2WithDeskPage({
                       // `resolvedTodayCount` (see its own doc comment,
                       // above) — starts at 0 every session and increments
                       // live off `handleInteractionStatusChange`'s own
-                      // real Resolved-transition writes, so this badge and
-                      // `PerformanceSummaryCard`'s own "today" figure can
-                      // legitimately disagree (that card is still mock
-                      // data) — an acceptable, explicitly-requested trade,
-                      // not a bug.
+                      // real Resolved-transition writes. Per explicit
+                      // follow-up ("make sure the assignments resolved
+                      // matches the count in the top right chip"), this
+                      // same `resolvedTodayCount` is now also passed to
+                      // `PerformanceSummaryCard` below (its own
+                      // `liveResolvedTodayCount` prop) so that card's
+                      // "today" figure reads identically to this badge
+                      // instead of a fixed mock value — see that card's
+                      // own doc comment.
                       //
                       // `-mx-6` cancels out `PageHeader`'s own baked-in
                       // `px-6` (page-header.tsx) so its title text lines up
@@ -6565,8 +6590,8 @@ export function AgentWorkspace2WithDeskPage({
                       // visibly indented past them.
                       <div className="-mx-6 mb-6">
                         <PageHeader
-                          title={`Good ${getGreetingPeriod()}, ${CURRENT_AGENT_FIRST_NAME}`}
-                          subtitle={formatHeaderDateTime()}
+                          title={`Welcome Back, ${CURRENT_AGENT_FIRST_NAME}`}
+                          subtitle={formatHeaderDate()}
                           // `bordered={false}` per earlier explicit
                           // request — same opt-out lyra-ui's own "Record
                           // Header (Compact, Borderless)" Storybook story
@@ -6680,7 +6705,7 @@ export function AgentWorkspace2WithDeskPage({
                         list — one card showing it twice added nothing a
                         single card + ring didn't already cover. */}
                     <div className="mt-6 lyra-container-grid">
-                      <PerformanceSummaryCard />
+                      <PerformanceSummaryCard liveResolvedTodayCount={resolvedTodayCount} />
                       <PerformanceBreakdownCard />
                     </div>
                   </div>

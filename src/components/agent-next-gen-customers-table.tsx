@@ -48,6 +48,7 @@ import {
   MessageCircle,
   ArrowDown,
   ArrowUp,
+  Eye,
 } from "lucide-react";
 
 /* ── CustomersListView ──
@@ -726,7 +727,17 @@ export function CustomerChannelStack({
   return (
     <div
       className={cn(
-        "absolute inset-y-0 left-0 z-10 flex items-center gap-1.5 my-1 ml-1",
+        // `ml-[36px]` (was `ml-1`/4px) — per explicit follow-up, with a
+        // screenshot showing the overlay painting directly over the row's
+        // leading `isRowOpen` "eye" icon column (§58): that column is fixed
+        // `w-[40px]`, so a 4px inset left this absolutely-positioned overlay
+        // (still anchored `left-0` against the row itself, not that column)
+        // covering it whenever both were present on the same row. 36px
+        // clears the eye-icon column's own width, applied unconditionally —
+        // for the majority of rows with `leadingChannelStack` but no
+        // `isRowOpen` (2.0's Desk-tab table, if ever wired) this just reads
+        // as a bit more inset from the row edge, not a visible bug.
+        "absolute inset-y-0 left-0 z-10 flex items-center gap-1.5 my-1 ml-[36px]",
         "rounded-lyra-sm",
         "opacity-0 pointer-events-none transition-opacity",
         "group-hover:opacity-100 group-hover:pointer-events-auto",
@@ -841,6 +852,7 @@ export function CustomersListView({
   sortedRows,
   openRowId,
   leadingChannelStack = false,
+  isRowOpen,
 }: {
   onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
   // Filter state is a controlled prop, not local `useState`, so it lives on
@@ -891,6 +903,36 @@ export function CustomersListView({
    *  out of scope for this request and stay on the original "Channels"
    *  column. */
   leadingChannelStack?: boolean;
+  /**
+   * Per explicit request ("add a blank column header and if a record is
+   * open as an assignment or as a tab add an eye icon to indicate it is
+   * being viewed by someone") — an optional per-row lookup a consumer can
+   * pass to indicate a customer is currently open elsewhere (a left-nav
+   * assignment card, a customer full-screen tab, etc.). When provided, a
+   * fixed leading column (blank/`sr-only` header, same non-reorderable/
+   * non-toggleable treatment as the trailing "Actions" column below) shows
+   * a Lucide `Eye` icon for any row this returns `true` for. Deliberately
+   * a caller-supplied function rather than this component reaching into
+   * `interactions`/`openCustomerTabs` state itself — those are owned by
+   * each page file, not this shared table, and Advanced has no customer
+   * full-screen tabs at all (see AgentWorkspaceAdvancedPage.tsx's own
+   * `isRowOpen` call site) — keeping the check itself entirely up to the
+   * caller means this component doesn't need to know which "open"
+   * mechanisms exist in a given tier. Omit entirely (default: no column
+   * rendered at all) for consumers that don't want this indicator — 2.0's
+   * own Desk-tab usage is out of scope for this request and doesn't pass
+   * it, so it renders exactly as before. Per a later explicit follow-up
+   * (screenshot showing the `leadingChannelStack` hover overlay covering
+   * this column on Agent Workspace Advanced's Search-panel Customers
+   * sub-tab, "you didn't add the icon to advanced" / "I mean advanced"),
+   * the Search panel's own Customers sub-tab (`agent-next-gen-search-
+   * panel.tsx`) — which per its own `leadingChannelStack` doc comment
+   * already only ever renders from Advanced — now wires this too, reusing
+   * the exact same `interactions.some(...)` check Advanced's main Desk-tab
+   * table already passes (no `openCustomerTabs` concept there, same as
+   * that call site).
+   */
+  isRowOpen?: (row: CustomerListRecord) => boolean;
 }) {
   // `"channels"` is dropped from the column system entirely in
   // `leadingChannelStack` mode — it's no longer a normal column at all
@@ -1035,6 +1077,11 @@ export function CustomersListView({
         <Table style={{ minWidth: tableMinWidth }}>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
+              {isRowOpen && (
+                <TableHead className="w-[40px] shrink-0">
+                  <span className="sr-only">Open</span>
+                </TableHead>
+              )}
               {columnOrder.map((key: CustomerColKey) => {
                 const col = CUSTOMER_COLUMN_CONFIG[key];
                 return (
@@ -1086,6 +1133,16 @@ export function CustomersListView({
                 data-state={row.contactNumber === openRowId ? "selected" : undefined}
                 onClick={() => onRowClick(row)}
               >
+                {isRowOpen && (
+                  <TableCell className="w-[40px] shrink-0">
+                    {isRowOpen(row) && (
+                      <>
+                        <Eye className="h-4 w-4 text-lyra-fg-secondary" strokeWidth={1.5} aria-hidden="true" />
+                        <span className="sr-only">{`${row.firstName} ${row.lastName} is currently open`}</span>
+                      </>
+                    )}
+                  </TableCell>
+                )}
                 {leadingChannelStack && (
                   <CustomerChannelStack row={row} onStartInteraction={onStartInteraction} />
                 )}

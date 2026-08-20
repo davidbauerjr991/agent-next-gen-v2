@@ -1324,13 +1324,43 @@ export function PerformanceBreakdownCard() {
 /* Performance summary card — mirrors PerformanceBreakdownCard's pattern:
    owns its own date filter state and looks up dummy data per range so the
    Assignments Resolved / Overall Performance numbers — and the Channel Type
-   breakdown below them — change when a range is picked. */
-export function PerformanceSummaryCard() {
+   breakdown below them — change when a range is picked.
+
+   Per explicit follow-up, with a screenshot of this card's own "Assignments
+   Resolved: 12" row: "make sure the assignments resolved matches the count
+   in the top right chip in the dashboard" — that chip is the dashboard
+   header's own live `resolvedTodayCount` Badge ("{n} Assignments resolved
+   today", each page's own doc comment on that Badge), a REAL count that
+   starts at 0 every session and increments as `handleInteractionStatusChange`
+   actually marks a channel Resolved. This card's own "today" figure used to
+   come from `PERFORMANCE_DATA_BY_RANGE.today.casesResolved` instead — a
+   fixed mock value ("12") — which is exactly the mismatch this follow-up is
+   about; the two numbers disagreeing was previously a deliberate, explicitly
+   requested trade-off (see each page's own call site, now updated), but this
+   follow-up overrides that. `liveResolvedTodayCount` is optional (each of
+   the 3 call sites passes its own page-level `resolvedTodayCount` state) and
+   is only substituted in for the "today" range specifically — "Yesterday"/
+   "Last 7 Days"/"Custom" have no live-tracked equivalent to substitute, so
+   they keep showing `PERFORMANCE_DATA_BY_RANGE`'s own mock figures
+   unchanged. */
+export function PerformanceSummaryCard({
+  liveResolvedTodayCount,
+}: {
+  /** This page's own live `resolvedTodayCount` state — see this card's own
+   *  doc comment above for why. Omit for a consumer with no such live
+   *  counter to pass (none currently — all 3 pages have one), in which case
+   *  this card falls back to its previous mock-only behavior. */
+  liveResolvedTodayCount?: number;
+} = {}) {
   const [dateFilter, setDateFilter] = useState<DateFilterValue>("today");
   const data = PERFORMANCE_DATA_BY_RANGE[dateFilter];
   const channelData = CHANNEL_TYPE_DATA_BY_RANGE[dateFilter];
   const overallYou = CHANNEL_TYPE_META.reduce((sum, meta) => sum + channelData[meta.id].you, 0);
   const overallTeam = CHANNEL_TYPE_META.reduce((sum, meta) => sum + channelData[meta.id].team, 0);
+  const casesResolvedDisplay =
+    dateFilter === "today" && liveResolvedTodayCount !== undefined
+      ? String(liveResolvedTodayCount)
+      : data.casesResolved;
 
   return (
     <DashboardCard
@@ -1344,7 +1374,7 @@ export function PerformanceSummaryCard() {
       <div className="flex flex-col gap-3 px-4 pb-4">
         <div className="flex items-center justify-between">
           <span className="lyra-body-md text-lyra-fg-secondary">Assignments Resolved</span>
-          <span className="lyra-heading-sm text-lyra-fg-default">{data.casesResolved}</span>
+          <span className="lyra-heading-sm text-lyra-fg-default">{casesResolvedDisplay}</span>
         </div>
         <div className="flex items-center justify-between">
           <span className="lyra-body-md text-lyra-fg-secondary">Overall Performance</span>
