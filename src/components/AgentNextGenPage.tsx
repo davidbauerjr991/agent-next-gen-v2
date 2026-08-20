@@ -71,6 +71,7 @@ import {
   CURRENT_AGENT_FIRST_NAME,
   CURRENT_AGENT_LAST_NAME,
   formatHeaderDate,
+  formatHeaderGreeting,
   withoutChannelStatus,
   nextCustomerSortDirection,
   synthesizeChannelAddress,
@@ -6401,7 +6402,7 @@ export function AgentNextGenPage({
                       // visibly indented past them.
                       <div className="-mx-6 mb-6">
                         <PageHeader
-                          title={`Welcome Back, ${CURRENT_AGENT_FIRST_NAME}`}
+                          title={formatHeaderGreeting(CURRENT_AGENT_FIRST_NAME)}
                           subtitle={formatHeaderDate()}
                           // `bordered={false}` per earlier explicit
                           // request — same opt-out lyra-ui's own "Record

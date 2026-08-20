@@ -841,6 +841,12 @@ Files touched: `agent-next-gen-shared-utils.ts` (`formatHeaderSubtitle` renamed 
 
 Verified tsc-clean (51-error app baseline unchanged across all 3 page files) and eslint-clean (same pre-existing findings across all 4 touched files, unchanged in kind/count/location).
 
+**Follow-up (much later session): time-of-day greeting and subhead time both restored.** Per explicit request ("update the page header on the home page to say 'Good {Morning/Evening/Afternoon}, {Name}' and add the time back to the date subhead"), this reverses the very reasoning that started this section — the "agent's local clock/timezone isn't reliable over VPN" concern is explicitly overridden by this later request. The title's flat `Welcome Back, ${name}` is replaced by a new `formatHeaderGreeting(name)` helper returning "Good Morning/Afternoon/Evening, {name}" based on `new Date().getHours()` (boundaries: 5am–11:59am Morning, 12pm–4:59pm Afternoon, otherwise Evening — a common convention, not explicitly specified). `formatHeaderDate` gains the time back onto its existing bare date, e.g. "August 20, 2026 · 2:41 PM" — same `· ` separator the very first version of this subtitle used, before the time was first dropped earlier in this section. Both still ride the same `clockTick`-driven re-render everything else on this page already relies on, so the greeting/time update live for free without a dedicated interval.
+
+Files touched: `agent-next-gen-shared-utils.ts` (new `formatHeaderGreeting` function + export; `formatHeaderDate` body appends the time part; both doc comments rewritten with the full history); `AgentNextGenPage.tsx`, `AgentWorkspace2WithDeskPage.tsx`, `AgentWorkspaceAdvancedPage.tsx` (title literal → `formatHeaderGreeting(CURRENT_AGENT_FIRST_NAME)`, `formatHeaderGreeting` import added; `formatHeaderDate()` call site itself unchanged, since the time addition lives entirely inside the shared helper).
+
+Verified tsc-clean (51-error app baseline unchanged) and eslint-clean (same pre-existing findings across all 4 touched files — `PanelLeftClose` unused import, hand-rolled-button rule violation, `useMemo` dependency warning, and unused eslint-disable directives per page file, plus `_omit` in shared-utils.ts — unchanged in kind/count/location, none introduced by this change).
+
 ## 63. Contact History card: third row shows the routing skill instead of the customer ID
 
 Per explicit follow-up, with a screenshot of the Contact History card's row list ("CST-22841", "CST-30164", etc. as the third line of each row): "instead of using the Customer ID in the third row - use the Skill Name."
@@ -905,3 +911,43 @@ That "top right chip" is each page's own dashboard-header `Badge` reading `resol
 Files touched: `agent-next-gen-interaction-dashboard.tsx` (`PerformanceSummaryCard`'s new prop + doc comment), `AgentNextGenPage.tsx`/`AgentWorkspace2WithDeskPage.tsx`/`AgentWorkspaceAdvancedPage.tsx` (one call site each, plus the header-badge doc comment update).
 
 Verified tsc-clean (51-error app baseline unchanged across all 4 touched files) and eslint-clean (all errors/warnings in the 4 touched files confirmed pre-existing and unrelated to this change — no new findings).
+
+## 67. Contact History row: drop the redundant skill prefix from a dismissed row's description
+
+Per explicit follow-up, with a screenshot of a dismissed dial-pad row reading "General Support — resolved and dismissed by agent" as its description directly above a third line ALSO reading "General Support" (the skill-name row added by §63): "remove the redundant skill in the description of the contact history items (General Support -)."
+
+Root cause: `buildDismissedContactHistoryEntry`'s `description` prefixes `primaryChannel.preview` whenever it's set (`"{preview} — {status} and dismissed by agent"`). For a skill/agent quick-dialed `Thread`, `preview` is populated with the real routing skill's own label at creation time (e.g. `preview: skillLabel` in each page's own dial-pad launch handler) — not a message snippet the way it is for other channel types. That same function's `skillName` field, meanwhile, has no real per-interaction skill data to draw from (nothing on `Interaction` tracks it) and always falls back to a hardcoded generic `"General Support"`. Whenever a dismissed row's real routing skill happened to BE "General Support," both fields ended up holding the exact same string, rendered back to back.
+
+Fix: `skillName` is now its own local constant inside the function (still `"General Support"`, unchanged value) so `description`'s own prefix logic can compare directly against it — the `primaryChannel.preview` prefix is now only included when `preview` is set AND not equal to that same `skillName` string. A `preview` holding genuinely different content (a real message snippet from another code path, or a distinct skill label like "Billing") still shows normally; only the exact-duplicate case is suppressed.
+
+Files touched: `agent-next-gen-contact-history.tsx` only (`buildDismissedContactHistoryEntry`).
+
+Verified tsc-clean (51-error app baseline unchanged; this file's own 1 pre-existing `LucideIcon`-type error unchanged, just shifted line number) and eslint-clean (13 pre-existing fast-refresh warnings, 0 errors, unchanged).
+
+## 68. Login modal: header reads "Agent Workspace", launch button reads plain "Launch"
+
+Per explicit request: "in the login screen change the modal header to say 'Agent Workspace' instead of 'Agent next Gen' - make the button say 'Launch'."
+
+The login modal is lyra-ui's own shared `LoginCard` component (`agent-next-gen-v2/src/components/LoginPage.tsx` just renders `<LoginCard onLaunch={...} />` with no other props), whose `appName` prop defaults to `"Agent Next Gen"` and drives both the header title (`Container`'s own `headerTitle={appName}`) and the launch button's own label (`` `Launch ${appName}` `` idle, `` `Launching ${appName}…` `` mid-launch).
+
+Rather than changing that shared default (other consumers of `LoginCard` may rely on it — none of lyra-ui's own Storybook stories override `appName`, but this app isn't the only real consumer either), `LoginPage.tsx` now passes `appName="Agent Workspace"` explicitly — changes the header without touching the shared component's own default.
+
+For the button, simply changing `appName` alone would have produced "Launch Agent Workspace," not the plain "Launch" the request asked for. `LoginCard` gained a new optional `launchButtonLabel?: string` prop (lyra-ui, login-card.tsx) — when set, it's used verbatim in place of `` `Launch ${appName}` `` for the button's idle-state label; the in-progress `"Launching {appName}…"` status text is untouched (that's genuinely informative progress feedback, not a redundant static label). `LoginPage.tsx` passes `launchButtonLabel="Launch"`.
+
+Files touched: `lyra-ui/src/components/login-card.tsx` (new `launchButtonLabel` prop + doc comment), `agent-next-gen-v2/src/components/LoginPage.tsx` (one call site, `appName` + `launchButtonLabel`).
+
+Verified lyra-ui tsc-clean (3-error pre-existing baseline unchanged — `admin-shell.tsx` ×2, `list-item.tsx` ×1, all unrelated); lyra-ui has no standalone eslint config (its own `package.json` "lint" script is `tsc --noEmit`, matching this verification). Verified app tsc-clean (51-error baseline unchanged; `LoginPage.tsx` itself has 0 errors) and eslint-clean (`LoginPage.tsx`: 0 problems).
+
+## 69. Agent Workspace 2.0 Premium: WEM and Interactions added to the top-right app area
+
+Per explicit follow-up (first phrased ambiguously as "in 2.0 - add wem and interactions into the apps top right... like in 2.0 basic," then corrected: "sorry I mean premium - add wem and interactions into the apps top right"), `AgentWorkspace2WithDeskPage.tsx` ("Agent Workspace 2.0 Premium") is brought up to parity with `AgentNextGenPage.tsx` ("Agent Workspace 2.0," aka "2.0 basic") for these two apps specifically.
+
+WEM already existed in Premium (added generally to all three tiers per §99's own predecessor work) but was still using the original placeholder icon and was still in `HIDDEN_FROM_APPS_MENU` — meaning, since it was also unpinned by default, it had no way to be opened at all. Now matches 2.0 basic exactly: `PANEL_KEY_METADATA.wem`'s icon is `UserCog` (not `Gauge`), and `"wem"` is removed from `HIDDEN_FROM_APPS_MENU` — it's still unpinned by default (no permanent header icon), but reachable via "View All Apps" like Notifications/Agent Chat/etc.
+
+Interactions specifically was requested to live inside the Search panel ("put interactions in search"), not as its own separate top-right icon — mirroring 2.0 basic's own Search panel, which already has an Interactions sub-tab alongside Messages/Threads. Premium's `WITH_DESK_SEARCH_PANEL_TABS` (passed to the shared `useSearchPanelContent` hook) gains `"interactions"` back (it had been explicitly removed in an earlier, unrelated request that trimmed Premium's Search panel down to just Messages/Threads — that earlier removal is superseded by this one, for Interactions only; Customers still isn't included, staying 2.0-basic-only). The hook's `UseSearchPanelContentOptions` requires `onAddToast`/`onOpenInteraction` once `"interactions"` is in `tabs` — Premium's `searchContent` call site now passes its own existing `addToast` and `handleOpenInteractionRow`, the same pair its separate "Interactions" DESK tab already used elsewhere in this file. Premium's own standalone "Interactions" DESK tab (`activeDeskTab === "interactions"`) is untouched — this only adds the Search panel's own Interactions sub-tab, it doesn't remove or duplicate the dashboard tab.
+
+Files touched: `AgentWorkspace2WithDeskPage.tsx` only (icon import swap, `PANEL_KEY_METADATA.wem`, `HIDDEN_FROM_APPS_MENU`, `WITH_DESK_SEARCH_PANEL_TABS`, `useSearchPanelContent` call site, plus doc-comment updates at both edit sites).
+
+Verified tsc-clean (51-error app baseline unchanged) and eslint-clean for this file specifically (2 pre-existing errors + 4 pre-existing warnings, all at unrelated lines — unused `PanelLeftClose` import, a hand-rolled-button rule violation, a `useMemo` dependency warning, and unused eslint-disable directives — none introduced or touched by this change).
+
+**Follow-up (same session):** Per immediate explicit follow-up ("remove the wem and interactions tabs in premium"), this entire change is reverted for Premium: `PANEL_KEY_METADATA.wem`'s icon is back to `Gauge`, `"wem"` is back in `HIDDEN_FROM_APPS_MENU` (fully unreachable again, matching this page's pre-§69 state), and `WITH_DESK_SEARCH_PANEL_TABS` is back to `["messages", "threads"]` with the `useSearchPanelContent` call site back to just `{ tabs: WITH_DESK_SEARCH_PANEL_TABS }` (no `onAddToast`/`onOpenInteraction`). `AgentNextGenPage.tsx` ("2.0 basic") is untouched by either this or the original change — it already had WEM reachable and Interactions in Search before this session, and keeps that. Verified tsc-clean (51-error baseline unchanged) and eslint-clean for `AgentWorkspace2WithDeskPage.tsx` (same pre-existing baseline as above, unchanged).

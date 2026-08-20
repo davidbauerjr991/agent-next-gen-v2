@@ -656,23 +656,41 @@ export function buildDismissedContactHistoryEntry(interaction: Interaction, cloc
   // which case `contactHistoryDisplayIdentity` (above) falls back to
   // `name` rather than showing nothing.
   const channelAddress = primaryChannel?.addressLabel ?? primaryChannel?.value;
+  // Nothing on `Interaction` tracks which skill it was originally routed
+  // under (channels/threads carry no such field — see `Interaction`'s own
+  // type), so a dismissed row falls back to this generic label rather than
+  // guessing. Every other `ContactHistoryEntry` construction site (the
+  // hand-authored rows above, `buildContactHistoryFromCustomers`'s
+  // templates) has a real authored value instead. Declared as its own
+  // constant (rather than inlined below) so `description`'s own dedupe
+  // check just below can compare against the exact same string used for
+  // the `skillName` field, per the follow-up doc comment on `description`.
+  const skillName = "General Support";
   return {
     id: `dismissed-${interaction.id}-${Date.now()}`,
     name: interaction.customerName ?? "Customer",
     statusLabel,
     statusVariant: SESSION_STATUS_TO_CONTACT_HISTORY_VARIANT[statusLabel] ?? "success",
     redial: channelType === "voice",
-    description: primaryChannel?.preview
-      ? `${primaryChannel.preview} — ${statusLabel.toLowerCase()} and dismissed by agent`
-      : `${statusLabel} and dismissed by agent`,
+    // Per explicit follow-up, with a screenshot of a dismissed dial-pad row
+    // reading "General Support — resolved and dismissed by agent" (this
+    // line) directly above a third line ALSO reading "General Support"
+    // (`skillName`, just below): "remove the redundant skill in the
+    // description." `primaryChannel.preview` is set to the real routing
+    // skill's label for a skill/agent quick-dialed `Thread` (see
+    // `Thread.preview`'s own call sites, e.g. `preview: skillLabel` at this
+    // channel's creation) — when it happens to equal this row's own
+    // (generic, hardcoded) `skillName` above, prefixing the description
+    // with it is pure duplication of the very next line down. Only
+    // suppressed in that exact case — a `preview` holding something
+    // genuinely different (a real message snippet, a distinct skill name)
+    // still shows normally, since that's actually new information.
+    description:
+      primaryChannel?.preview && primaryChannel.preview !== skillName
+        ? `${primaryChannel.preview} — ${statusLabel.toLowerCase()} and dismissed by agent`
+        : `${statusLabel} and dismissed by agent`,
     caseId: interaction.customerId,
-    // Nothing on `Interaction` tracks which skill it was originally routed
-    // under (channels/threads carry no such field — see `Interaction`'s own
-    // type), so a dismissed row falls back to this generic label rather
-    // than guessing. Every other `ContactHistoryEntry` construction site
-    // (the hand-authored rows above, `buildContactHistoryFromCustomers`'s
-    // templates) has a real authored value instead.
-    skillName: "General Support",
+    skillName,
     channelType,
     channelLabel: CONTACT_HISTORY_CHANNEL_LABEL[channelType],
     timeAgo: "Just now",

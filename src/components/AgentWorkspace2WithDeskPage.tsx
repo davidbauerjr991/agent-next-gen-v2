@@ -82,6 +82,7 @@ import {
   CURRENT_AGENT_FIRST_NAME,
   CURRENT_AGENT_LAST_NAME,
   formatHeaderDate,
+  formatHeaderGreeting,
   withoutChannelStatus,
   nextCustomerSortDirection,
   synthesizeChannelAddress,
@@ -359,9 +360,13 @@ const SCREEN_POP_APPS: SelectOption[] = [
 // Search panel's own sub-tabs (`useSearchPanelContent`, agent-next-gen-
 // search-panel.tsx) — just Messages/Threads here per explicit request
 // ("remove customers and Interactions, just have Messages and Threads").
-// `AgentNextGenPage.tsx` passes its own, longer list (all 4, Customers
-// first) to the same hook instead of this constant — see that file's own
-// call site.
+// Interactions was briefly added back (matching `AgentNextGenPage.tsx`'s
+// own tab set) per a follow-up ("add wem and interactions into the apps top
+// right... put interactions in search"), then explicitly removed again
+// right after ("remove the wem and interactions tabs in premium") — this
+// page keeps its own separate "Interactions" DESK tab
+// (`activeDeskTab === "interactions"`, further down this file) as the only
+// place Interactions lives here.
 const WITH_DESK_SEARCH_PANEL_TABS: SearchPanelTabKey[] = ["messages", "threads"];
 
 // Builds a `tagOpenChannels` closure off of the given `interactions` — reads
@@ -3885,6 +3890,14 @@ export function AgentWorkspace2WithDeskPage({
   // `SearchInput` + blank body, no sub-tabs) — replaced outright, not kept
   // alongside the new one.
   //
+  // `"messages"`/`"threads"` per an earlier explicit request ("remove
+  // customers and Interactions, just have Messages and Threads");
+  // `"interactions"` added back per a later follow-up ("add wem and
+  // interactions into the apps top right... put interactions in search"),
+  // matching `AgentNextGenPage.tsx`'s own tab set minus Customers. Still no
+  // `customers` bag, since the Customers tab itself stays 2.0-basic-only.
+  // `onAddToast`/`onOpenInteraction` are required once `"interactions"` is
+  // in `tabs` (see `UseSearchPanelContentOptions`) — reusing this page's own
   // Only `"messages"`/`"threads"` here — per explicit request ("remove
   // customers and Interactions, just have Messages and Threads") — unlike
   // `AgentNextGenPage.tsx`'s own 4-tab list. This page keeps its own
@@ -4004,7 +4017,10 @@ export function AgentWorkspace2WithDeskPage({
   // (per explicit request) — `panelOrder`/`pinnedKeys` themselves are
   // untouched, so Customers (already pinned) keeps its header icon; Accounts/
   // Tickets/WEM (already unpinned) simply have no way to open them anymore,
-  // since this menu was their only entry point.
+  // since this menu was their only entry point. WEM was briefly removed from
+  // this list ("add wem... into the apps top right... like in 2.0 basic"),
+  // then explicitly put back ("remove the wem and interactions tabs in
+  // premium").
   const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["customers", "accounts", "tickets", "wem"];
   const appsMenuItems: MenuEntry[] = panelOrder.filter((key: PanelKey) => !HIDDEN_FROM_APPS_MENU.includes(key)).map((key) => {
     const { label, icon: KeyIcon } = PANEL_KEY_METADATA[key];
@@ -6590,7 +6606,7 @@ export function AgentWorkspace2WithDeskPage({
                       // visibly indented past them.
                       <div className="-mx-6 mb-6">
                         <PageHeader
-                          title={`Welcome Back, ${CURRENT_AGENT_FIRST_NAME}`}
+                          title={formatHeaderGreeting(CURRENT_AGENT_FIRST_NAME)}
                           subtitle={formatHeaderDate()}
                           // `bordered={false}` per earlier explicit
                           // request — same opt-out lyra-ui's own "Record

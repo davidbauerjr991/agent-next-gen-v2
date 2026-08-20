@@ -172,35 +172,58 @@ const CURRENT_AGENT_NAME = "John Smith";
 
 const [CURRENT_AGENT_FIRST_NAME, CURRENT_AGENT_LAST_NAME] = CURRENT_AGENT_NAME.split(" ");
 
-/* Dashboard page-header subtitle — a bare "August 20, 2026", read fresh on
-   every render. History, in order, across several explicit follow-ups:
+/* Dashboard page-header subtitle — "August 20, 2026 · 2:41 PM", read fresh
+   on every render. History, in order, across several explicit follow-ups:
    originally "Wednesday, July 29, 2026 · 9:41 AM" (date + time); the
-   time-of-day portion was dropped first ("remove the time from the date
-   subhead and just have the date"); it was then briefly replaced with a
-   full sentence wrapped around the date ("Please review your queue and
+   time-of-day portion was dropped ("remove the time from the date subhead
+   and just have the date"); it was then briefly replaced with a full
+   sentence wrapped around the bare date ("Please review your queue and
    performance below for {Month Day, Year}", then re-worded to "Below is
    your dashboard for {Month Day, Year}"); reverted back to the bare date
    alone per a later explicit follow-up ("go back to the {Month Day, Year}
-   for the subhead"). Time-of-day stays dropped for the same reason the
-   header TITLE doesn't greet by time of day either (see
-   `CURRENT_AGENT_FIRST_NAME`'s own call sites: "Welcome Back, {name}", no
-   time-of-day variant): an agent's local clock/timezone isn't reliable when
-   they're connected through a VPN whose exit point sits elsewhere, so
-   nothing in this header depends on time-of-day, only the calendar date.
-   Renders without a weekday ("August 20, 2026", not "Thursday, August 20,
-   2026") — that "{Month Day, Year}" format is the one thing every version
-   of this subtitle, sentence-wrapped or bare, has kept in common. Was
+   for the subhead"); the time-of-day portion was then added back per a
+   later explicit request ("add the time back to the date subhead") — the
+   same request that also restored the header TITLE's own time-of-day
+   greeting (see `formatHeaderGreeting` below), reversing the earlier
+   VPN-timezone-unreliability reasoning that had dropped both. Still no
+   weekday ("August 20, 2026," not "Thursday, August 20, 2026") — that
+   "{Month Day, Year}" format is the one thing every version of this
+   subtitle, sentence-wrapped or bare, has kept in common. Was
    `formatHeaderSubtitle` while it briefly held a full sentence; renamed
-   back to `formatHeaderDate` now that it's a bare date again — kept as its
-   own shared helper (rather than inlined at each of the 3 call sites) since
+   back to `formatHeaderDate` once it went back to a date — kept as its own
+   shared helper (rather than inlined at each of the 3 call sites) since
    it's identical across all 3 tiers. Ticks live for free: the main
    component's own `clockTick` state already re-renders this whole tree once
    a second for the open-channel elapsed timers, so this just reads
    `new Date()` again on whichever render that produces — no separate
-   interval needed here (rolls over at midnight without a page reload). */
+   interval needed here (rolls over at midnight, and updates the visible
+   minute, without a page reload). */
 function formatHeaderDate(): string {
   const now = new Date();
-  return now.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+  const datePart = now.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+  const timePart = now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${datePart} · ${timePart}`;
+}
+
+/* Dashboard page-header title — "Good Morning/Afternoon/Evening, {name}",
+   read fresh on every render off the agent's local clock, same "ticks live
+   for free" reasoning as `formatHeaderDate` above. History: this started as
+   a time-of-day greeting ("Good morning, John"), was flattened to a plain
+   "Welcome Back, {name}" per an explicit follow-up reasoning that an
+   agent's local clock/timezone isn't reliable when connected through a VPN
+   whose exit point sits elsewhere — then restored to a time-of-day greeting
+   again per a later explicit request ("update the page header on the home
+   page to say 'Good {Morning/Evening/Afternoon}, {Name}'"), which
+   supersedes that earlier VPN-timezone concern. Boundaries (5am–11:59am
+   "Morning", 12pm–4:59pm "Afternoon", otherwise "Evening") are a common
+   convention, not something explicitly specified. Takes `name` as a
+   parameter rather than hardcoding `CURRENT_AGENT_FIRST_NAME` itself, since
+   all 3 call sites already import that constant separately for other uses
+   (e.g. the welcome modal's own greeting). */
+function formatHeaderGreeting(name: string): string {
+  const hour = new Date().getHours();
+  const partOfDay = hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
+  return `Good ${partOfDay}, ${name}`;
 }
 
 /* Deterministic 12-digit case-ID generator (no Math.random, so the dashboard
@@ -548,6 +571,7 @@ export {
   CURRENT_AGENT_FIRST_NAME,
   CURRENT_AGENT_LAST_NAME,
   formatHeaderDate,
+  formatHeaderGreeting,
   makeCaseId,
   formatCreateDate,
   percentOfTeam,
