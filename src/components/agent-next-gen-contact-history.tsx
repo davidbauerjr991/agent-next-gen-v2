@@ -19,10 +19,11 @@ import {
   Tag,
   Label,
   WhatsAppIcon,
+  ChatMessage,
 } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_CUSTOMERS } from "@nicecxone/lyra-ui/customers-data";
 import { type Interaction } from "@/components/agent-next-gen-interaction-dashboard";
-import { formatElapsedTime, CURRENT_AGENT_NAME } from "@/components/agent-next-gen-shared-utils";
+import { formatElapsedTime, CURRENT_AGENT_NAME, initialsFor } from "@/components/agent-next-gen-shared-utils";
 import { cn } from "@/lib/utils";
 import {
   type LucideIcon,
@@ -405,44 +406,36 @@ function buildContactHistoryEmailBody(entry: ContactHistoryEntry): string {
 }
 
 /** One read-only customer/agent bubble for `ContactHistoryEntryDetail`'s
- *  own synthesized message thread (chat/SMS/WhatsApp rows only) — same
- *  avatar/bubble/timestamp classes as
- *  `CustomerHistoryConversationMessageBubble` (agent-next-gen-customer-
- *  info-panel.tsx) for visual consistency between the two "read a past
- *  conversation" experiences in this app; redeclared locally rather than
- *  imported, to avoid the same circular import `ContactHistoryMessage`'s
- *  own doc comment describes. No hover toolbar (Copy/Add tag) — this is
- *  closed history, nothing to copy/tag in-progress. */
-function ContactHistoryMessageBubble({ message }: { message: ContactHistoryMessage }) {
+ *  own synthesized message thread (chat/SMS/WhatsApp rows only) — was a
+ *  hand-rolled copy of the live-transcript bubble markup (nearly identical
+ *  to `CustomerHistoryConversationMessageBubble`, agent-next-gen-customer-
+ *  info-panel.tsx's own equivalent), now just a thin adapter over lyra-ui's
+ *  shared `ChatMessage` — same component the real, in-progress transcript
+ *  uses (`TranscriptMessageBubble` above). No `onCopy`/`tagOptions` passed
+ *  — this is closed history, nothing to copy/tag in-progress, and
+ *  `ChatMessage`'s own toolbar stays hidden entirely when those are
+ *  omitted. `customerName`/`agentName` — this component doesn't know either
+ *  on its own (`ContactHistoryMessage` carries no name field), so
+ *  `ContactHistoryEntryDetail` passes both down from `entry`/
+ *  `CURRENT_AGENT_NAME`. */
+function ContactHistoryMessageBubble({
+  message,
+  customerName,
+  agentName,
+}: {
+  message: ContactHistoryMessage;
+  customerName: string;
+  agentName: string;
+}) {
   const isCustomer = message.sender === "customer";
   return (
-    <div className={cn("flex flex-col", isCustomer ? "items-start" : "items-end")}>
-      <div className={cn("flex max-w-[85%] items-start gap-2", isCustomer ? "flex-row" : "flex-row-reverse")}>
-        <span
-          className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full lyra-body-sm-emphasis lyra-transcript-avatar",
-            isCustomer
-              ? "bg-lyra-accent-green-soft text-lyra-accent-green-strong"
-              : "bg-lyra-bg-primary text-lyra-fg-on-primary"
-          )}
-          aria-hidden="true"
-        >
-          {isCustomer ? "C" : "A"}
-        </span>
-        <div className="flex min-w-0 flex-col gap-1">
-          <div
-            className={cn(
-              "rounded-lyra-lg px-4 py-3 border border-transparent",
-              isCustomer ? "rounded-tl-none bg-lyra-state-hover" : "rounded-tr-none"
-            )}
-            style={!isCustomer ? { backgroundColor: "var(--lyra-color-bg-conversation-user)" } : undefined}
-          >
-            <p className="lyra-body-md text-lyra-fg-default">{message.text}</p>
-            <span className="mt-2 block lyra-body-sm text-lyra-fg-secondary">{message.timestampDisplay}</span>
-          </div>
-        </div>
-      </div>
-    </div>
+    <ChatMessage
+      variant={message.sender}
+      name={isCustomer ? customerName : agentName}
+      initials={initialsFor(isCustomer ? customerName : agentName)}
+      timestamp={message.timestampDisplay}
+      text={message.text}
+    />
   );
 }
 
@@ -1140,7 +1133,7 @@ export function ContactHistoryEntryDetail({ entry }: { entry: ContactHistoryEntr
               isVoice ? (
                 <ContactHistoryTranscriptLine key={i} message={message} customerName={entry.name} />
               ) : (
-                <ContactHistoryMessageBubble key={i} message={message} />
+                <ContactHistoryMessageBubble key={i} message={message} customerName={entry.name} agentName={CURRENT_AGENT_NAME} />
               )
             )}
           </div>

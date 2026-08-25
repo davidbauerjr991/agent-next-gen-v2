@@ -42,6 +42,7 @@ import {
   KebabMenuButton,
   type ToastItem,
   SearchInput,
+  ChatMessage,
 } from "@nicecxone/lyra-ui";
 import { type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
 import { type Thread } from "@/components/agent-next-gen-interaction-dashboard";
@@ -56,6 +57,7 @@ import {
   isWithinCustomerHistoryDateRange,
   phoneValueFromDisplay,
   phoneDisplayFromValue,
+  initialsFor,
 } from "@/components/agent-next-gen-shared-utils";
 import { type ContactHistoryStatusVariant } from "@/components/agent-next-gen-contact-history";
 import { OUTBOUND_AGENTS } from "@/components/agent-next-gen-outbound-data";
@@ -1010,43 +1012,37 @@ export function CustomerHistoryDetailField({ label, value }: { label: string; va
 export const CUSTOMER_HISTORY_DETAIL_TABS = ["Details", "Conversation"];
 
 /** One read-only customer/agent bubble for the Conversation tab's SMS
- *  thread (`CustomerHistoryConversationContent` below) — a trimmed-down
- *  sibling of `TranscriptMessageBubble` (this file's live-transcript
- *  bubble), reusing the exact same avatar/bubble/timestamp classes for
- *  visual consistency. No hover toolbar (Copy/Add tag) or tags row here —
- *  both are live-editing affordances for an open conversation, and every
- *  session this panel shows is already closed history; there's nothing to
- *  tag or copy-in-progress. */
-export function CustomerHistoryConversationMessageBubble({ message }: { message: CustomerHistoryConversationMessage }) {
+ *  thread (`CustomerHistoryConversationContent` below) — was a hand-rolled
+ *  copy of the live-transcript bubble markup (nearly identical to
+ *  `ContactHistoryMessageBubble`, agent-next-gen-contact-history.tsx's own
+ *  equivalent), now just a thin adapter over lyra-ui's shared `ChatMessage`
+ *  — same component the real, in-progress transcript uses
+ *  (`TranscriptMessageBubble`, agent-next-gen-transcript.tsx). No
+ *  `onCopy`/`tagOptions` passed — both are live-editing affordances for an
+ *  open conversation, and every session this panel shows is already closed
+ *  history; there's nothing to tag or copy-in-progress, and `ChatMessage`'s
+ *  own toolbar stays hidden entirely when those are omitted.
+ *  `customerName`/`agentName` — `CustomerHistoryConversationMessage` itself
+ *  carries no name field, so `CustomerHistoryConversationContent` passes
+ *  both down from its own `entry` (`customerUsername`/`agentName`). */
+export function CustomerHistoryConversationMessageBubble({
+  message,
+  customerName,
+  agentName,
+}: {
+  message: CustomerHistoryConversationMessage;
+  customerName: string;
+  agentName: string;
+}) {
   const isCustomer = message.sender === "customer";
   return (
-    <div className={cn("flex flex-col", isCustomer ? "items-start" : "items-end")}>
-      <div className={cn("flex max-w-[85%] items-start gap-2", isCustomer ? "flex-row" : "flex-row-reverse")}>
-        <span
-          className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full lyra-body-sm-emphasis lyra-transcript-avatar",
-            isCustomer
-              ? "bg-lyra-accent-green-soft text-lyra-accent-green-strong"
-              : "bg-lyra-bg-primary text-lyra-fg-on-primary"
-          )}
-          aria-hidden="true"
-        >
-          {isCustomer ? "C" : "A"}
-        </span>
-        <div className="flex min-w-0 flex-col gap-1">
-          <div
-            className={cn(
-              "rounded-lyra-lg px-4 py-3 border border-transparent",
-              isCustomer ? "rounded-tl-none bg-lyra-state-hover" : "rounded-tr-none"
-            )}
-            style={!isCustomer ? { backgroundColor: "var(--lyra-color-bg-conversation-user)" } : undefined}
-          >
-            <p className="lyra-body-md text-lyra-fg-default">{message.text}</p>
-            <span className="mt-2 block lyra-body-sm text-lyra-fg-secondary">{message.timestampDisplay}</span>
-          </div>
-        </div>
-      </div>
-    </div>
+    <ChatMessage
+      variant={message.sender}
+      name={isCustomer ? customerName : agentName}
+      initials={initialsFor(isCustomer ? customerName : agentName)}
+      timestamp={message.timestampDisplay}
+      text={message.text}
+    />
   );
 }
 
@@ -1065,7 +1061,12 @@ export function CustomerHistoryConversationContent({ entry }: { entry: CustomerH
     return (
       <div className="flex flex-col gap-4 px-4 py-3">
         {(entry.conversationMessages ?? []).map((message, i) => (
-          <CustomerHistoryConversationMessageBubble key={i} message={message} />
+          <CustomerHistoryConversationMessageBubble
+            key={i}
+            message={message}
+            customerName={entry.customerUsername}
+            agentName={entry.agentName}
+          />
         ))}
       </div>
     );
@@ -1941,7 +1942,7 @@ export function CopilotSearchFooter({ className }: { className?: string }) {
       <ActionIconButton
         aria-label="Add"
         title="Add"
-        className="shrink-0 rounded-full border border-lyra-border-default"
+        className="shrink-0 rounded-full border border-lyra-border-soft"
       >
         <Plus className="h-4 w-4" strokeWidth={1.5} />
       </ActionIconButton>
@@ -2861,7 +2862,7 @@ export function CustomerInfoHoverPreview({
       // vertically centered — 80vh leaves enough margin above/below to
       // stay fully on-screen), and `max-h-[768px]` caps it from growing
       // arbitrarily tall on very large displays — per explicit spec.
-      className="flex h-[80vh] max-h-[768px] w-[340px] flex-col overflow-hidden rounded-lyra-lg border border-lyra-border-default bg-lyra-bg-surface-container-subtle shadow-lg"
+      className="flex h-[80vh] max-h-[768px] w-[340px] flex-col overflow-hidden rounded-lyra-lg border border-lyra-border-soft bg-lyra-bg-surface-container-subtle shadow-lg"
     >
       <PanelHeader
         // Static "Customer Information" now (was the customer's own

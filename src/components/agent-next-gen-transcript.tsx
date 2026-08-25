@@ -2,6 +2,7 @@ import * as AccordionPrimitive from "@radix-ui/react-accordion";
 import React, { useState, useRef, useLayoutEffect, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import {
+  ChatMessage,
   ActionIconButton,
   TagPicker,
   Tag,
@@ -540,9 +541,18 @@ export const QUICK_TAG_OPTIONS: Omit<TranscriptTag, "id">[] = [
    `InteractionTranscript` so it can be looped once per `Contact`
    instead of once for the whole (now session-grouped) transcript. Tag
    add/remove and the copy action are still owned by `InteractionTranscript`
-   (tag state lives per-session there) — this component is just the row
-   markup, taking the handlers it needs as props. Unchanged from the
-   original inline JSX otherwise. */
+   (tag state lives per-session there) — this component is just a thin
+   wrapper over lyra-ui's own `ChatMessage`, taking the handlers/state
+   `InteractionTranscript` already owns and threading them straight
+   through. `ChatMessage` now owns the actual bubble/toolbar/tags markup
+   (ported from what used to be hand-rolled directly in this function —
+   the two were kept in sync by hand for a while, this replaces that with
+   a real shared component) — see that component's own doc comment
+   (chat-message.tsx, lyra-ui) for the one deliberate layout change it
+   made along the way: the timestamp now sits before the name in the
+   header row ("9:51 AM · John Smith") instead of its own line inside the
+   bubble. This wrapper's own external prop shape is unchanged, so every
+   existing call site below needed zero changes. */
 export function TranscriptMessageBubble({
   message,
   tagPickerOpen,
@@ -566,144 +576,23 @@ export function TranscriptMessageBubble({
    *  and grows the bubble from 70% to the full available width. */
   narrow?: boolean;
 }) {
-  const isCustomer = message.sender === "customer";
   return (
-    <div className={cn("flex flex-col", isCustomer ? "items-start" : "items-end")}>
-      <div className={cn("flex items-start gap-2", narrow ? "max-w-full" : "max-w-[70%]", isCustomer ? "flex-row" : "flex-row-reverse")}>
-        {!narrow && (
-        <span
-          className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full lyra-body-sm-emphasis",
-            isCustomer
-              ? "bg-lyra-accent-green-soft text-lyra-accent-green-strong"
-              : "bg-lyra-bg-primary text-lyra-fg-on-primary"
-          )}
-          aria-hidden="true"
-        >
-          {message.initials}
-        </span>
-        )}
-        <div className="flex min-w-0 flex-col gap-1">
-          <span className={cn("lyra-body-sm text-lyra-fg-secondary px-1", !isCustomer && "text-right")}>
-            {message.name}
-          </span>
-          <div className={cn("group flex items-end gap-1.5", isCustomer ? "flex-row" : "flex-row-reverse")}>
-            <div
-              className={cn(
-                "rounded-lyra-lg px-4 py-3 border border-transparent",
-                isCustomer ? "rounded-tl-none bg-lyra-state-hover" : "rounded-tr-none"
-              )}
-              style={!isCustomer ? { backgroundColor: "var(--lyra-color-bg-conversation-user)" } : undefined}
-            >
-              <p className="lyra-body-md text-lyra-fg-default">{message.text}</p>
-              <span className="mt-2 block lyra-body-sm text-lyra-fg-secondary">{message.timestamp}</span>
-            </div>
-            {/* Copy / Add tag — hidden until the bubble row is hovered,
-                sitting just outside the bubble (right for customer bubbles,
-                left for agent bubbles), bottom-aligned with it rather than
-                overlapping it. Bare icons, no surrounding toolbar chrome
-                (no border/bg/shadow container) — just the two
-                ActionIconButtons floating next to the bubble. The
-                TagPicker's own popover (the flyout for picking a tag) is
-                unaffected by this — only the outer wrapper around these two
-                icons lost its box styling. */}
-            <div
-              className={cn(
-                // `pointer-events-none` while hidden — otherwise the
-                // invisible (opacity-0) ActionIconButtons underneath still
-                // receive hover/focus, so their Tooltip (Button's own
-                // `isIconVariant && title` wrap, tooltip.tsx) can pop open
-                // pointing at nothing whenever the cursor happens to pass
-                // over that dead space. `pointer-events-auto` restores
-                // interactivity once actually visible (hover or open).
-                //
-                // `group-focus-within:` alongside `group-hover:` — per
-                // explicit accessibility request: Copy/Add-tag are real
-                // buttons, so `opacity-0`/`pointer-events-none` alone
-                // doesn't remove them from the tab order, it just leaves
-                // them invisible (and unclickable, pre-`pointer-events-auto`)
-                // while a keyboard user has actually tabbed to one. Tabbing
-                // into either button now reveals this toolbar exactly like
-                // hovering the row does; the hover behavior itself is
-                // unchanged.
-                "mb-0.5 flex shrink-0 items-center gap-0.5 pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
-                // The "Add tag" popover renders in a portal, so moving the
-                // pointer into it isn't hovering this row anymore —
-                // group-hover alone would fade the toolbar out from under
-                // an open popover. Force it visible (and interactive)
-                // whenever this message's picker is open.
-                tagPickerOpen && "pointer-events-auto opacity-100"
-              )}
-            >
-              <ActionIconButton size="sm" title="Copy message" onClick={onCopy}>
-                <Copy className="h-3.5 w-3.5" strokeWidth={1.5} />
-              </ActionIconButton>
-              {/* `TagPicker` (lyra-ui) — a Popover-based "pick a colored tag
-                  pill" flyout, extracted from what used to be a hand-rolled
-                  Popover + raw <button> row here. Deliberately a Popover
-                  with custom content, not `Menu` — see tag-picker.tsx's own
-                  doc comment for why forcing a row that's just a colored
-                  pill through `Menu`'s icon+label+trailing template doesn't
-                  fit. Its own popover flyout is untouched by the wrapper
-                  change above — only removed the box around the trigger
-                  icons, not the picker's own dropdown. */}
-              <TagPicker
-                options={QUICK_TAG_OPTIONS}
-                appliedLabels={message.tags?.map((t) => t.label) ?? []}
-                open={tagPickerOpen}
-                onOpenChange={onTagPickerOpenChange}
-                onSelect={onAddTag}
-                // `TagPicker` is now a real checkbox multi-select (per
-                // explicit request) — unchecking an already-applied tag
-                // needs to actually remove it, not just no-op. Looks the
-                // matching `TranscriptTag` up by label to get the real id
-                // `onRemoveTag` needs (this component only tracks labels,
-                // not ids — see tag-picker.tsx's own doc comment).
-                onDeselect={(label) => {
-                  const tag = message.tags?.find((t) => t.label === label);
-                  if (tag) onRemoveTag(tag.id);
-                }}
-              />
-            </div>
-          </div>
-          {message.tags && message.tags.length > 0 && (
-            <div
-              className={cn(
-                "group/tags mt-1 flex flex-wrap items-center gap-2",
-                isCustomer ? "flex-row" : "flex-row-reverse"
-              )}
-            >
-              {message.tags.map((tag) => (
-                <Tag key={tag.id} label={tag.label} variant={tag.variant} shape="pill" onRemove={() => onRemoveTag(tag.id)} />
-              ))}
-              {/* Hover-reveal "Clear Tags" — only shows once the applied-tags
-                  row itself is hovered (a separate, named `group/tags` from
-                  the bubble row's own `group` above, so hovering the message
-                  bubble/copy-and-add-tag toolbar doesn't also reveal this).
-                  `variant="ghost"` (button.tsx) — a small, text-only button
-                  is the correct "ghost" per this design system's own
-                  naming, not a guessed style. */}
-              <Button
-                variant="ghost"
-                size="sm"
-                // `group-focus-within/tags:opacity-100` alongside the
-                // existing hover reveal — per explicit accessibility
-                // request: this button is itself the focusable element,
-                // but `group-focus-within` (not `focus-visible`) is used
-                // here instead of `favorite-button.tsx`'s simpler
-                // technique since the visibility is driven by the PARENT
-                // `group/tags` row, not this button's own focus state in
-                // isolation — matches the toolbar fix just above.
-                className="opacity-0 transition-opacity group-hover/tags:opacity-100 group-focus-within/tags:opacity-100"
-                onClick={onClearTags}
-              >
-                Clear Tags
-              </Button>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+    <ChatMessage
+      variant={message.sender}
+      name={message.name}
+      initials={message.initials}
+      timestamp={message.timestamp}
+      text={message.text}
+      narrow={narrow}
+      onCopy={onCopy}
+      tagOptions={QUICK_TAG_OPTIONS}
+      tags={message.tags}
+      tagPickerOpen={tagPickerOpen}
+      onTagPickerOpenChange={onTagPickerOpenChange}
+      onAddTag={onAddTag}
+      onRemoveTag={onRemoveTag}
+      onClearTags={onClearTags}
+    />
   );
 }
 

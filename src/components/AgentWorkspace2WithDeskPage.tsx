@@ -4646,7 +4646,7 @@ export function AgentWorkspace2WithDeskPage({
                   // shortcut. `KebabMenuButton` isn't built on `Button`
                   // (it's its own hand-rolled trigger), so these classes are
                   // reproduced directly rather than passed as a `variant` prop.
-                  className="h-11 w-11 rounded-lyra-sm border border-lyra-border-default bg-lyra-bg-control text-lyra-fg-action hover:bg-lyra-state-hover active:bg-lyra-state-pressed data-[state=open]:bg-lyra-state-hover"
+                  className="h-11 w-11 rounded-lyra-sm border border-lyra-border-soft bg-lyra-bg-control text-lyra-fg-action hover:bg-lyra-state-hover active:bg-lyra-state-pressed data-[state=open]:bg-lyra-state-hover"
                   onOpenChange={setAppsMenuOpen}
                   // Notifications is unpinnable now (see the `PanelPinButton`
                   // row above) — once it's unpinned (or responsively
@@ -6750,13 +6750,16 @@ export function AgentWorkspace2WithDeskPage({
                     }
                     // "{n} Skills" for the queue drill-down (the same count
                     // as that queue widget's own Skills metric, derived from
-                    // this exact `queueSubItems[selectedQueueId]` list) or
-                    // the case ID for a Contact History entry — either way,
-                    // the identifier that goes with `headerTitle` above.
+                    // this exact `queueSubItems[selectedQueueId]` list) or,
+                    // per explicit follow-up request, the routing skill name
+                    // for a Contact History entry (previously the case ID —
+                    // `headerTitle` above already shows the customer's real
+                    // name, so this now surfaces a second, distinct fact
+                    // about the contact instead).
                     headerSubhead={
                       selectedQueueId
                         ? `${(queueSubItems[selectedQueueId] ?? []).length} Skills`
-                        : selectedContactHistoryEntry?.caseId
+                        : selectedContactHistoryEntry?.skillName
                     }
                     onClose={() => {
                       setInteriorPanelOpen(false);
