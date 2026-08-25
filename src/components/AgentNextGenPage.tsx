@@ -6892,6 +6892,14 @@ export function AgentNextGenPage({
                   recordDraft={activeCustomerRecordDraft}
                   overviewEditing={activeCustomerOverviewEditing}
                   onOverviewEditingChange={setActiveCustomerOverviewEditing}
+                  // Per explicit follow-up request ("only open the customer
+                  // information automatically if a NEW message appears in
+                  // the copilot window") — see `onCopilotFirstAvailable`'s
+                  // own doc comment (agent-next-gen-customer-info-panel.tsx)
+                  // for exactly which moment this fires on. Reveals the
+                  // panel even if the agent had it closed; a no-op if it
+                  // was already open.
+                  onCopilotFirstAvailable={() => setSidePanelOpen(true)}
                 />
                 </div>
               )}

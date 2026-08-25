@@ -3,7 +3,7 @@
 // Workspace 2.0) and `AgentWorkspace2WithDeskPage.tsx` (Agent Workspace 2.0
 // With Desk), per explicit request. Previously this lived inline in
 // `AgentNextGenPage.tsx` only, with the two pages' Search panels having
-// drifted into two different shapes (this one's real Interactions/
+// drifted into two different shapes (this one's real Contacts/
 // Messages/Customers/Threads sub-tabs vs. With Desk's older standalone-
 // `SearchInput` version) — extracted here so both pages render the exact
 // same underlying tab/content system, just configured with a different
@@ -46,8 +46,14 @@ import {
 
 export type SearchPanelTabKey = "interactions" | "messages" | "customers" | "threads";
 
+// Per explicit follow-up request, the "interactions" sub-tab's own display
+// label reads "Contacts" now — the underlying `SearchPanelTabKey` value
+// (`"interactions"`), the `InteractionsListView` component it renders, and
+// every internal reference to "interactions"/"Interactions" data in this
+// file's own doc comments stay as-is; only this user-visible tab label
+// changed.
 export const SEARCH_PANEL_TAB_LABELS: Record<SearchPanelTabKey, string> = {
-  interactions: "Interactions",
+  interactions: "Contacts",
   messages: "Messages",
   customers: "Customers",
   threads: "Threads",

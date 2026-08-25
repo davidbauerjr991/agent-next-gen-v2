@@ -977,13 +977,23 @@ export type DateFilterValue = "today" | "yesterday" | "last7" | "custom";
 // drag-and-drop to work) instead of five hand-written near-duplicate `<Tab>`
 // elements.
 export type DeskTabKey = "home" | "customers" | "accounts" | "tickets" | "wem" | "interactions";
+// `interactions`'s own display label reads "Contacts" now, per explicit
+// follow-up request — same rename as the Search panel's own "interactions"
+// sub-tab (`SEARCH_PANEL_TAB_LABELS`, agent-next-gen-search-panel.tsx) and
+// the Customer Information panel's own "Interactions" tab
+// (`CUSTOMER_PANEL_TABS`, agent-next-gen-customer-info-panel.tsx). This
+// particular label is currently unreachable in the live UI — no consumer's
+// `deskTabOrder` still includes `"interactions"` (Premium's own copy had it
+// removed already; 2.0/Advanced dropped their whole Desk tab row) — kept
+// renamed here anyway for consistency, in case a `deskTabOrder` ever
+// reintroduces it.
 export const DESK_TAB_LABELS: Record<DeskTabKey, string> = {
   home: "Dashboard",
   customers: "Customers",
   accounts: "Accounts",
   tickets: "Tickets",
   wem: "WEM",
-  interactions: "Interactions",
+  interactions: "Contacts",
 };
 
 /* Dummy Performance data per date range — drives the Performance summary

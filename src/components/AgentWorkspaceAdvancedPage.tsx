@@ -4605,7 +4605,7 @@ export function AgentWorkspaceAdvancedPage({
                 content yet since none of the four has a real data source
                 in this prototype. Search is the one exception — its body
                 is the real `InteractionsListView` (moved in from the old
-                "Interactions" desk tab) behind an Interactions/Messages/
+                "Interactions" desk tab) behind a Contacts/Messages/
                 Customers/Threads `TabList` in `headerContent` (see
                 `searchContent`'s own doc comment for the full story).
                 WEM = Workforce Engagement Management — `UserCog` (a
@@ -6148,8 +6148,9 @@ export function AgentWorkspaceAdvancedPage({
                       list + right-docked detail panel here instead, when
                       that tab was selected — moved into the Customer
                       Information panel itself as an "Interactions" tab per
-                      explicit request, see `CUSTOMER_PANEL_TABS`, so this is
-                      unconditional again.) */}
+                      explicit request (later renamed "Contacts" — see
+                      `CUSTOMER_PANEL_TABS`), so this is unconditional
+                      again.) */}
                   <div className="flex flex-1 overflow-hidden">
                       <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
                         {isHistoryConversationView && historyConversationForActive ? (
@@ -7042,6 +7043,14 @@ export function AgentWorkspaceAdvancedPage({
                   recordDraft={activeCustomerRecordDraft}
                   overviewEditing={activeCustomerOverviewEditing}
                   onOverviewEditingChange={setActiveCustomerOverviewEditing}
+                  // Per explicit follow-up request ("only open the customer
+                  // information automatically if a NEW message appears in
+                  // the copilot window") — see `onCopilotFirstAvailable`'s
+                  // own doc comment (agent-next-gen-customer-info-panel.tsx)
+                  // for exactly which moment this fires on. Reveals the
+                  // panel even if the agent had it closed; a no-op if it
+                  // was already open.
+                  onCopilotFirstAvailable={() => setSidePanelOpen(true)}
                   // Per explicit request: an unknown-contact interaction
                   // (`!activeInteractionIsRealCustomer` — same signal
                   // `tabs` above already keys off) gets the customer-
