@@ -100,14 +100,26 @@ function formatWaitTime(totalSeconds: number): string {
  *  this reads as a plain green "responded" signal, not an alert — only
  *  once it's sat unanswered this long does it actually need attention.
  *  Placeholder value; tune to whatever the real digital-channel SLA calls
- *  for. */
-const AWAITING_WARNING_SECONDS = 30;
+ *  for.
+ *
+ *  TEMPORARY, per explicit request ("update the SLA timing to not display
+ *  a warning until after 5 minutes... I will change this back... we are
+ *  demoing and i don't want it firing during the demo"): bumped from 30s to
+ *  300s (5 min) so the warning tier can't realistically fire mid-demo. The
+ *  user has said they'll revert this themselves afterward — leave as-is
+ *  unless told otherwise. */
+const AWAITING_WARNING_SECONDS = 300;
 
 /** Wait threshold (seconds) past which an awaiting channel escalates from
  *  amber ("warning") to red ("critical") — see `getAwaitingSeverity` below.
  *  Placeholder value; tune to whatever the real digital-channel SLA calls
- *  for. */
-const AWAITING_CRITICAL_SECONDS = 60;
+ *  for.
+ *
+ *  TEMPORARY: bumped from 60s to 600s (10 min), same demo request as
+ *  `AWAITING_WARNING_SECONDS` above — kept at 2× that constant (its
+ *  original 30s/60s ratio) so critical still can't fire before warning
+ *  does. */
+const AWAITING_CRITICAL_SECONDS = 600;
 
 /** Maps a channel's own "how long has it been awaiting a reply" duration
  *  (seconds since `lastCustomerMessageTick`, NOT since the channel opened —

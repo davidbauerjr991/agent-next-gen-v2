@@ -2,7 +2,7 @@
 // agent-next-gen-shared-utils.ts and sibling agent-next-gen-*.ts(x) files
 // for everything AgentNextGenPage.tsx itself no longer declares — split out
 // once that file crossed Babel's 500KB code-generator threshold.
-import { useState, useMemo, type ComponentType } from "react";
+import { useState, useMemo, useEffect, type ComponentType } from "react";
 import {
   type TagVariant,
   type ChannelType,
@@ -20,6 +20,7 @@ import {
   Label,
   WhatsAppIcon,
   ChatMessage,
+  TableFooter,
 } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_CUSTOMERS } from "@nicecxone/lyra-ui/customers-data";
 import { type Interaction } from "@/components/agent-next-gen-interaction-dashboard";
@@ -743,6 +744,79 @@ export const EXTENDED_CONTACT_HISTORY: ContactHistoryEntry[] = buildContactHisto
   "ch-ext"
 );
 
+// Deterministic content pools for `CONTACT_HISTORY_STRESS_BATCH` below —
+// same "index-modulo, not `Math.random()`" convention as the rest of this
+// file's dummy data, just cycling shorter pools instead of one row-per-
+// template (115 rows is too many to hand-author individually).
+const CONTACT_HISTORY_STRESS_SKILLS = ["Technical Support", "Billing", "Sales", "Escalations", "General Support"];
+const CONTACT_HISTORY_STRESS_STATUS: { statusLabel: string; statusVariant: ContactHistoryStatusVariant }[] = [
+  { statusLabel: "Resolved", statusVariant: "success" },
+  { statusLabel: "Resolved", statusVariant: "success" },
+  { statusLabel: "Resolved", statusVariant: "success" },
+  { statusLabel: "Escalated", statusVariant: "critical" },
+  { statusLabel: "Pending", statusVariant: "info" },
+];
+const CONTACT_HISTORY_STRESS_DESCRIPTIONS = [
+  "Password reset — identity verified, access restored",
+  "Billing inquiry — reviewed recent charges, no action needed",
+  "Product setup walkthrough — configuration completed",
+  "Subscription question — plan details clarified",
+  "Shipping status check — delivery window confirmed",
+  "Technical issue — reproduced and resolved same call",
+  "Account update — contact details refreshed",
+  "Feature request — logged for product team follow-up",
+  "Payment method update — new card on file",
+  "General inquiry — resolved without escalation",
+];
+const CONTACT_HISTORY_STRESS_DURATIONS = ["4m 12s", "6m 45s", "9m 03s", "3m 58s", "11m 20s", "7m 34s", "5m 15s", "8m 47s"];
+
+export const CONTACT_HISTORY_STRESS_COUNT = 115;
+
+/** Simulated bulk batch for "Last 72 Hours" — per explicit request, to
+ *  demonstrate real footer pagination (see `ContactHistoryCard` below)
+ *  rather than the card's old `max-h-[600px]` body scroll, this range needs
+ *  ~125 total contacts. 125 = the 5 hand-authored `CONTACT_HISTORY` rows +
+ *  5 `EXTENDED_CONTACT_HISTORY` rows already shown under "Last 72 Hours" +
+ *  this 115-row batch (see `buildContactHistoryByRange` below).
+ *
+ *  Cycles through all 60 `CREATE_NEW_CUSTOMERS` records
+ *  (`i % CREATE_NEW_CUSTOMERS.length`) rather than a fixed index list like
+ *  `EXTENDED_CONTACT_HISTORY_CUSTOMER_INDEXES` above, since 115 rows need
+ *  every customer reused roughly twice over. `buildContactHistoryFromCustomers`
+ *  itself isn't reused here because its `id` is derived from the customer's
+ *  own id (`${idPrefix}-${customer.id}`) — that collides the moment the same
+ *  customer index repeats within one batch. `id` here is derived from the
+ *  loop index instead (`ch-stress-${i}`), so every row stays a guaranteed-
+ *  unique React key even with the 60-customer pool wrapping around twice.
+ *  `timeAgo` stays flat at "2d ago" for the whole batch, same reasoning as
+ *  `EXTENDED_CONTACT_HISTORY` above (hour 48-72 of the window). */
+export const CONTACT_HISTORY_STRESS_BATCH: ContactHistoryEntry[] = Array.from(
+  { length: CONTACT_HISTORY_STRESS_COUNT },
+  (_, i): ContactHistoryEntry => {
+    const customer = CREATE_NEW_CUSTOMERS[i % CREATE_NEW_CUSTOMERS.length];
+    const channelType = customer.channels.includes("voice") ? "voice" : customer.channels[0] ?? "email";
+    const status = CONTACT_HISTORY_STRESS_STATUS[i % CONTACT_HISTORY_STRESS_STATUS.length];
+    return {
+      id: `ch-stress-${i}`,
+      name: customer.name,
+      caseId: customer.customerId,
+      channelType,
+      channelLabel: CONTACT_HISTORY_CHANNEL_LABEL[channelType],
+      redial: channelType === "voice",
+      customerId: customer.id,
+      email: customer.emailAddress,
+      phone: customer.firstPhone,
+      whatsappHandle: `@${customer.name}`,
+      statusLabel: status.statusLabel,
+      statusVariant: status.statusVariant,
+      description: CONTACT_HISTORY_STRESS_DESCRIPTIONS[i % CONTACT_HISTORY_STRESS_DESCRIPTIONS.length],
+      timeAgo: "2d ago",
+      duration: CONTACT_HISTORY_STRESS_DURATIONS[i % CONTACT_HISTORY_STRESS_DURATIONS.length],
+      skillName: CONTACT_HISTORY_STRESS_SKILLS[i % CONTACT_HISTORY_STRESS_SKILLS.length],
+    };
+  }
+);
+
 /** Contact History's own date filter — deliberately a separate type/value
  *  set from the shared `DateFilterValue` (Today/Yesterday/Last 7 days/
  *  Custom) the Productivity/Performance cards' `DateFilterChip` uses: this
@@ -782,7 +856,12 @@ export function buildContactHistoryByRange(
   return {
     today: dismissedContactHistory,
     last48h: [...dismissedContactHistory, ...CONTACT_HISTORY],
-    last72h: [...dismissedContactHistory, ...CONTACT_HISTORY, ...EXTENDED_CONTACT_HISTORY],
+    last72h: [
+      ...dismissedContactHistory,
+      ...CONTACT_HISTORY,
+      ...EXTENDED_CONTACT_HISTORY,
+      ...CONTACT_HISTORY_STRESS_BATCH,
+    ],
   };
 }
 
@@ -884,6 +963,15 @@ export function ContactHistoryCard({
 }) {
   const [dateFilter, setDateFilter] = useState<ContactHistoryDateFilterValue>("today");
   const [searchQuery, setSearchQuery] = useState("");
+  // Footer pagination (replaces the old reliance on `DashboardCard`'s own
+  // `max-h-[600px] overflow-y-auto` body scroll — see `CONTACT_HISTORY_STRESS_BATCH`'s
+  // own doc comment above for why "Last 72 Hours" needs this: 125 fixed rows
+  // don't fit in a scrolling 600px box in any usable way). Default 5 rows/page
+  // per explicit request, with 10/25 as user-selectable alternatives — same
+  // `currentPage`/`rowsPerPage` state shape `CustomersListView` already uses
+  // for its own `TableFooter` (agent-next-gen-customers-table.tsx).
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(5);
   const entries = historyByRange[dateFilter];
 
   // Filters the already date-ranged `entries` down to whatever matches the
@@ -908,6 +996,23 @@ export function ContactHistoryCard({
       ].some((field) => field.toLowerCase().includes(query))
     );
   }, [entries, searchQuery, hideCustomerNames]);
+
+  // Reset back to page 1 whenever the date range, search query, or page
+  // size changes — otherwise switching from "Last 72 Hours" (page 9 of a
+  // 25-page list) to "Today" (0-3 rows) could leave `currentPage` pointing
+  // past the end of the new, much shorter list until the `safePage` clamp
+  // below catches up on next render.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [dateFilter, searchQuery, rowsPerPage]);
+
+  const totalRecords = filteredEntries.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / rowsPerPage));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIdx = (safePage - 1) * rowsPerPage;
+  const pageEntries = filteredEntries.slice(startIdx, startIdx + rowsPerPage);
+  const displayStart = totalRecords === 0 ? 0 : startIdx + 1;
+  const displayEnd = Math.min(startIdx + rowsPerPage, totalRecords);
 
   return (
     <DashboardCard
@@ -967,6 +1072,28 @@ export function ContactHistoryCard({
           />
         </div>
       }
+      // `border-t-0 py-0` cancels `TableFooter`'s own top border/vertical
+      // padding — `DashboardCard`'s `footer` slot already wraps whatever's
+      // passed in with its own `border-t border-lyra-border-subtle px-4
+      // py-3` row (see that component's own doc comment), so without this
+      // override the two would stack into a doubled border + extra ~22px
+      // of combined top/bottom padding.
+      footer={
+        totalRecords > 0 ? (
+          <TableFooter
+            className="border-t-0 py-0"
+            currentPage={safePage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={setRowsPerPage}
+            rowsPerPageOptions={[5, 10, 25]}
+            totalRecords={totalRecords}
+            displayStart={displayStart}
+            displayEnd={displayEnd}
+          />
+        ) : undefined
+      }
     >
       {filteredEntries.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
@@ -977,7 +1104,7 @@ export function ContactHistoryCard({
         </div>
       ) : (
         <div className="flex flex-col">
-          {filteredEntries.map((entry, i) => {
+          {pageEntries.map((entry, i) => {
             const ChannelIcon = CONTACT_HISTORY_CHANNEL_ICON[entry.channelType];
             const isSelected = entry.id === selectedEntryId;
             const displayName = hideCustomerNames ? contactHistoryDisplayIdentity(entry) : entry.name;

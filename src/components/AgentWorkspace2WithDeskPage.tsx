@@ -147,8 +147,13 @@ import {
   type CustomerFilterKey,
   CustomersListView,
 } from "@/components/agent-next-gen-customers-table";
+// `InteractionsListView` itself is no longer imported directly — its DESK
+// tab was removed (see `deskTabOrder`'s own doc comment); the Search
+// panel's own Interactions tab renders it internally now
+// (agent-next-gen-search-panel.tsx, via `useSearchPanelContent`).
+// `InteractionHistoryRecord` is still needed here for
+// `handleOpenInteractionRow`'s own parameter type.
 import {
-  InteractionsListView,
   type InteractionHistoryRecord,
 } from "@/components/agent-next-gen-interactions-table";
 import { useSearchPanelContent, type SearchPanelTabKey } from "@/components/agent-next-gen-search-panel";
@@ -358,16 +363,23 @@ const SCREEN_POP_APPS: SelectOption[] = [
 ];
 
 // Search panel's own sub-tabs (`useSearchPanelContent`, agent-next-gen-
-// search-panel.tsx) — just Messages/Threads here per explicit request
-// ("remove customers and Interactions, just have Messages and Threads").
-// Interactions was briefly added back (matching `AgentNextGenPage.tsx`'s
-// own tab set) per a follow-up ("add wem and interactions into the apps top
-// right... put interactions in search"), then explicitly removed again
-// right after ("remove the wem and interactions tabs in premium") — this
-// page keeps its own separate "Interactions" DESK tab
-// (`activeDeskTab === "interactions"`, further down this file) as the only
-// place Interactions lives here.
-const WITH_DESK_SEARCH_PANEL_TABS: SearchPanelTabKey[] = ["messages", "threads"];
+// search-panel.tsx). History: originally just Messages/Threads per an
+// explicit request ("remove customers and Interactions, just have Messages
+// and Threads"); Interactions was briefly added back (matching
+// `AgentNextGenPage.tsx`'s own tab set) per a follow-up ("add wem and
+// interactions into the apps top right... put interactions in search"),
+// then explicitly removed again right after ("remove the wem and
+// interactions tabs in premium") — at that point this page kept its own
+// separate "Interactions" DESK tab as the only place Interactions lived.
+// That DESK tab is now gone too, per a later explicit request ("move the
+// interactions tab to the search panel (make it the first tab) - like in
+// 2.0 basic/advanced") — Interactions is back here, and listed FIRST (the
+// hook treats `tabs[0]` as both the leftmost tab and its own default active
+// tab), matching how `AgentNextGenPage.tsx`/`AgentWorkspaceAdvancedPage.tsx`
+// both already only surface Interactions in Search, not as a desk tab.
+// Still no `"customers"` — that stays 2.0-basic/Advanced-only, unrequested
+// here.
+const WITH_DESK_SEARCH_PANEL_TABS: SearchPanelTabKey[] = ["interactions", "messages", "threads"];
 
 // Builds a `tagOpenChannels` closure off of the given `interactions` — reads
 // each `Thread.type`/`.value` (skipping any channel the agent has
@@ -1463,18 +1475,43 @@ export function AgentWorkspace2WithDeskPage({
   };
   // Desk-tab display order — separate from `activeDeskTab` above (which
   // one is selected), so the user can click-and-drag reorder the Home/
-  // Customers/Accounts/Tickets/WEM tabs (via `TabList`'s `reorderable`/
+  // Customers/Accounts/Tickets tabs (via `TabList`'s `reorderable`/
   // `onReorder`, tabs.tsx) without that affecting which tab is currently
   // active. `TabList` doesn't own this order itself — it only reports the
   // result of a drag — so this array is the actual source of truth the
   // tab row below is rendered from.
+  //
+  // "wem" removed per explicit request ("in Premium - move WEM to the app
+  // menu dropdown (unpinned)"), shown a screenshot of this exact tab row
+  // with "WEM" sitting front-and-center next to "Interactions". WEM is
+  // still a valid `DeskTabKey` (the shared type, `agent-next-gen-
+  // interaction-dashboard.tsx`, also used by `AgentWorkspaceAdvancedPage.tsx`
+  // — untouched, this request was scoped to Premium only) and its "Coming
+  // soon" desk-tab content branch further down this file is untouched too;
+  // simply nothing in this array points `activeDeskTab` at it anymore. WEM
+  // now lives only in the header's own "View All Apps" dropdown instead
+  // (`PANEL_KEY_METADATA`/`HIDDEN_FROM_APPS_MENU` below — "wem" removed
+  // from that hidden list so it shows there), unpinned (`pinnedKeys.wem`
+  // stays `false`) so it has no permanent header icon, matching how
+  // Schedule/Screen Pop already behave in that same dropdown.
+  //
+  // "interactions" removed the same way, per a follow-up explicit request
+  // ("move the interactions tab to the search panel (make it the first
+  // tab) - like in 2.0 basic/advanced") — that content moved into the
+  // Search panel instead (see `searchContent`'s own doc comment below,
+  // `WITH_DESK_SEARCH_PANEL_TABS`), matching how `AgentNextGenPage.tsx` and
+  // `AgentWorkspaceAdvancedPage.tsx` both already only surface Interactions
+  // there, not as a separate desk tab. Unlike WEM, Interactions has no
+  // "Coming soon" fallback left to fall into — its dedicated
+  // `InteractionsListView` render branch was removed outright (see that
+  // branch's own former location, now just the generic Accounts/Tickets/WEM
+  // placeholder) since the content itself moved rather than needing a second
+  // home.
   const [deskTabOrder, setDeskTabOrder] = useState<DeskTabKey[]>([
     "home",
     "customers",
     "accounts",
     "tickets",
-    "wem",
-    "interactions",
   ]);
   /* Settings — a third top-level view alongside Desk/interaction-record,
      shown in place of both in the content column when the Settings rail
@@ -1783,11 +1820,12 @@ export function AgentWorkspace2WithDeskPage({
   // icon would.
   // Default pinned set — header shows (right to left) Notifications,
   // Agent Chat, Search; Schedule/Customers/Accounts/Tickets/WEM/Screen Pop
-  // start unpinned. Customers/Accounts/Tickets/WEM are also filtered out
-  // of the "View All Apps" menu itself (see `HIDDEN_FROM_APPS_MENU`
-  // below), making them fully unreachable from the app header; Schedule
-  // and Screen Pop aren't in that list, so unpinning them (Schedule per
-  // this follow-up request) just hides their header icon — both stay
+  // start unpinned. Customers/Accounts/Tickets are also filtered out of the
+  // "View All Apps" menu itself (see `HIDDEN_FROM_APPS_MENU` below), making
+  // them fully unreachable from the app header; Schedule, Screen Pop, and
+  // WEM aren't in that list, so unpinning them (Schedule per an earlier
+  // follow-up request; WEM per a later one, "move WEM to the app menu
+  // dropdown (unpinned)") just hides their header icon — all three stay
   // reachable via "View All Apps".
   const [pinnedKeys, setPinnedKeys] = useState<Record<PanelKey, boolean>>({
     notif: true,
@@ -3891,23 +3929,25 @@ export function AgentWorkspace2WithDeskPage({
   // alongside the new one.
   //
   // `"messages"`/`"threads"` per an earlier explicit request ("remove
-  // customers and Interactions, just have Messages and Threads");
-  // `"interactions"` added back per a later follow-up ("add wem and
-  // interactions into the apps top right... put interactions in search"),
-  // matching `AgentNextGenPage.tsx`'s own tab set minus Customers. Still no
-  // `customers` bag, since the Customers tab itself stays 2.0-basic-only.
-  // `onAddToast`/`onOpenInteraction` are required once `"interactions"` is
-  // in `tabs` (see `UseSearchPanelContentOptions`) — reusing this page's own
-  // Only `"messages"`/`"threads"` here — per explicit request ("remove
-  // customers and Interactions, just have Messages and Threads") — unlike
-  // `AgentNextGenPage.tsx`'s own 4-tab list. This page keeps its own
-  // separate "Interactions" DESK tab (`activeDeskTab === "interactions"`,
-  // further down this file) untouched; it's the Search panel's row that
-  // drops Interactions/Customers here, not the desk dashboard. No
-  // `customers` bag or `onAddToast` is passed since neither tab needs
-  // them — both render the hook's own "Coming soon" placeholder, same as
-  // Messages/Threads already did on the Workspace 2.0 side before this.
-  const searchContent = useSearchPanelContent({ tabs: WITH_DESK_SEARCH_PANEL_TABS });
+  // customers and Interactions, just have Messages and Threads"). No
+  // `customers` bag, since the Customers tab itself stays 2.0-basic/
+  // Advanced-only.
+  //
+  // `"interactions"` is back (see `WITH_DESK_SEARCH_PANEL_TABS`'s own doc
+  // comment for the full back-and-forth) per the latest explicit request
+  // ("move the interactions tab to the search panel (make it the first
+  // tab) - like in 2.0 basic/advanced") — this page's separate "Interactions"
+  // DESK tab is gone (see `deskTabOrder`'s own doc comment), so this is now
+  // the only place Interactions lives in Premium. `onAddToast`/
+  // `onOpenInteraction` are required once `"interactions"` is in `tabs`
+  // (see `UseSearchPanelContentOptions`) — reusing this page's own
+  // `addToast` and `handleOpenInteractionRow`, the exact pair the removed
+  // desk tab's own `InteractionsListView` used to be passed directly.
+  const searchContent = useSearchPanelContent({
+    tabs: WITH_DESK_SEARCH_PANEL_TABS,
+    onAddToast: addToast,
+    onOpenInteraction: handleOpenInteractionRow,
+  });
   const contentByPanelKey: Record<PanelKey, EmbeddablePanelContent> = {
     notif: notifContent,
     conversations: blankPanelContent("Agent Chat"),
@@ -4013,15 +4053,21 @@ export function AgentWorkspace2WithDeskPage({
   // here to reorder it moves the same underlying `panelOrder` array the
   // header reads, and vice versa.
   //
-  // Customers/Accounts/Tickets/WEM are hidden from this menu specifically
-  // (per explicit request) — `panelOrder`/`pinnedKeys` themselves are
-  // untouched, so Customers (already pinned) keeps its header icon; Accounts/
-  // Tickets/WEM (already unpinned) simply have no way to open them anymore,
-  // since this menu was their only entry point. WEM was briefly removed from
-  // this list ("add wem... into the apps top right... like in 2.0 basic"),
-  // then explicitly put back ("remove the wem and interactions tabs in
-  // premium").
-  const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["customers", "accounts", "tickets", "wem"];
+  // Customers/Accounts/Tickets are hidden from this menu specifically (per
+  // explicit request) — `panelOrder`/`pinnedKeys` themselves are untouched,
+  // so Customers (already pinned) keeps its header icon; Accounts/Tickets
+  // (already unpinned) simply have no way to open them anymore, since this
+  // menu was their only entry point. WEM has bounced in and out of this
+  // list across several follow-ups in the same vein — briefly removed
+  // ("add wem... into the apps top right... like in 2.0 basic"), put back
+  // ("remove the wem and interactions tabs in premium"), and now removed
+  // again for good per the most recent explicit request ("move WEM to the
+  // app menu dropdown (unpinned)" — this time dropping WEM's own separate
+  // Desk-tab entry too, see `deskTabOrder`'s own doc comment, so this
+  // dropdown is WEM's only entry point in Premium now). Still unpinned
+  // (`pinnedKeys.wem` stays `false`), so it has no permanent header icon —
+  // just a row here, matching Schedule/Screen Pop.
+  const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["customers", "accounts", "tickets"];
   const appsMenuItems: MenuEntry[] = panelOrder.filter((key: PanelKey) => !HIDDEN_FROM_APPS_MENU.includes(key)).map((key) => {
     const { label, icon: KeyIcon } = PANEL_KEY_METADATA[key];
     return {
@@ -6540,23 +6586,7 @@ export function AgentWorkspace2WithDeskPage({
                   />
                 </div>
               ))}
-              {activeDeskTab !== "customers" && !activeDeskTab.startsWith("customer:") && (activeDeskTab === "interactions" ? (
-                // Interactions — a real view (InteractionsListView, see
-                // agent-next-gen-interactions-table.tsx), not the "Coming
-                // soon" placeholder Accounts/Tickets/WEM still fall through
-                // to below. Simple conditional mount (not the elaborate
-                // always-mounted/opacity-0/inert treatment the "customers"
-                // block above uses) is fine here — that treatment exists
-                // specifically to protect `CustomerRowInfoPanel`'s own
-                // `ResizeObserver`-driven interior panel from a remount
-                // flicker (see that block's own long doc comment); this
-                // view has no such nested docked panel, so it's safe to
-                // unmount/remount on every tab switch like every other
-                // non-Customers tab already does.
-                <div key={activeDeskTab} className="flex flex-1 min-w-0 overflow-hidden animate-in fade-in-0 duration-200">
-                  <InteractionsListView onAddToast={addToast} onOpenInteraction={handleOpenInteractionRow} />
-                </div>
-              ) : activeDeskTab !== "home" ? (
+              {activeDeskTab !== "customers" && !activeDeskTab.startsWith("customer:") && (activeDeskTab !== "home" ? (
                 // Accounts/Tickets/WEM — no content built yet; same
                 // "Coming soon" placeholder treatment used elsewhere in
                 // this file for in-progress tabs (e.g. the Customer
@@ -6568,6 +6598,16 @@ export function AgentWorkspace2WithDeskPage({
                 // never replay `animate-in`) — same reasoning as the
                 // top-level Settings/interaction/dashboard branches' own
                 // `key`s above.
+                //
+                // "interactions" used to be its own branch here
+                // (InteractionsListView, mounted directly), but per explicit
+                // request ("move the interactions tab to the search panel
+                // (make it the first tab) - like in 2.0 basic/advanced")
+                // that content moved to the Search panel instead (see
+                // `searchContent`'s own doc comment above) and "interactions"
+                // was removed from `deskTabOrder` — so this branch can no
+                // longer actually be reached for "interactions" specifically,
+                // same as it already couldn't for Accounts/Tickets/WEM.
                 <div key={activeDeskTab} className="flex flex-1 items-center justify-center p-4 animate-in fade-in-0 duration-200">
                   <p className="lyra-body-md text-lyra-fg-disabled text-center">Coming soon</p>
                 </div>

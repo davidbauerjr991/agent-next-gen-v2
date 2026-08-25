@@ -35,6 +35,8 @@ import {
   ArrowUpRight,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   CircleCheck,
   UserX,
   ArrowDown,
@@ -980,6 +982,8 @@ export function TranscriptSessionSeparator({
   isCurrentSession,
   showActionCluster = true,
   isNewThread = false,
+  collapsed = false,
+  onToggleCollapsed,
 }: {
   session: Contact;
   open: boolean;
@@ -1092,6 +1096,24 @@ export function TranscriptSessionSeparator({
    *  every existing call site is unaffected until `InteractionTranscript`
    *  starts threading a real value through. */
   isNewThread?: boolean;
+  /** Whether this CLOSED session's transcript content — this session's own
+   *  message bubbles, rendered by `InteractionTranscript` as a sibling of
+   *  this whole component, not a child of it — is currently collapsed
+   *  away. Purely a display flag here: this component owns no message
+   *  content itself, so `collapsed` only drives which icon
+   *  (`ChevronsDownUp`/`ChevronsUpDown`) the collapse button next to the
+   *  status tag shows; `InteractionTranscript` is what actually animates
+   *  its own message-content wrapper open/shut off this same session's
+   *  `collapsedSessionIds` entry. */
+  collapsed?: boolean;
+  /** Toggles `collapsed` for this session. Passing this is what renders the
+   *  collapse icon at all, immediately right of the status tag — same
+   *  "which direction does the next click applies" idiom lyra-ui's own
+   *  `AssignmentsExpandCollapseAllButton` uses. Only ever shown for a
+   *  session whose status reads "Closed" (`session.status`, via
+   *  `InteractionTranscript`'s own `getSessionStatus`) — an in-progress
+   *  session has nothing to collapse away yet. */
+  onToggleCollapsed?: () => void;
 }) {
   const isClosed = !isCurrentSession || !!channelClosed;
   // Local to the Outcome popover's own "Status" field — same "one popover
@@ -1518,6 +1540,33 @@ export function TranscriptSessionSeparator({
                 onCancelClose={onCancelClose}
                 disabled={isClosed}
               />
+            )}
+            {/* Collapse icon — immediately right of the status tag, only for
+                a session that actually reads "Closed" and only once
+                `onToggleCollapsed` is passed (a caller that doesn't support
+                collapsing closed sessions just omits it, same "renders for
+                real regardless of a handler, or omit the slot entirely"
+                shape the rest of this cluster already uses). Collapses this
+                session's own message content — animated, owned by
+                `InteractionTranscript` — while this whole row stays put;
+                see `onToggleCollapsed`'s own doc comment above. */}
+            {session.status === "Closed" && onToggleCollapsed && (
+              <Tooltip content={collapsed ? "Expand session" : "Collapse session"} placement="bottom">
+                <Button
+                  variant="icon"
+                  size="icon-sm"
+                  aria-label={collapsed ? "Expand session" : "Collapse session"}
+                  aria-expanded={!collapsed}
+                  className="text-lyra-fg-secondary"
+                  onClick={onToggleCollapsed}
+                >
+                  {collapsed ? (
+                    <ChevronsUpDown className="h-3.5 w-3.5" strokeWidth={1.5} />
+                  ) : (
+                    <ChevronsDownUp className="h-3.5 w-3.5" strokeWidth={1.5} />
+                  )}
+                </Button>
+              </Tooltip>
             )}
             {/* Unassign & Dismiss — immediately right of the status tag, per
                 explicit request. Same icon/action `ChannelTab`'s own kebab
@@ -1993,6 +2042,26 @@ export function InteractionTranscript({
     });
   };
 
+  // Which CLOSED sessions have their message content collapsed away — same
+  // per-session `Set` shape as `openSessionIds` above (independent toggles,
+  // not an exclusive accordion), but a separate flag entirely: `open`/
+  // `toggleSession` only ever animate `TranscriptSessionDetails` itself,
+  // while this animates this session's own message bubbles (rendered
+  // further down, in this session's own per-session block) shut. Only a
+  // session that reads "Closed" ever exposes the collapse icon that flips
+  // this (`TranscriptSessionSeparator`'s own `onToggleCollapsed` doc
+  // comment) — a still-open session's id never lands in this set.
+  const [collapsedSessionIds, setCollapsedSessionIds] = useState<Set<string>>(new Set());
+
+  const toggleSessionCollapsed = (sessionId: string) => {
+    setCollapsedSessionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  };
+
   // The CURRENT session's status is `currentStatus`, a prop from
   // `Interaction` (see its own doc comment for why) — every OTHER
   // (historical) session in this Thread always reads "Closed", full stop,
@@ -2446,6 +2515,12 @@ export function InteractionTranscript({
                   // `isNewThread` prop doc comment for how the caller
                   // resolves it.
                   isNewThread={session.id === lastSessionId && isNewThread}
+                  collapsed={collapsedSessionIds.has(session.id)}
+                  onToggleCollapsed={
+                    sessionWithCurrentStatus.status === "Closed"
+                      ? () => toggleSessionCollapsed(session.id)
+                      : undefined
+                  }
                 />
                 {/* Everything below the separator (mock/live message
                     bubbles, the Voice/Email placeholder) is what actually
@@ -2487,6 +2562,34 @@ export function InteractionTranscript({
                     messages — see the three blocks below) is covered
                     either way, since this padding lives on their shared
                     parent, not on any one of them individually. */}
+                {/* Collapses this session's own message content (below)
+                    away as one animated block whenever this session is in
+                    `collapsedSessionIds` — same `data-[state=open]:animate-
+                    accordion-down`/`data-[state=closed]:animate-accordion-up`
+                    mechanism `TranscriptSessionSeparator`'s own Session
+                    Details panel already uses, a wholly separate/independent
+                    `AccordionPrimitive` instance from that one (this session's
+                    "Session Details" open/closed state and its "message
+                    content collapsed" state are unrelated flags — see
+                    `TranscriptSessionSeparator`'s own `collapsed` prop doc
+                    comment). Wraps the div below rather than replacing it, so
+                    every existing class on that div (the 1200px-centered
+                    column, the dim/opacity transition, the last-session
+                    `pb-9`) is untouched — this only adds a height animation
+                    around it. Still a DOM descendant of the outer
+                    `<div key={session.id}>` either way, so
+                    `TranscriptSessionSeparator`'s own `sticky top-0` keeps
+                    working exactly as already documented there (a fully
+                    collapsed session legitimately has nothing left to stick
+                    through, which is the correct behavior here). */}
+                <AccordionPrimitive.Root
+                  type="single"
+                  collapsible
+                  value={collapsedSessionIds.has(session.id) ? "" : session.id}
+                  onValueChange={() => {}}
+                >
+                <AccordionPrimitive.Item value={session.id} className="border-none">
+                <AccordionPrimitive.Content className="overflow-hidden data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up">
                 <div
                   className={cn(
                     "w-full max-w-[1200px] mx-auto px-6",
@@ -2599,6 +2702,9 @@ export function InteractionTranscript({
                   );
                 })()}
                 </div>
+                </AccordionPrimitive.Content>
+                </AccordionPrimitive.Item>
+                </AccordionPrimitive.Root>
               </div>
             );
           })}
