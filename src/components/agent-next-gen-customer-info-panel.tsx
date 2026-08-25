@@ -75,9 +75,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Bookmark,
-  Plus,
-  SlidersHorizontal,
-  Send,
   Clock,
   FileText,
   Minimize2,
@@ -1889,11 +1886,10 @@ function CustomerRecordSaveFooter({ onSave, onCancel }: { onSave: () => void; on
  *  `buildCopilotSummary` (synthesized, same deterministic-per-customer
  *  approach as Overview's Latest Interaction/Latest Note — see that
  *  function's own doc comment). Purely a read-only recap — the actual
- *  "ask copilot something" affordance is the separate `CopilotSearchFooter`
- *  below, pinned to the bottom of this same tab by its caller (mirrors how
- *  the Overview tab's own `AIInput` footer is pinned by ITS caller, not
- *  rendered inline here — see `CustomerInformationSidePanel`'s `footer`
- *  prop).
+ *  "ask copilot something" affordance is the shared `AIInput` component
+ *  (ai-input.tsx) — same component the Overview tab's own footer uses —
+ *  pinned to the bottom of this same tab by its caller, not rendered
+ *  inline here (see `CustomerInformationSidePanel`'s `footer` prop).
  *
  *  Per explicit follow-up request ("animate in the content in copilot
  *  sequentially after the copilot window opens"), the two blocks below
@@ -1961,83 +1957,6 @@ export function CopilotTabContent({ summary }: { summary: CopilotSummary }) {
           <p className="lyra-body-md text-lyra-fg-default">{summary.journeySummary}</p>
         </div>
       </div>
-    </div>
-  );
-}
-
-/** "Search copilot" input — the Copilot tab's own footer, pinned to the
- *  bottom the same way the Overview tab's `AIInput` footer is (see
- *  `CopilotTabContent`'s own doc comment). Deliberately a separate,
- *  purpose-built component rather than a reskinned `AIInput`
- *  (ai-input.tsx) — that component's stacked textarea-plus-toolbar shape
- *  (attach button and submit button on their own row BELOW a multi-line
- *  growing textarea, plus a helper-text line under the whole thing) is
- *  built for composing a longer prompt, where this is a single-line,
- *  single-row search-style affordance (per the reference screenshot: a
- *  round "+" button, one pill-shaped field with an inline filter icon, and
- *  a round send button, all in one row with no helper text) — closer to a
- *  compact search bar than a chat composer. No real backend behind
- *  "search" here (same "canned/no-op" treatment as `AIInput`'s own "Ask
- *  about this customer..." placeholder elsewhere in this panel) — submitting
- *  just clears the field. */
-export function CopilotSearchFooter({ className }: { className?: string }) {
-  const [value, setValue] = useState("");
-  const canSubmit = value.trim().length > 0;
-
-  const handleSubmit = () => {
-    if (!canSubmit) return;
-    setValue("");
-  };
-
-  return (
-    <div className={cn("flex w-full items-center gap-2", className)}>
-      {/* `ActionIconButton` (actions.tsx) composes `Button variant="icon"` —
-          its own default shape is a small ROUNDED-SQUARE icon button (see
-          that component's own doc comment on why every icon button in the
-          design system routes through `Button` now), overridden here to the
-          round pill shape the reference screenshot shows via a plain
-          `rounded-full` className — `cn()`/tailwind-merge (already relied on
-          elsewhere in this file — see `INTERACTION_MAIN_CONTENT_MIN_WIDTH`
-          area) correctly drops `Button`'s own `rounded-lyra-sm` for this
-          later, more specific radius utility rather than fighting it. */}
-      <ActionIconButton
-        aria-label="Add"
-        title="Add"
-        className="shrink-0 rounded-full border border-lyra-border-soft"
-      >
-        <Plus className="h-4 w-4" strokeWidth={1.5} />
-      </ActionIconButton>
-      <div
-        className={cn(
-          "flex min-w-0 flex-1 items-center gap-2 rounded-full border bg-lyra-bg-surface-container-subtle py-1.5 pl-4 pr-2 transition-colors",
-          "border-lyra-border-strong hover:border-lyra-state-border-hover-neutral",
-          "focus-within:border-lyra-border-active focus-within:ring-2 focus-within:ring-lyra-border-active/20"
-        )}
-      >
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              handleSubmit();
-            }
-          }}
-          placeholder="Search copilot"
-          aria-label="Search copilot"
-          className="min-w-0 flex-1 bg-transparent outline-none lyra-body-md text-lyra-fg-default placeholder:text-lyra-fg-disabled"
-        />
-        <SlidersHorizontal className="h-4 w-4 shrink-0 text-lyra-fg-secondary" strokeWidth={1.5} aria-hidden="true" />
-      </div>
-      <ActionIconButton
-        aria-label="Send"
-        title="Send"
-        onClick={handleSubmit}
-        className="shrink-0 rounded-full bg-lyra-bg-surface-shell"
-      >
-        <Send className="h-4 w-4" strokeWidth={1.5} />
-      </ActionIconButton>
     </div>
   );
 }
@@ -3108,12 +3027,19 @@ export function CustomerInfoHoverPreview({
           `footer` prop above) — kept here too for exact content parity,
           per this component's own doc comment. `SHOW_CUSTOMER_INFO_AI_INPUT`
           — see that flag's own doc comment — temporarily hides it here too.
-          Copilot's own `CopilotSearchFooter` (per explicit request) is NOT
-          gated behind that flag — it's a distinct, always-on feature, not
-          the thing that flag was written to temporarily hide. */
+          Copilot's own `AIInput` (per explicit request, matching the
+          reference screenshot's stock defaults — see `CopilotTabContent`'s
+          own doc comment) is NOT gated behind that flag — it's a distinct,
+          always-on feature, not the thing that flag was written to
+          temporarily hide. `singleLine` (per explicit follow-up request)
+          renders it as a single compact row — attach/input/submit all
+          inline — instead of `AIInput`'s own default stacked textarea-
+          above/toolbar-below layout; `helperText=""` suppresses that
+          layout's own default caption text, since a single-row search-bar
+          affordance reads better without one directly underneath it. */
       activeTab === CUSTOMER_PANEL_TABS.indexOf("Copilot") ? (
         <PanelFooter className="shrink-0 justify-start">
-          <CopilotSearchFooter />
+          <AIInput singleLine helperText="" className="w-full" />
         </PanelFooter>
       ) : (
         SHOW_CUSTOMER_INFO_AI_INPUT &&
@@ -3775,11 +3701,12 @@ export function CustomerInformationSidePanel({
       // side-panel.tsx), so it's already outside the scroll region and
       // naturally stays fixed to the bottom without any extra CSS.
       // Temporarily hidden — see `SHOW_CUSTOMER_INFO_AI_INPUT`'s own doc
-      // comment. Copilot's own `CopilotSearchFooter` (per explicit request)
-      // uses this exact same "shrink-0 sibling after PanelContent" mechanism
-      // for its own fixed-to-bottom placement, checked FIRST since it's not
-      // gated behind `SHOW_CUSTOMER_INFO_AI_INPUT` — see
-      // `CopilotTabContent`'s own doc comment. The Save/Cancel footer
+      // comment. Copilot's own `AIInput` (per explicit request, matching
+      // the reference screenshot's stock defaults) uses this exact same
+      // "shrink-0 sibling after PanelContent" mechanism for its own
+      // fixed-to-bottom placement, checked FIRST since it's not gated
+      // behind `SHOW_CUSTOMER_INFO_AI_INPUT` — see `CopilotTabContent`'s
+      // own doc comment. The Save/Cancel footer
       // (`recordDraft.isDirty || overviewEditing` — appears the instant
       // EITHER a field actually changes OR the Customer Overview edit
       // button is clicked, per explicit request) is checked BEFORE either
@@ -3841,7 +3768,7 @@ export function CustomerInformationSidePanel({
           />
         ) : activeTab === CUSTOMER_PANEL_TABS.indexOf("Copilot") ? (
           <PanelFooter className="justify-start">
-            <CopilotSearchFooter />
+            <AIInput singleLine helperText="" className="w-full" />
           </PanelFooter>
         ) : SHOW_CUSTOMER_INFO_AI_INPUT && activeTab === CUSTOMER_PANEL_TABS.indexOf("Overview") ? (
           <PanelFooter className="relative justify-start">
@@ -4045,9 +3972,16 @@ export function CustomerRowInfoPanel({
   // last-viewed tab would be a mildly confusing default. `row?.contactNumber`
   // (not `row` itself, a fresh object reference every render) is what this
   // actually keys off, so this doesn't also fire on every unrelated re-render
-  // while the same row's panel is already open.
+  // while the same row's panel is already open. `CUSTOMER_PANEL_TABS.
+  // indexOf("Overview")`, not a hardcoded `0` — confirmed live as a real
+  // bug once "Copilot" moved to global index 0 (§73's reorder): this
+  // effect kept resetting straight onto Copilot's content on every row
+  // open even though `visibleTabs` above always strips "Copilot" from the
+  // tab row entirely for this read-only, non-conversational panel — no
+  // tab button ever looked selected, but Copilot's info box/Journey
+  // Summary rendered anyway.
   useEffect(() => {
-    if (row) setActiveTab(0);
+    if (row) setActiveTab(CUSTOMER_PANEL_TABS.indexOf("Overview"));
   }, [row?.contactNumber]);
 
   const customerName = row ? `${row.firstName} ${row.lastName}` : undefined;

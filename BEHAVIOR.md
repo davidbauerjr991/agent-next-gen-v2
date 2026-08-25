@@ -1047,3 +1047,39 @@ Per explicit follow-up request ("if the customer information is closed and the a
 Files touched: `agent-next-gen-customer-info-panel.tsx` (`onCopilotFirstAvailable` prop + its invocation inside the existing effect), `AgentNextGenPage.tsx`, `AgentWorkspace2WithDeskPage.tsx`, `AgentWorkspaceAdvancedPage.tsx` (each: removed the `activeInteractionIdRef`/`handleSendMessage` addition from the first pass, added one `onCopilotFirstAvailable={() => setSidePanelOpen(true)}` line at their own `CustomerInformationSidePanel` call site).
 
 Verified tsc-clean (51-error app baseline unchanged) and eslint-clean across all 4 touched files (0 new errors — the 3 page files each show the same 2 pre-existing errors already documented earlier in this log: unused `PanelLeftClose` import, a hand-rolled-`<button>` rule violation; `agent-next-gen-customer-info-panel.tsx` shows its same 40 pre-existing warnings, 0 errors).
+
+## 76. Fixed: Copilot content leaking into the Customers-table row panel (a real, live bug — not stale docs)
+
+Reported live via screenshot ("don't display copilot in the customer tab - it is only an in-interaction feature") alongside a second message ("you are missing the overview in customer table"): opening a Customers-table row (`CustomerRowInfoPanel`) showed "Overview" as the selected tab label, but the actual body content underneath was Copilot's info box + Journey Summary card — Overview's own real content (the Customer Overview accordion, Latest Interaction, Latest Note) never rendered at all.
+
+Root cause: a leftover per-row reset `useEffect` — `useEffect(() => { if (row) setActiveTab(0); }, [row?.contactNumber]);` — that predates §73's `CUSTOMER_PANEL_TABS` reorder. Before that reorder, global index `0` WAS "Overview", so this hardcoded reset happened to be correct by coincidence. Once "Copilot" moved to index `0`, this same reset started forcing `activeTab` onto Copilot's content on every row open instead — even though `CustomerRowInfoPanel`'s own `visibleTabs` already unconditionally strips "Copilot" from the tab row itself (see that `tabs` prop's own doc comment: "a Customers-table row is read-only reference info about a customer, never the seat of an actual conversation"), so no tab button ever visibly highlighted as "Copilot" — the mismatch between the (correct, Overview-labeled) tab row and the (wrong, Copilot) body content is exactly what both bug reports describe.
+
+This was the ONLY leftover hardcoded numeric `setActiveTab` call in the file — confirmed via a repo-wide `setActiveTab\(\d\)` search turning up nothing else. (The four `useState(0)` mount-time initializers were already fixed correctly back in §73 itself, including this same `CustomerRowInfoPanel`'s own initializer — this bug was specifically in a SEPARATE, later-added reset effect that §73's fix didn't touch, since it wasn't part of that original grep for `useState(0)`.)
+
+Fixed the same way as every other site in this file: `setActiveTab(CUSTOMER_PANEL_TABS.indexOf("Overview"))` instead of the hardcoded `0`.
+
+Files touched: `agent-next-gen-customer-info-panel.tsx` only (`CustomerRowInfoPanel`'s per-row reset effect).
+
+Verified tsc-clean (51-error app baseline unchanged) and eslint-clean for this file (0 errors; same 40 pre-existing warnings — no new warnings introduced).
+
+## 77. Copilot tab footer swapped from custom `CopilotSearchFooter` to the shared `AIInput` component
+
+Per explicit request ("update the copilot input to use the AIInput component"), with a reference screenshot showing `AIInput`'s own stock rendering (placeholder "Ask anything...", "+" attach button present, mic icon, "AI assistant can make mistakes. Double check responses." helper text): the Copilot tab's footer — previously the custom, purpose-built `CopilotSearchFooter` component (a round "+" button, single-row pill search field with a filter icon, round send button, no helper text — deliberately NOT a reskinned `AIInput` per that component's own original doc comment) — is now just `<AIInput className="w-full" />`, the same shared component (`ai-input.tsx`) the Overview tab's own footer already uses elsewhere in this file.
+
+Both render call sites — `CustomerInfoHoverPreview` and `CustomerInformationSidePanel` — swap `<CopilotSearchFooter />` for `<AIInput className="w-full" />`, deliberately WITHOUT `showAttach={false}` (unlike the existing Overview-tab usage, `<AIInput placeholder="Ask about this customer..." showAttach={false} className="w-full" />`, which hides the attach button on purpose) — the reference screenshot shows the "+" button present, so this call relies on `AIInput`'s own stock defaults (`placeholder`, `helperText`, `showAttach = true`) to match it exactly.
+
+`CopilotSearchFooter`'s own function definition was deleted entirely — confirmed via a repo-wide search it had no other live consumers (only the inert, non-compiled `AgentNextGenPage.pre-split-backup.tsx` historical backup still mentioned it, out of scope for behavior purposes). Its now-unused icon imports (`Plus`, `SlidersHorizontal`, `Send`) were removed too; `ActionIconButton` stayed, since it's still used elsewhere in this file.
+
+Files touched: `agent-next-gen-customer-info-panel.tsx` only (`CopilotSearchFooter` definition removed; both call sites swapped to `AIInput`; stale doc-comment cross-references to `CopilotSearchFooter` updated; unused icon imports removed).
+
+Verified tsc-clean (51-error app baseline unchanged) and eslint-clean for this file (0 errors; same 40 pre-existing warnings — no new warnings introduced, and none removed either, since `CopilotSearchFooter` wasn't itself the source of any of the pre-existing `react-refresh/only-export-components` warnings).
+
+## 78. Copilot footer's `AIInput` set to `singleLine` — attach/input/submit inline in one compact row
+
+Per explicit follow-up request ("apply the single line to the agent-next-gen-v2"), following §77's swap to the shared `AIInput` component: both Copilot-tab footer call sites now pass `singleLine` (the new lyra-ui `AIInput` prop — see lyra-ui's own BEHAVIOR/changelog for that component, or `ai-input.tsx`'s own doc comment on the prop) plus `helperText=""`, rendering `<AIInput singleLine helperText="" className="w-full" />` in place of the plain `<AIInput className="w-full" />` from §77.
+
+`singleLine` lays the attach ("+") button, the growing-disabled single-row textarea, and the submit/mic button out in one compact horizontal row — instead of `AIInput`'s own default two-row layout (textarea on its own line, toolbar with attach/submit below it) — matching the more compact "search-bar" affordance a Copilot side-panel footer calls for over the taller default multi-line composer shape. `helperText=""` suppresses `AIInput`'s own default caption ("AI assistant can make mistakes...") underneath, since a single-row bar reads better without a caption stacked below it — this mirrors the lyra-ui Storybook story ("Single line (Copilot input)", `AIInput.stories.tsx`) built alongside the component change itself, which uses the same `singleLine` + empty-`helperText` combination.
+
+Files touched: `agent-next-gen-customer-info-panel.tsx` only (both `CustomerInfoHoverPreview` and `CustomerInformationSidePanel` Copilot-footer call sites gained `singleLine helperText=""`; the first call site's own doc comment updated to explain the prop). The `singleLine` prop itself lives in lyra-ui (`ai-input.tsx`), not this repo — no lyra-ui changes were needed here since that prop already shipped.
+
+Verified tsc-clean (51-error app baseline unchanged) and eslint-clean for this file (0 errors; same 40 pre-existing warnings — no new warnings introduced).
