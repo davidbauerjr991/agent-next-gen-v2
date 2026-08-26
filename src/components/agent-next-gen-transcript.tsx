@@ -575,7 +575,10 @@ export function TranscriptMessageBubble({
   /** True below 400px of the transcript's own rendered width — see
    *  `InteractionTranscript`'s own `transcriptNarrow` state (its
    *  `ResizeObserver`) for how this is measured. Drops the sender avatar
-   *  and grows the bubble from 70% to the full available width. */
+   *  only — the bubble's own max-width (80%, full below 768px) is a
+   *  SEPARATE breakpoint `ChatMessage` measures and applies entirely on
+   *  its own (see that component's own doc comment, lyra-ui), not
+   *  something this prop controls. */
   narrow?: boolean;
 }) {
   return (
@@ -616,10 +619,25 @@ export function TranscriptMessageBubble({
  *  Three dots, `animate-bounce` (Tailwind's stock keyframe) with a staggered
  *  `animationDelay` per dot (0ms/150ms/300ms) — the standard "typing"
  *  cadence, rather than a bespoke keyframe just for this one usage. */
-function TypingIndicator({ initials, narrow = false }: { initials: string; narrow?: boolean }) {
+function TypingIndicator({
+  initials,
+  narrow = false,
+  bubbleFullWidth = false,
+}: {
+  initials: string;
+  narrow?: boolean;
+  /** True below 768px of the transcript's own rendered width — matches the
+   *  real message bubbles' own independent max-width breakpoint (see
+   *  `ChatMessage`'s own doc comment, lyra-ui) so this bubble doesn't read
+   *  as a different width than whichever real one follows it. A separate
+   *  prop from `narrow` (400px, avatar only) — see
+   *  `InteractionTranscript`'s own `transcriptBubbleFullWidth` state for
+   *  how this is measured. */
+  bubbleFullWidth?: boolean;
+}) {
   return (
     <div className="flex flex-col items-start" aria-live="polite" aria-label="Customer is typing">
-      <div className={cn("flex items-start gap-2", narrow ? "max-w-full" : "max-w-[70%]")}>
+      <div className={cn("flex items-start gap-2", bubbleFullWidth ? "max-w-full" : "max-w-[80%]")}>
         {!narrow && (
           <span
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-lyra-accent-green-soft text-lyra-accent-green-strong lyra-body-sm-emphasis"
@@ -2204,19 +2222,33 @@ export function InteractionTranscript({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Below 400px of this transcript's own rendered width: drop each
-  // message's sender avatar, and let the bubble itself grow from 70% to
-  // 80% of that width — per explicit request. Measured directly off this
-  // same scroll container via `ResizeObserver`, same pattern
-  // `ScheduleToolbar`'s own `containerRef`/`isWide`/`isCompact` already
-  // uses for its Add/Day/Week collapse (SchedulePanel.tsx) — a CSS
-  // `@container` query here stopped firing reliably for the agent
-  // live-testing it, even after several rounds of review/hardening.
+  // message's sender avatar (`transcriptNarrow`, threaded into each real
+  // message bubble's own `narrow` prop as an override — see
+  // `TranscriptMessageBubble`'s own doc comment). Below 768px: grow the
+  // TYPING INDICATOR's own bubble to full width, matching the real message
+  // bubbles' own independent 80%/full-width breakpoint — per explicit
+  // request (`ChatMessage`, lyra-ui, self-measures that breakpoint
+  // internally off its own root element and needs no prop from here; the
+  // `TypingIndicator` below is still a local, un-ported component with no
+  // measurement of its own, so it needs `transcriptBubbleFullWidth` handed
+  // down explicitly to stay visually consistent with the real bubbles
+  // beside it). Both measured directly off this same scroll container via
+  // one shared `ResizeObserver`, same pattern `ScheduleToolbar`'s own
+  // `containerRef`/`isWide`/`isCompact` already uses for its Add/Day/Week
+  // collapse (SchedulePanel.tsx) — a CSS `@container` query here stopped
+  // firing reliably for the agent live-testing it, even after several
+  // rounds of review/hardening.
   const [transcriptNarrow, setTranscriptNarrow] = useState(false);
+  const [transcriptBubbleFullWidth, setTranscriptBubbleFullWidth] = useState(false);
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
-    setTranscriptNarrow(el.getBoundingClientRect().width < 400);
-    const ro = new ResizeObserver(([entry]) => setTranscriptNarrow(entry.contentRect.width < 400));
+    const applyWidth = (width: number) => {
+      setTranscriptNarrow(width < 400);
+      setTranscriptBubbleFullWidth(width < 768);
+    };
+    applyWidth(el.getBoundingClientRect().width);
+    const ro = new ResizeObserver(([entry]) => applyWidth(entry.contentRect.width));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -2695,7 +2727,11 @@ export function InteractionTranscript({
                           />
                         ))}
                         {showTypingIndicator && (
-                          <TypingIndicator initials={displayInitials} narrow={transcriptNarrow} />
+                          <TypingIndicator
+                            initials={displayInitials}
+                            narrow={transcriptNarrow}
+                            bubbleFullWidth={transcriptBubbleFullWidth}
+                          />
                         )}
                       </div>
                     )
@@ -2896,10 +2932,56 @@ export function fillQuickReplyTemplate(
    it doesn't know or care what happens to a message once sent. */
 export const QUICK_REPLY_TRIGGER_CHAR = "/";
 export const QUICK_REPLY_TRIGGER_PATTERN = /\/(\w*)$/;
-export function InteractionComposer({ onSend }: { onSend: (text: string) => void }) {
+export function InteractionComposer({
+  onSend,
+  prefill,
+  onPrefillConsumed,
+}: {
+  onSend: (text: string) => void;
+  /** Populates the composer's own text WITHOUT sending it — per explicit
+   *  request ("When one is clicked it should populate into the input but
+   *  not send until the agent clicks send"), for Copilot's suggested-reply
+   *  cards (currently only Marcus Webb's scripted scenario,
+   *  `AgentWorkspace2WithDeskPage.tsx`). This component still owns its own
+   *  `message` state (unchanged, uncontrolled) — `prefill` is a one-shot
+   *  injection into that state via the `useEffect` below, not a switch to a
+   *  fully controlled input: the agent can still freely edit/clear the
+   *  populated text afterward like anything else they typed themselves.
+   *  Left `undefined` by every OTHER caller (no behavior change for them). */
+  prefill?: string;
+  /** Fired the instant `prefill` is consumed (copied into `message`) — the
+   *  caller's cue to reset its own `prefill` value back to `undefined`.
+   *  Required so a SECOND, later `prefill` call can ever take effect at
+   *  all: the effect below is keyed on `[prefill]`, so if the caller left
+   *  its own prefill value sitting non-`undefined` after the first one
+   *  landed, setting the exact same string again wouldn't change that
+   *  dependency and the effect simply wouldn't refire. Resetting to
+   *  `undefined` in between means every distinct suggestion the agent
+   *  clicks — even if it happens to be identical text — reliably re-fires
+   *  this effect. */
+  onPrefillConsumed?: () => void;
+}) {
   const [message, setMessage] = useState("");
   const canSend = message.trim().length > 0;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // See `prefill`'s own doc comment above for the full "why" — this just
+  // performs the one-shot injection + focus, then immediately hands control
+  // back to the caller to reset `prefill` to `undefined` again.
+  useEffect(() => {
+    if (prefill === undefined) return;
+    setMessage(prefill);
+    onPrefillConsumed?.();
+    // The textarea's own auto-grow (further down this component, if any)
+    // and caret placement both need the DOM to have actually committed
+    // `message`'s new value first.
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      el?.focus();
+      el?.setSelectionRange(prefill.length, prefill.length);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill]);
   // Per explicit request: tabbing out of the message textarea should land
   // on the Send button first — not the toolbar's Attach/Bold/Italic/etc.
   // icon buttons, which sit BEFORE Send in visual/DOM order (see the render

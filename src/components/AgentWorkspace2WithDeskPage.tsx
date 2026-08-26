@@ -55,6 +55,7 @@ import {
   AgentLegDisconnectedToast,
   Select,
   Tooltip,
+  Checkbox,
   type SelectOption,
   type SortDirection,
   type CreateNewOutboundConfig,
@@ -176,6 +177,23 @@ import {
 // explicitly asked).
 import { CollapsedChannelBadge } from "@/components/CollapsedChannelBadge";
 import { AddChannelAdHocButton } from "@/components/agent-next-gen-add-channel-button";
+import {
+  MARCUS_WEBB_ID,
+  MARCUS_WEBB_CHANNEL_ID,
+  MARCUS_WEBB_ACTION_CONFIG,
+  MARCUS_WEBB_THANKS_MESSAGE,
+  MARCUS_WEBB_REDACTED_SSN,
+  MARCUS_WEBB_RESET_VERIFY_MESSAGE,
+  MARCUS_WEBB_RESET_PASSWORD_GENERATED_MESSAGE,
+  MARCUS_WEBB_RESET_LOGIN_CONFIRM_MESSAGE,
+  buildMarcusWebbInteraction,
+  generateMarcusWebbTempPassword,
+  resetMarcusWebbScenario,
+  saveMarcusWebbScenario,
+  MARCUS_WEBB_RESET_STEP_ORDER,
+  type MarcusWebbAction,
+  type MarcusWebbScenarioState,
+} from "@/components/agent-next-gen-marcus-webb-scenario";
 import appIcon from "@/assets/app-icon.svg";
 import {
   MessageSquare,
@@ -205,6 +223,8 @@ import {
   IdCard,
   PhoneOutgoing,
   RotateCcw,
+  ShieldAlert,
+  Info,
   type LucideIcon,
 } from "lucide-react";
 
@@ -559,6 +579,453 @@ function resolveInteractionLastCustomerResponseLabel(
   return latest ? formatCompactDateTime(latest) : undefined;
 }
 
+/* ── MarcusWebbCopilotCard ──
+   The Copilot card rendered via `CopilotTabContent`'s own `extra` prop
+   (agent-next-gen-customer-info-panel.tsx) for the Marcus Webb scripted
+   scenario ONLY — every other interaction leaves `copilotExtra` unset, so
+   this never mounts for them. A plain step-machine render, not its own
+   component with local state: every value it needs (`state`) and every
+   action it can trigger (the 4 callback props) live in the parent page
+   component, per this scenario's own persistence needs (see
+   `agent-next-gen-marcus-webb-scenario.ts`'s own top-of-file comment).
+
+   Built entirely from existing lyra-ui atoms (`Button`'s `outline`/`wrap`
+   variants for every clickable option here, including the suggested-reply
+   text — `wrap` was added to `Button` specifically for arbitrary-length
+   button text like a "Continue with {typed search}" label, which is
+   exactly what a canned reply preview also is) rather than any hand-rolled
+   button shape, same "use the real design-system component" correction
+   this session already applied once to the AIInput clear button.
+
+   Per explicit follow-up request ("animate in the [cards] sequentially,
+   all copilot cards should"), every card's own root element gets the same
+   `animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-backwards
+   duration-500` entrance `CopilotTabContent`'s own doc comment already
+   established (that comment has the full "why `fill-mode-backwards`, why
+   this duration/delay pacing" reasoning — reused verbatim here). Critically,
+   each card's root ALSO gets an explicit `key` ("decision", "reset-detail",
+   `detail-${selectedAction}`, `message-options-${selectedAction}`,
+   "wrapup") — without one, switching `copilotStep`/`selectedAction` would
+   just patch the existing DOM node's children in place (same call site,
+   same component instance, no unmount), so the browser would never see a
+   fresh element to replay the CSS entrance on. The `key` forces React to
+   tear down and remount a brand-new node on every step transition instead,
+   which is what makes each new card actually animate in on arrival rather
+   than popping in silently after the first one. (Steps that mutate WITHIN
+   a still-mounted card — e.g. `resetSteps` flags flipping while
+   `copilotStep`/`selectedAction` stay put — correctly do NOT get a new key,
+   so clicking through the reset steps doesn't replay the whole card's
+   entrance each time, only the one-time arrival does.) The two-block
+   "options"/"investigate" detail card additionally staggers its second
+   block (the `recommendation` warning callout, when present) `delay-300`
+   behind the first, same two-element stagger pattern as
+   `CopilotTabContent`'s own info-box/Journey-Summary pair.
+
+   Per a later explicit follow-up ("add a green checkmark and disable the
+   menu item but keep the card (shift the copilot down like a normal
+   chat)"), the decision card (`decisionCard`, built unconditionally near
+   the top of the function body) is no longer one of the mutually-exclusive
+   step branches that gets swapped out — it renders on every step from
+   "decision" onward, with the picked option additionally getting a green
+   `CheckCircle2` (`text-lyra-status-success-strong`, the same "done" color
+   `resetSteps`' own icons already use) ahead of its label. Per a further
+   explicit follow-up ("only disable the clicked option"), ONLY the picked
+   option gets `disabled` — the other two stay clickable, so the agent can
+   still change their mind and pick a different path. Per a still further
+   follow-up ("once an item is completed keep it disabled"), which option(s)
+   read as `completed` is now `state.selectedActions.includes(action)` — a
+   persistent, ever-growing history array (see that field's own doc comment,
+   agent-next-gen-marcus-webb-scenario.ts) — rather than `state.selectedAction
+   === action` (just the current pick): the latter would have silently
+   re-enabled an earlier completed option the instant the agent selected a
+   different one afterward, since `selectedAction` only ever holds ONE value
+   at a time. Per a YET further follow-up ("don't fully disable steps until
+   they are complete (ie. the agent has sent a reply to the customer)"),
+   `onSelectAction`/`handleMarcusWebbSelectAction` does NOT append to
+   `selectedActions` anymore — picking an option only ever sets
+   `selectedAction` (the in-progress pick, still driving which `nextCard`
+   shows below). Per a final correction to that same follow-up ("once the
+   step is completed (ie. the customer responds)"), `selectedActions` gets
+   appended from `handleSendMessage`'s 2500ms simulated-customer-reply
+   `setTimeout` callback (its `isMarcusWebbWrapupSend` branch) — the moment
+   the CUSTOMER's reply actually lands, not the instant the agent sends —
+   so an option stays enabled/re-pickable for as long as it's merely in
+   progress, and only locks in as checked/disabled once the customer has
+   actually responded. Once added, an
+   option's checked/disabled state only ever turns on, never back off, for
+   the rest of the scenario. Whatever the CURRENT step's own card
+   is (`nextCard` — computed by the same `if`/`else if` chain the old
+   mutually-exclusive `return`s used to be, now assigning instead of
+   returning) renders BELOW `decisionCard` in one shared `flex flex-col
+   gap-3` wrapper, rather than replacing it — the same "earlier turn stays
+   put, the next one appends underneath" shape a real chat transcript
+   already has, which is what makes the whole Copilot `extra` slot grow
+   (and everything below it shift down) turn by turn instead of popping
+   between single unrelated cards.
+
+   Per a further explicit follow-up ("scroll to the latest card in
+   copilot"), a zero-height sentinel `<div ref={latestCardRef}>` sits at the
+   very end of the returned stack (after `nextCard`), and a `useEffect`
+   keyed on `state.copilotStep`/`state.selectedAction` — the same two
+   values that determine which card is currently "latest" — calls that
+   sentinel's own `scrollIntoView({ behavior: "smooth", block: "end" })`
+   whenever either changes. `scrollIntoView` finds its own nearest
+   scrollable ancestor automatically (the Copilot tab's `PanelContent`
+   scroll region, agent-next-gen-customer-info-panel.tsx), so this needs no
+   ref/knowledge of that container at all. The hook is called
+   UNCONDITIONALLY before the `copilotStep === "done"` early return below —
+   moving it after would violate the rules of hooks the moment this
+   component stays mounted (same call site, same instance) across a
+   transition INTO "done", since a hook that only sometimes runs changes
+   the hook count between renders. */
+function MarcusWebbCopilotCard({
+  state,
+  onSelectAction,
+  onCompleteActivity,
+  onSelectMessage,
+  onWrapUp,
+  onResetVerifyIdentity,
+  onResetGeneratePassword,
+  onResetRegeneratePassword,
+  onResetConfirmLogin,
+}: {
+  state: MarcusWebbScenarioState;
+  onSelectAction: (action: MarcusWebbAction) => void;
+  onCompleteActivity: () => void;
+  onSelectMessage: (text: string) => void;
+  onWrapUp: (updateStatus: boolean) => void;
+  /** The "reset" action's own 3 independently-clickable steps — see
+   *  `MarcusWebbScenarioState.resetSteps`'s own doc comment. Only ever
+   *  called when `state.selectedAction === "reset"` (the only action with a
+   *  dedicated step-by-step render branch below); every other action still
+   *  goes through the generic `onCompleteActivity` button. */
+  onResetVerifyIdentity: () => void;
+  onResetGeneratePassword: () => void;
+  onResetRegeneratePassword: () => void;
+  onResetConfirmLogin: () => void;
+}) {
+  // Scroll-to-latest-card sentinel — see this function's own top-of-file
+  // doc comment for the full reasoning. Called unconditionally, before the
+  // `copilotStep === "done"` early return just below, per the rules of
+  // hooks.
+  const latestCardRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    latestCardRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [state.copilotStep, state.selectedAction]);
+
+  if (state.copilotStep === "done") return null;
+
+  // Per explicit follow-up request ("add a green checkmark and disable the
+  // menu item but keep the card (shift the copilot down like a normal
+  // chat)"), this card no longer gets replaced by the next step once an
+  // option is picked — it stays, reading as an answered form (the chosen
+  // option gets a green checkmark and, per a further explicit follow-up,
+  // ONLY that one option is disabled — see this function's own top-of-file
+  // doc comment), and whatever the CURRENT step's own card is (`nextCard`,
+  // below) renders BELOW it instead, same "earlier turn stays put, next one
+  // appends underneath" shape a real chat transcript already has. Built
+  // unconditionally (not just inside the `copilotStep === "decision"`
+  // branch) since it also needs to keep rendering, resolved, for every
+  // LATER step too.
+  const decisionCard = (
+    <div key="decision" className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-backwards duration-500 flex flex-col gap-3 rounded-lyra-md border border-lyra-border-subtle bg-lyra-bg-surface-base p-4">
+      <div className="flex items-center gap-2">
+        <ShieldAlert className="h-4 w-4 shrink-0 text-lyra-status-warning-strong" strokeWidth={1.5} aria-hidden="true" />
+        <span className="lyra-body-md-emphasis text-lyra-fg-default">How would you like to help Marcus?</span>
+      </div>
+      <p className="lyra-body-sm text-lyra-fg-secondary">
+        He's tried resetting his password multiple times and is now locked out of his account.
+      </p>
+      <div className="flex flex-col gap-2">
+        {(Object.keys(MARCUS_WEBB_ACTION_CONFIG) as MarcusWebbAction[]).map((action) => {
+          // `selectedActions`, not `state.selectedAction === action` — see
+          // that field's own doc comment (agent-next-gen-marcus-webb-
+          // scenario.ts) for why this needs to check the whole completed-
+          // action history instead of just the current pick: per explicit
+          // follow-up request, an option stays checked/disabled once
+          // COMPLETED (the customer has actually responded to the agent's
+          // suggested reply — see `handleSendMessage`'s simulated-reply
+          // `setTimeout`, `isMarcusWebbWrapupSend` branch), even after the
+          // agent later selects a different one. Merely
+          // PICKING an option (without finishing it) does NOT add it here —
+          // per a further explicit follow-up ("don't fully disable steps
+          // until they are complete"), an option that's still in progress
+          // stays enabled/re-pickable, same as one never touched at all.
+          const completed = state.selectedActions.includes(action);
+          // Per a further explicit follow-up ("show the active option in an
+          // active state (no checkmark and disabled until completed)"), the
+          // option currently being worked (picked, but not yet sent — see
+          // `completed`'s own comment above for that distinction) gets its
+          // own visual treatment distinct from BOTH the plain untouched
+          // outline buttons and the resolved checkmark+disabled ones — no
+          // checkmark, still fully clickable (re-picking it, or a different
+          // option, remains possible for as long as it's merely in
+          // progress). Per a still further follow-up ("I want the options to
+          // reset to be in an active (pressed) state when the Reset Options
+          // for Marcus are displayed, same for the other buttons when their
+          // options are displayed" — i.e. the first attempt's plain
+          // `bg-lyra-bg-surface-sunken` fill read as barely-there, not
+          // "pressed"), swapped to the design system's own established
+          // selected/pressed-toggle combo — `bg-lyra-bg-active-subtle
+          // border-lyra-border-active text-lyra-fg-active-strong` — the same
+          // 3-class treatment `ToggleGroup`'s own `selected` state uses
+          // (toggle-group.tsx), reused verbatim here rather than inventing a
+          // one-off look, for a clearly "on/pressed" appearance instead of a
+          // subtle background tint.
+          const active = !completed && state.selectedAction === action;
+          return (
+            <Button
+              key={action}
+              variant="outline"
+              disabled={completed}
+              className={cn(
+                "w-full justify-start gap-2",
+                active && "bg-lyra-bg-active-subtle border-lyra-border-active text-lyra-fg-active-strong"
+              )}
+              onClick={() => onSelectAction(action)}
+            >
+              {completed && (
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-lyra-status-success-strong" strokeWidth={1.5} aria-hidden="true" />
+              )}
+              {MARCUS_WEBB_ACTION_CONFIG[action].optionLabel}
+            </Button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  if (state.copilotStep === "decision") {
+    return decisionCard;
+  }
+
+  let nextCard: React.ReactNode = null;
+
+  // "reset" gets its own render branch — per explicit request, each of its
+  // 3 steps is independently actionable and performs a real action, with no
+  // shared "Mark steps complete" button at the bottom; some steps reveal
+  // extra inline content once done (the SSN reference under step 1, the
+  // generated password + Regenerate under step 2). See
+  // `MarcusWebbScenarioState.resetSteps`'s own doc comment for the full
+  // reasoning (including why this used to be 4 steps — a "send the
+  // temporary password to Marcus's verified email on file" step was removed
+  // per explicit request, "remove this step"). "options"/"investigate" fall
+  // through to the generic items-list + button branch further below,
+  // unchanged.
+  //
+  // Per a further explicit follow-up ("the resetting steps do not wrap -
+  // maybe don't have the entire item a button but have a checkbox next to
+  // the item that reveals the content and populates the chat when checked
+  // and once completed it disables"), each step used to be a full-width
+  // ghost `Button` (base `buttonVariants` class includes `whitespace-nowrap`
+  // — see button.tsx — which is why long step text was overflowing/
+  // scrolling horizontally instead of wrapping). Rebuilt as a plain
+  // `Checkbox` + hand-laid-out `<span>` row instead of using `Checkbox`'s
+  // own built-in `label` prop, so the text sits in a `flex-1 min-w-0` span
+  // that's free to wrap within the card's width rather than being sized by
+  // an `inline-flex` label wrapper.
+  //
+  // Per a still further explicit follow-up ("don't set the checked as
+  // completed until after the message is sent"), refined by a further
+  // explicit correction ("once the step is completed (ie. the customer
+  // responds)"), and finally corrected once more by a screenshot showing a
+  // real send/reply exchange for step 1 that still hadn't updated its
+  // checkbox ("it's not updating in the copilot card to checked and
+  // disabled"): the checkbox's fully "completed" look (blue check +
+  // strikethrough text + `disabled`) is now held back until the CUSTOMER
+  // has actually responded to THAT SPECIFIC step's own message —
+  // `state.resetStepsConfirmed` (see that field's own doc comment,
+  // agent-next-gen-marcus-webb-scenario.ts) — NOT the scenario-wide
+  // `state.selectedActions.includes("reset")` flag, which only fires once,
+  // at the very end of the whole flow (the final suggested-reply/wrap-up
+  // exchange), and NOT the instant the step's own one-shot `onReset*`
+  // handler runs either. Each step therefore reads THREE states off
+  // `checkboxState(key)` below, mirroring Radix Checkbox's own `boolean |
+  // "indeterminate"` union: `false` (untouched — box empty, content not yet
+  // revealed), `"indeterminate"` (the step's action has run — SSN/
+  // generated-password reveal box IS showing, composer prefill IS available
+  // — but the customer hasn't responded to it yet, so this renders as a
+  // filled dash rather than a checkmark and stays enabled/re-clickable),
+  // and `true` (the customer responded — full checkmark, strikethrough,
+  // `disabled`). Revealing content (the SSN/password boxes below) still
+  // keys off the raw `steps.*` flag, unaffected by this — only the
+  // checkbox's OWN visual/interactive state waits on the customer's reply.
+  if (state.copilotStep === "detail" && state.selectedAction === "reset") {
+    const config = MARCUS_WEBB_ACTION_CONFIG.reset;
+    const steps = state.resetSteps;
+    const confirmed = state.resetStepsConfirmed;
+    const stepRowClassName = "flex items-start gap-2 px-2 py-1.5";
+    const checkboxState = (key: keyof typeof steps): boolean | "indeterminate" =>
+      !steps[key] ? false : confirmed[key] ? true : "indeterminate";
+    const stepTextClassName = (key: keyof typeof steps) =>
+      `lyra-body-sm flex-1 min-w-0 ${
+        steps[key] && confirmed[key] ? "text-lyra-fg-secondary line-through" : "text-lyra-fg-default"
+      }`;
+    nextCard = (
+      <div key="reset-detail" className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-backwards duration-500 flex flex-col gap-3 rounded-lyra-md border border-lyra-border-subtle bg-lyra-bg-surface-base p-4">
+        <span className="lyra-body-md-emphasis text-lyra-fg-default">{config.cardTitle}</span>
+        <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1.5">
+            <div className={stepRowClassName}>
+              <Checkbox
+                className="mt-0.5"
+                checked={checkboxState("identityVerified")}
+                disabled={steps.identityVerified && confirmed.identityVerified}
+                onCheckedChange={() => !steps.identityVerified && onResetVerifyIdentity()}
+                aria-label={config.items[0]}
+              />
+              <span className={stepTextClassName("identityVerified")}>{config.items[0]}</span>
+            </div>
+            {steps.identityVerified && (
+              <div className="ml-8 flex items-center gap-2 rounded-lyra-sm border border-lyra-border-subtle bg-lyra-bg-surface-sunken px-3 py-1.5">
+                <span className="lyra-body-xs text-lyra-fg-secondary">SSN on file:</span>
+                <code className="lyra-body-sm-emphasis text-lyra-fg-default">{MARCUS_WEBB_REDACTED_SSN}</code>
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <div className={stepRowClassName}>
+              <Checkbox
+                className="mt-0.5"
+                checked={checkboxState("passwordGenerated")}
+                disabled={steps.passwordGenerated && confirmed.passwordGenerated}
+                onCheckedChange={() => !steps.passwordGenerated && onResetGeneratePassword()}
+                aria-label={config.items[1]}
+              />
+              <span className={stepTextClassName("passwordGenerated")}>{config.items[1]}</span>
+            </div>
+            {steps.passwordGenerated && state.resetTempPassword && (
+              <div className="ml-8 flex items-center justify-between gap-2 rounded-lyra-sm border border-lyra-border-subtle bg-lyra-bg-surface-sunken px-3 py-1.5">
+                <code className="lyra-body-sm-emphasis text-lyra-fg-default">{state.resetTempPassword}</code>
+                <Button variant="ghost" size="sm" onClick={onResetRegeneratePassword}>
+                  <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+                  Regenerate
+                </Button>
+              </div>
+            )}
+          </div>
+          <div className={stepRowClassName}>
+            <Checkbox
+              className="mt-0.5"
+              checked={checkboxState("loginConfirmed")}
+              disabled={steps.loginConfirmed && confirmed.loginConfirmed}
+              onCheckedChange={() => !steps.loginConfirmed && onResetConfirmLogin()}
+              aria-label={config.items[2]}
+            />
+            <span className={stepTextClassName("loginConfirmed")}>{config.items[2]}</span>
+          </div>
+        </div>
+      </div>
+    );
+  } else if (state.copilotStep === "detail" && state.selectedAction) {
+    const config = MARCUS_WEBB_ACTION_CONFIG[state.selectedAction];
+    nextCard = (
+      <div key={`detail-${state.selectedAction}`} className="flex flex-col gap-3">
+        <div className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-backwards duration-500 flex flex-col gap-3 rounded-lyra-md border border-lyra-border-subtle bg-lyra-bg-surface-base p-4">
+          <span className="lyra-body-md-emphasis text-lyra-fg-default">{config.cardTitle}</span>
+          <ul className="flex flex-col gap-2">
+            {config.items.map((item, i) => (
+              <li key={i} className="flex items-start gap-2 lyra-body-sm text-lyra-fg-default">
+                {config.cardKind === "steps" ? (
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-lyra-fg-secondary" strokeWidth={1.5} aria-hidden="true" />
+                ) : (
+                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-lyra-fg-secondary" strokeWidth={1.5} aria-hidden="true" />
+                )}
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+          {/* No `recommendation` means this card owns its own Continue/Mark
+              Complete button, unchanged from before. When a `recommendation`
+              IS set (currently "investigate" only), the button moves into
+              the standalone warning callout below instead, per explicit
+              request to pull the flagged recommendation line out of this
+              activity summary entirely. */}
+          {!config.recommendation && (
+            <Button className="w-full" onClick={onCompleteActivity}>
+              {config.completeLabel}
+            </Button>
+          )}
+        </div>
+        {/* Reveals second, `delay-300` behind the card above — same
+            two-block stagger `CopilotTabContent`'s own info-box/Journey-
+            Summary pair already established (that component's own doc
+            comment has the full reasoning for `fill-mode-backwards` +
+            `delay-300`/duration-500 pacing, reused verbatim here). Styled to
+            match the "warning-solid" `Container` variant per explicit
+            request (a visible border, not just the borderless subtle fill
+            `InlineNotification`'s "warning" variant uses everywhere else in
+            this file) — scoped to this one call site via `className` rather
+            than changing the shared component's own variant, so the
+            SLA-breach warning banner elsewhere in this file is unaffected. */}
+        {config.recommendation && (
+          <InlineNotification
+            variant="warning"
+            className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-backwards duration-500 delay-300 border border-lyra-status-warning-strong"
+            action={
+              <Button className="w-full" onClick={onCompleteActivity}>
+                {config.completeLabel}
+              </Button>
+            }
+          >
+            {config.recommendation}
+          </InlineNotification>
+        )}
+      </div>
+    );
+  } else if (state.copilotStep === "message-options" && state.selectedAction) {
+    const config = MARCUS_WEBB_ACTION_CONFIG[state.selectedAction];
+    nextCard = (
+      <div key={`message-options-${state.selectedAction}`} className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-backwards duration-500 flex flex-col gap-3 rounded-lyra-md border border-lyra-border-subtle bg-lyra-bg-surface-base p-4">
+        <span className="lyra-body-md-emphasis text-lyra-fg-default">Suggested replies</span>
+        <p className="lyra-body-sm text-lyra-fg-secondary">
+          Pick one to fill in the message box below — nothing sends until you click Send.
+        </p>
+        <div className="flex flex-col gap-2">
+          {config.messageOptions.map((msg, i) => (
+            <Button key={i} variant="outline" wrap className="w-full" onClick={() => onSelectMessage(msg)}>
+              {msg}
+            </Button>
+          ))}
+        </div>
+      </div>
+    );
+  } else if (state.copilotStep === "wrapup") {
+    nextCard = (
+      <div key="wrapup" className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-backwards duration-500 flex flex-col gap-3 rounded-lyra-md border border-lyra-border-subtle bg-lyra-bg-surface-base p-4">
+        <span className="lyra-body-md-emphasis text-lyra-fg-default">Update status and dismiss?</span>
+        <p className="lyra-body-sm text-lyra-fg-secondary">
+          Marcus's issue looks resolved. Mark this interaction Resolved and dismiss it?
+        </p>
+        <div className="flex gap-2">
+          <Button className="flex-1" onClick={() => onWrapUp(true)}>
+            Yes, update &amp; dismiss
+          </Button>
+          <Button variant="outline" className="flex-1" onClick={() => onWrapUp(false)}>
+            Not yet
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Decision card first (now permanently resolved/disabled — see above),
+  // whatever the current step's card is appended below it. Plain document
+  // flow, no extra positioning needed: `CopilotTabContent`'s own
+  // `extra` slot (this component's sole call site) just grows taller as
+  // more content renders inside it, "shifting everything below it down"
+  // for free exactly like a normal chat transcript growing with new turns.
+  return (
+    <div className="flex flex-col gap-3">
+      {decisionCard}
+      {nextCard}
+      {/* Zero-height scroll target — see this function's own top-of-file
+          doc comment for the full "scroll to the latest card" reasoning. */}
+      <div ref={latestCardRef} />
+    </div>
+  );
+}
+
 export function AgentWorkspace2WithDeskPage({
   showPageHeader = false,
   showPanelToggle = false,
@@ -618,6 +1085,152 @@ export function AgentWorkspace2WithDeskPage({
   useEffect(() => {
     interactions.forEach((interaction) => saveCaseRecord(interaction));
   }, [interactions]);
+  // ── Marcus Webb scripted scenario (Premium only) ──
+  // `agent-next-gen-marcus-webb-scenario.ts` owns the actual localStorage
+  // read/write and the scenario's static content; this page only owns WHEN
+  // things happen (the trigger, wiring into `interactions`/Copilot/the
+  // composer) and the 4 agent-driven transitions below. Lazy-initialized via
+  // `resetMarcusWebbScenario()` — NOT `loadMarcusWebbScenario()` — so every
+  // fresh page load starts this scenario over from scratch rather than
+  // resuming whatever was left in `localStorage` from a previous load (see
+  // that module's own top-of-file comment for the full reasoning: a plain
+  // reload is now itself the "reset" action, per explicit request, no
+  // DevTools console needed).
+  const [marcusWebbState, setMarcusWebbState] = useState<MarcusWebbScenarioState>(() => resetMarcusWebbScenario());
+  // One-shot value handed to `InteractionComposer`'s own `prefill` prop when
+  // the agent clicks a suggested reply on the "message-options" Copilot
+  // card — populates the composer's text box without sending it (per
+  // explicit request). Reset back to `undefined` via `onPrefillConsumed`
+  // once the composer's effect has consumed it, so clicking the SAME
+  // suggestion again later can still re-trigger it.
+  const [marcusWebbComposerPrefill, setMarcusWebbComposerPrefill] = useState<string | undefined>(undefined);
+
+  // (No mount-time rehydration effect here anymore — `marcusWebbState`
+  // above always starts at `DEFAULT_STATE` now, so there's nothing left in
+  // `interactions` to restore on a fresh load. The trigger effect further
+  // down is what (re-)creates Marcus's interaction every time.)
+
+  // (5-real-seconds-after-"available" trigger effect lives further down,
+  // right after `agentStatus` itself is declared — see that effect's own
+  // doc comment there for why it can't live up here.)
+
+  // Keeps the persisted `marcusWebbState.interaction` in sync with whatever
+  // `interactions` actually holds for Marcus's card right now (new messages
+  // from `handleSendMessage`'s `applyToChannel`, status changes, etc.) — the
+  // same "reflect live state into local storage" role
+  // `saveCaseRecord`/the effect right above plays for every OTHER
+  // interaction, just scoped to this one id and this module's own storage
+  // key instead.
+  useEffect(() => {
+    const live = interactions.find((i) => i.id === MARCUS_WEBB_ID);
+    if (live) {
+      setMarcusWebbState((prev) => (prev.interaction === live ? prev : saveMarcusWebbScenario({ interaction: live })));
+    }
+  }, [interactions]);
+
+  const handleMarcusWebbSelectAction = (action: MarcusWebbAction) => {
+    // Does NOT touch `selectedActions` (the persistent completed-options
+    // history — see that field's own doc comment, agent-next-gen-marcus-
+    // webb-scenario.ts) here anymore. Per a further explicit follow-up
+    // ("don't fully disable steps until they are complete (ie. the agent
+    // has sent a reply to the customer)"), later corrected by a final
+    // explicit follow-up ("once the step is completed (ie. the customer
+    // responds)"), picking an option off the decision card is no longer
+    // what locks it in as checked/disabled — only the CUSTOMER actually
+    // responding to that option's suggested reply is. See
+    // `handleSendMessage`'s own simulated-reply `setTimeout`
+    // (`isMarcusWebbWrapupSend` branch), where `selectedActions` actually
+    // gets appended once that reply lands.
+    setMarcusWebbState(
+      saveMarcusWebbScenario({
+        selectedAction: action,
+        copilotStep: "detail",
+      })
+    );
+  };
+  const handleMarcusWebbCompleteActivity = () => {
+    setMarcusWebbState(saveMarcusWebbScenario({ activityCompleted: true, copilotStep: "message-options" }));
+  };
+  const handleMarcusWebbSelectMessage = (text: string) => {
+    setMarcusWebbComposerPrefill(text);
+  };
+  // ── "reset" action's 4 clickable steps (per explicit request) ──
+  // Each of these is called directly from its own row in
+  // `MarcusWebbCopilotCard`'s dedicated reset-step render branch — no
+  // shared "Mark steps complete" button; the 4th (`handleMarcusWebbResetConfirmLogin`)
+  // checks whether every step is now done and, if so, transitions
+  // `copilotStep` on to `"message-options"` itself — the exact same target
+  // state the old shared button used to set via `onCompleteActivity` above,
+  // just triggered automatically instead of by an explicit extra click.
+  const handleMarcusWebbResetVerifyIdentity = () => {
+    setMarcusWebbComposerPrefill(MARCUS_WEBB_RESET_VERIFY_MESSAGE);
+    setMarcusWebbState(
+      saveMarcusWebbScenario({ resetSteps: { ...marcusWebbState.resetSteps, identityVerified: true } })
+    );
+  };
+  const handleMarcusWebbResetGeneratePassword = () => {
+    setMarcusWebbComposerPrefill(MARCUS_WEBB_RESET_PASSWORD_GENERATED_MESSAGE);
+    setMarcusWebbState(
+      saveMarcusWebbScenario({
+        resetTempPassword: generateMarcusWebbTempPassword(),
+        resetSteps: { ...marcusWebbState.resetSteps, passwordGenerated: true },
+      })
+    );
+  };
+  // Swaps the displayed password for a fresh one without touching the
+  // composer or `resetSteps` — a pure "I don't like that one, give me
+  // another" affordance, not a step transition of its own.
+  const handleMarcusWebbResetRegeneratePassword = () => {
+    setMarcusWebbState(saveMarcusWebbScenario({ resetTempPassword: generateMarcusWebbTempPassword() }));
+  };
+  // This flow used to have a 3rd step here ("send the temporary password to
+  // Marcus's verified email on file") that opened a dedicated email
+  // `Thread` on Marcus's interaction and populated it with an email
+  // template. Removed per explicit request ("remove this step") — step 2's
+  // own composer prefill already tells Marcus the password is on its way to
+  // his email, making a separate agent-facing "send it" click redundant.
+  // `handleMarcusWebbResetConfirmLogin` below (now step 3, was step 4) no
+  // longer needs to switch the active channel back to chat either, since
+  // this step never switched it to email in the first place. Once this
+  // step lands, checks whether all 3 steps are now done and — if so —
+  // transitions `copilotStep` straight to `"message-options"` itself, same
+  // target state `onCompleteActivity`/`handleMarcusWebbCompleteActivity`
+  // sets for every OTHER action's own explicit "Mark Complete" button.
+  const handleMarcusWebbResetConfirmLogin = () => {
+    setMarcusWebbComposerPrefill(MARCUS_WEBB_RESET_LOGIN_CONFIRM_MESSAGE);
+    const nextSteps = { ...marcusWebbState.resetSteps, loginConfirmed: true };
+    const allStepsDone = nextSteps.identityVerified && nextSteps.passwordGenerated && nextSteps.loginConfirmed;
+    setMarcusWebbState(
+      saveMarcusWebbScenario({
+        resetSteps: nextSteps,
+        ...(allStepsDone ? { activityCompleted: true, copilotStep: "message-options" as const } : {}),
+      })
+    );
+  };
+  // "Yes" dismisses for real, reusing the same `handleInteractionStatusChange`
+  // + `handleDismissInteraction` pair every other card's own status-change/
+  // dismiss actions already use (see this file's own doc comments on those
+  // two handlers) — no separate Contact History code needed (per
+  // `handleDismissInteraction`'s own doc comment, it logs any dismissed
+  // interaction with an agent-sent message regardless of customer-directory
+  // identity). "Not yet", per explicit follow-up ("if the user selects not
+  // yet, just dismiss that card do not remove the How would you like to
+  // help Marcus card"), goes to `"idle"` rather than `"done"` — `"done"`
+  // nulls the WHOLE Copilot card (see `MarcusWebbCopilotCard`'s own early
+  // return), which would also take the decision card down with it; `"idle"`
+  // has no matching `nextCard` branch, so only the wrap-up prompt itself
+  // disappears and the (already-resolved) decision card stays put, same as
+  // every other step's card being replaced. Nothing transitions OUT of
+  // `"idle"` afterward — the wrap-up prompt is scripted to fire only once.
+  const handleMarcusWebbWrapUp = (updateStatus: boolean) => {
+    if (updateStatus) {
+      handleInteractionStatusChange(MARCUS_WEBB_ID, MARCUS_WEBB_CHANNEL_ID, "Resolved");
+      handleDismissInteraction(MARCUS_WEBB_ID);
+      setMarcusWebbState(saveMarcusWebbScenario({ dismissed: true, copilotStep: "done" }));
+    } else {
+      setMarcusWebbState(saveMarcusWebbScenario({ copilotStep: "idle" }));
+    }
+  };
   // Real "Today" Contact History rows — starts empty (nothing to show on
   // login, there's no backend here to have loaded anything from) and grows
   // as the agent actually dismisses whole assignments (`handleDismissInteraction`
@@ -1126,6 +1739,15 @@ export function AgentWorkspace2WithDeskPage({
   // Information tab set, plain customer-ID subtitle — see
   // `showChannelTabRow` right below) the instant either action resolves,
   // not just at the customer directory's own static, build-time contents.
+  // The scripted Marcus Webb interaction (`MARCUS_WEBB_ID`, see
+  // agent-next-gen-marcus-webb-scenario.ts) reads as a real customer here
+  // too, but no longer via a special-cased third OR clause — per a later
+  // explicit request ("add marcus webb to the customer database"), he's
+  // now a genuine `CREATE_NEW_CUSTOMERS` entry (its own `id` set to
+  // `MARCUS_WEBB_ID`, added in lyra-ui's `create-new-customers-data.ts` —
+  // see that file's own doc comment), so the first `.some(...)` below
+  // already covers him like any other real customer, no different from
+  // how `createdCustomerRecords` promotes a freshly-linked/created card.
   const activeInteractionIsRealCustomer = activeInteraction
     ? CREATE_NEW_CUSTOMERS.some((c) => c.id === activeInteraction.id) ||
       createdCustomerRecords.some((c) => c.id === activeInteraction.id)
@@ -1533,6 +2155,53 @@ export function AgentWorkspace2WithDeskPage({
   const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
   const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("unavailable");
+  // 5-real-seconds-after-"available" trigger for the Marcus Webb scripted
+  // scenario — no longer time-based (was a 30s, then 5s, real-time delay;
+  // per explicit follow-up request that proved fiddly to test/demo on
+  // command) — now fires the instant the agent presses the "L" key, any
+  // time they're "available" and the scenario hasn't already fired this
+  // page load. Has to live here (after `agentStatus` itself, not up with
+  // the rest of that scenario's own state/effects near the top of this
+  // component) purely because it reads `agentStatus` — a `useEffect`'s
+  // dependency array is evaluated as part of this call, so referencing a
+  // not-yet-declared `const` there is a hard TDZ error, not just a stale
+  // read. Only arms once per PAGE LOAD — `marcusWebbState` itself resets to
+  // its defaults on every mount (see that state's own declaration above),
+  // so `marcusWebbState.triggered` only ever blocks a SECOND trigger within
+  // the SAME load, not across a reload.
+  //
+  // Per explicit report ("it didn't open the interaction, just the left
+  // nav — keep the agent on whatever screen they're on") — deliberately
+  // does NOT call `switchActiveInteraction`/`setSidePanelOpen` the way
+  // `handleOpenAssignmentFromNotification`'s own `isNewInteraction` branch
+  // does for every AGENT-clicked notification: Marcus's arrival should
+  // announce itself (nav opens, `InteractionNavItem` animates in) without
+  // yanking the agent off whatever they're currently looking at — only a
+  // deliberate click on his new nav card should actually open him.
+  //
+  // The keydown listener ignores "L" while the agent is actually typing
+  // (any focused `<input>`/`<textarea>`/`contenteditable`, or with a
+  // modifier held) — this is a real, printable letter the agent needs to
+  // type into the composer/search/etc. constantly, so only a "bare L" press
+  // outside any text field counts as the demo shortcut.
+  useEffect(() => {
+    if (agentStatus !== "available" || marcusWebbState.triggered) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "l" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable) return;
+      const interaction = buildMarcusWebbInteraction(clockTickRef.current);
+      setInteractions((prev) => (prev.some((i) => i.id === MARCUS_WEBB_ID) ? prev : [...prev, interaction]));
+      setMarcusWebbState(saveMarcusWebbScenario({ triggered: true, interaction, copilotStep: "decision" }));
+      // Per explicit request ("when a new interaction comes in - if the
+      // left nav is closed, open it") — Marcus's chat is a genuinely
+      // inbound, unprompted arrival (the agent didn't launch it), the same
+      // category `handleOpenAssignmentFromNotification` above now covers.
+      setNavOpen(true);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [agentStatus, marcusWebbState.triggered]);
   const [showWelcomeModal, setShowWelcomeModal] = useState(true);
   // Flushes whatever `fireAgentLegStatusToast` deferred (further up this
   // component) the moment the welcome modal actually closes (Go Available /
@@ -3250,12 +3919,38 @@ export function AgentWorkspace2WithDeskPage({
       }, 2000);
     }
 
+    // Marcus Webb's own wrap-up reply — captured once here (send time), not
+    // re-read inside the timeout below, same "snapshot now, not whenever the
+    // callback happens to fire" reasoning `channelKeyAtSend` above already
+    // follows. True exactly when the agent is sending one of the suggested
+    // replies on Marcus's "message-options" Copilot card — i.e. this is the
+    // message that resolves his scenario, per explicit request ("Once sent
+    // continue the conversation and wrap up").
+    const isMarcusWebbWrapupSend =
+      interactionId === MARCUS_WEBB_ID && marcusWebbState.copilotStep === "message-options";
+    // Snapshotted alongside `isMarcusWebbWrapupSend` for the same reason —
+    // read inside the 2500ms timeout below, not re-read live off
+    // `marcusWebbState` when that callback actually fires.
+    const marcusWebbCompletedAction = marcusWebbState.selectedAction;
+    // True for every OTHER message sent during the "reset" flow's own 4
+    // steps — i.e. every send that ISN'T the final wrap-up reply above. See
+    // `resetStepsConfirmed`'s own doc comment (agent-next-gen-marcus-webb-
+    // scenario.ts) for the full reasoning: each step's checkbox needs its
+    // OWN "the customer responded to THIS step" signal, not the single
+    // scenario-wide one `isMarcusWebbWrapupSend` drives.
+    const isMarcusWebbResetStepSend =
+      interactionId === MARCUS_WEBB_ID &&
+      marcusWebbState.selectedAction === "reset" &&
+      marcusWebbState.copilotStep === "detail";
+
     // Simulated customer reply — canned text, not a real conversation
     // engine. "Customer"/"C" here are placeholders: `InteractionTranscript`
     // already swaps every customer-sender message's name/initials for this
     // interaction's real customer at render time (see its own doc comment),
     // so this reads correctly without needing the real name threaded
-    // through here too.
+    // through here too. Marcus's own scenario overrides both the reply text
+    // (his scripted thanks message, not a random pool pick) and advances his
+    // Copilot card to "wrapup" once it lands.
     window.setTimeout(() => {
       if (isTextChannelAtSend) {
         setCustomerTyping((prev) => ({ ...prev, [typingKey]: false }));
@@ -3266,7 +3961,9 @@ export function AgentWorkspace2WithDeskPage({
         name: "Customer",
         initials: "C",
         timestamp: new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }),
-        text: CUSTOMER_AUTO_REPLY_POOL[Math.floor(Math.random() * CUSTOMER_AUTO_REPLY_POOL.length)],
+        text: isMarcusWebbWrapupSend
+          ? MARCUS_WEBB_THANKS_MESSAGE
+          : CUSTOMER_AUTO_REPLY_POOL[Math.floor(Math.random() * CUSTOMER_AUTO_REPLY_POOL.length)],
       };
       setInteractions((prev) =>
         prev.map((interaction) =>
@@ -3280,6 +3977,57 @@ export function AgentWorkspace2WithDeskPage({
             : interaction
         )
       );
+      // Per explicit follow-up ("don't set the checked as completed until
+      // after the message is sent"), then corrected by a further explicit
+      // follow-up ("once the step is completed (ie. the customer
+      // responds)"): the decision card's chosen option (and, for "reset",
+      // each of its own step checkboxes — see `MarcusWebbCopilotCard`'s own
+      // reset-detail branch) only lock in as checked/disabled once THIS —
+      // the customer's simulated reply actually landing, not the agent's
+      // send moment above — fires. `marcusWebbCompletedAction` was
+      // snapshotted at send time (same reasoning as `isMarcusWebbWrapupSend`
+      // itself); reading `marcusWebbState.selectedActions` live here is
+      // still correct since this callback only ever runs once per send and
+      // nothing else mutates that array in between.
+      if (isMarcusWebbWrapupSend) {
+        setMarcusWebbState(
+          saveMarcusWebbScenario({
+            copilotStep: "wrapup",
+            ...(marcusWebbCompletedAction
+              ? {
+                  selectedActions: marcusWebbState.selectedActions.includes(marcusWebbCompletedAction)
+                    ? marcusWebbState.selectedActions
+                    : [...marcusWebbState.selectedActions, marcusWebbCompletedAction],
+                }
+              : {}),
+          })
+        );
+      }
+      // Per a further explicit follow-up ("it's not updating in the copilot
+      // card to checked and disabled" — a real send/reply round trip for
+      // reset step 1 hadn't flipped that step's checkbox), the scenario-wide
+      // `isMarcusWebbWrapupSend` signal above only ever fires once, at the
+      // very END of the whole flow — it can't be what confirms each of the
+      // 4 reset steps' OWN individual checkboxes along the way. Every OTHER
+      // send during the reset flow (`isMarcusWebbResetStepSend`, snapshotted
+      // above) confirms whichever step is next in line: the first entry in
+      // `MARCUS_WEBB_RESET_STEP_ORDER` that's `true` in `resetSteps` (the
+      // agent clicked it) but still `false` in `resetStepsConfirmed` (the
+      // customer hasn't answered it yet) gets flipped. See
+      // `resetStepsConfirmed`'s own doc comment (agent-next-gen-marcus-webb-
+      // scenario.ts) for the full reasoning.
+      if (isMarcusWebbResetStepSend) {
+        const steps = marcusWebbState.resetSteps;
+        const confirmed = marcusWebbState.resetStepsConfirmed;
+        const nextToConfirm = MARCUS_WEBB_RESET_STEP_ORDER.find((key) => steps[key] && !confirmed[key]);
+        if (nextToConfirm) {
+          setMarcusWebbState(
+            saveMarcusWebbScenario({
+              resetStepsConfirmed: { ...confirmed, [nextToConfirm]: true },
+            })
+          );
+        }
+      }
     }, 2500);
   };
 
@@ -3734,7 +4482,19 @@ export function AgentWorkspace2WithDeskPage({
       );
     });
     switchActiveInteraction(id);
-    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
+    if (isNewInteraction) {
+      setSidePanelOpen(lastSidePanelOpenChoice.current);
+      // Per explicit request ("when a new interaction comes in - if the
+      // left nav is closed, open it"), scoped to genuinely INBOUND arrivals
+      // only — a notification represents work that landed on its own, not
+      // something the agent just launched. Deliberately does NOT extend to
+      // `handleStartCall`/`handleQuickDial`/`handleRedial` (the
+      // agent-initiated launch paths) — that auto-open was explicitly
+      // dropped per an earlier request (see this same file's own
+      // `handleStartCall` doc comment above), and this stays scoped clear
+      // of reintroducing it there.
+      setNavOpen(true);
+    }
     setNotifications((prev) => prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n)));
   };
 
@@ -6235,7 +6995,30 @@ export function AgentWorkspace2WithDeskPage({
                           // Per-Thread — see `Thread.startedFresh`'s own doc
                           // comment for why this reads the ACTIVE channel's
                           // own flag, not `activeInteraction.startedFresh`.
-                          isFreshLaunch={!!activeChannel?.startedFresh}
+                          // Marcus Webb's own scripted channel is OR'd in
+                          // here specifically (not via `Thread.startedFresh`
+                          // itself, which would also flip the record-header
+                          // subtitle to "Draft" and other `startedFresh`-
+                          // gated behavior meant for a genuinely blank
+                          // agent-launched draft — see those other call
+                          // sites' own doc comments) — per explicit report
+                          // ("do not have the previous messages, just have
+                          // the latest one"), this scenario's own single
+                          // real opening message (`liveMessages`) was
+                          // rendering ON TOP of the shared canned
+                          // `TRANSCRIPT_SESSIONS` mock log, since Marcus's
+                          // channel isn't `startedFresh` and so fell through
+                          // to that shared log same as any other pre-
+                          // existing chat. `isFreshLaunch=true` here swaps
+                          // that shared log for a single synthesized Session
+                          // Details separator instead (same as any other
+                          // brand-new outbound text launch), leaving only
+                          // Marcus's own real message visible underneath —
+                          // `liveMessages` itself renders in its own
+                          // trailing block regardless of this flag either
+                          // way (see `InteractionTranscript`'s own doc
+                          // comment), so his opening message is unaffected.
+                          isFreshLaunch={!!activeChannel?.startedFresh || activeInteraction.id === MARCUS_WEBB_ID}
                           // Per explicit request/follow-up clarification —
                           // see `activeChannelIsNewOutboundThread`'s own
                           // doc comment above for the full reasoning.
@@ -6317,7 +7100,17 @@ export function AgentWorkspace2WithDeskPage({
                           activeChannelStatus !== "Closed" &&
                           activeChannelType !== "email" &&
                           activeChannelType !== "voice" && (
-                            <InteractionComposer onSend={(text) => handleSendMessage(activeInteraction.id, text)} />
+                            <InteractionComposer
+                              onSend={(text) => handleSendMessage(activeInteraction.id, text)}
+                              // Marcus Webb's suggested-reply Copilot card
+                              // populates this (see `handleMarcusWebbSelect
+                              // Message` above) — `undefined` for every other
+                              // interaction, so this is a no-op elsewhere.
+                              prefill={
+                                activeInteraction.id === MARCUS_WEBB_ID ? marcusWebbComposerPrefill : undefined
+                              }
+                              onPrefillConsumed={() => setMarcusWebbComposerPrefill(undefined)}
+                            />
                           )}
                         </>
                         )}
@@ -7151,6 +7944,27 @@ export function AgentWorkspace2WithDeskPage({
                   // panel even if the agent had it closed; a no-op if it
                   // was already open.
                   onCopilotFirstAvailable={() => setSidePanelOpen(true)}
+                  // Marcus Webb's own decision/detail/message-options/wrapup
+                  // card — only ever rendered for HIS interaction (every
+                  // other customer leaves this `undefined`, the same default
+                  // every other `CustomerInformationSidePanel` consumer in
+                  // this app gets). See `MarcusWebbCopilotCard`'s own doc
+                  // comment (top of this file) for what each step renders.
+                  copilotExtra={
+                    activeInteraction.id === MARCUS_WEBB_ID ? (
+                      <MarcusWebbCopilotCard
+                        state={marcusWebbState}
+                        onSelectAction={handleMarcusWebbSelectAction}
+                        onCompleteActivity={handleMarcusWebbCompleteActivity}
+                        onSelectMessage={handleMarcusWebbSelectMessage}
+                        onWrapUp={handleMarcusWebbWrapUp}
+                        onResetVerifyIdentity={handleMarcusWebbResetVerifyIdentity}
+                        onResetGeneratePassword={handleMarcusWebbResetGeneratePassword}
+                        onResetRegeneratePassword={handleMarcusWebbResetRegeneratePassword}
+                        onResetConfirmLogin={handleMarcusWebbResetConfirmLogin}
+                      />
+                    ) : undefined
+                  }
                   // Per explicit request: an unknown-contact interaction
                   // (`!activeInteractionIsRealCustomer` — same signal
                   // `tabs` above already keys off) gets the customer-

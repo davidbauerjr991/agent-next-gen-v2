@@ -3633,7 +3633,19 @@ export function AgentNextGenPage({
       );
     });
     switchActiveInteraction(id);
-    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
+    if (isNewInteraction) {
+      setSidePanelOpen(lastSidePanelOpenChoice.current);
+      // Per explicit request ("when a new interaction comes in - if the
+      // left nav is closed, open it"), scoped to genuinely INBOUND arrivals
+      // only — a notification represents work that landed on its own, not
+      // something the agent just launched. Deliberately does NOT extend to
+      // `handleStartCall`/`handleQuickDial`/`handleRedial` (the
+      // agent-initiated launch paths) — that auto-open was explicitly
+      // dropped per an earlier request (see this same file's own
+      // `handleStartCall` doc comment above), and this stays scoped clear
+      // of reintroducing it there.
+      setNavOpen(true);
+    }
     setNotifications((prev) => prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n)));
   };
 

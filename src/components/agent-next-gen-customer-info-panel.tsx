@@ -44,7 +44,7 @@ import {
   SearchInput,
   ChatMessage,
 } from "@nicecxone/lyra-ui";
-import { type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
+import { CREATE_NEW_CUSTOMERS, type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
 import { type Thread } from "@/components/agent-next-gen-interaction-dashboard";
 import {
   splitCustomerName,
@@ -61,6 +61,7 @@ import {
 } from "@/components/agent-next-gen-shared-utils";
 import { type ContactHistoryStatusVariant } from "@/components/agent-next-gen-contact-history";
 import { OUTBOUND_AGENTS } from "@/components/agent-next-gen-outbound-data";
+import { MARCUS_WEBB_CUSTOMER_ID } from "@/components/agent-next-gen-marcus-webb-scenario";
 import { OUTCOME_TAG_OPTIONS } from "@/components/agent-next-gen-transcript";
 import { type CustomerListRecord, CustomerAddChannelButton } from "@/components/agent-next-gen-customers-table";
 import { cn } from "@/lib/utils";
@@ -163,13 +164,17 @@ export interface CustomerInfoField {
   value: string;
 }
 
-// There's no real per-customer contact/billing record anywhere in this
-// app's data — `CREATE_NEW_CUSTOMERS` (lyra-ui's shared customer fixture,
-// see the import above) only carries `id`/`name`/`customerId`/`channels`,
-// nothing address- or billing-shaped. These pools exist so the synthesized
-// profile below reads as plausible varied data (different customers land on
-// different cities/streets) rather than everyone getting the exact same
-// invented address with only the house number changing.
+// `CREATE_NEW_CUSTOMERS` (lyra-ui's shared customer fixture, see the import
+// above) DOES carry real phone/email/address/city/state/zip/balance fields
+// per record now (added for the Customers list view's own columns/filters —
+// see that file's own top-of-file comment) — `buildCustomerInfoFields`
+// below prefers those when a record matches, per explicit request ("match
+// the customer information in the chat to the database information").
+// These pools below are the fallback ONLY, for any interaction with no
+// matching database record at all (ad-hoc/unknown contacts) — so the
+// synthesized profile still reads as plausible varied data (different
+// customers land on different cities/streets) rather than everyone getting
+// the exact same invented address with only the house number changing.
 export const CUSTOMER_INFO_STREET_NAMES = [
   "Clinton Heights Ave", "Maple Grove Dr", "Sunset Ridge Ln", "Harbor View Ct",
   "Cedar Hollow Rd", "Birchwood Ter", "Fieldstone Way", "Willow Creek Blvd",
@@ -187,18 +192,26 @@ export const CUSTOMER_INFO_CITY_STATE: { city: string; state: string }[] = [
 
 /** Builds this panel's field list for whichever customer/interaction is
  *  actually open, instead of one fixed placeholder profile shown for every
- *  interaction. Prefers real data already on the interaction itself over
- *  synthesized filler: `recordId` (the same id already shown in the panel's
- *  own header subhead) becomes "Contact #", and "Phone #"/"Email" read the
- *  real address a voice/email channel was actually opened on
- *  (`Thread.addressLabel`/`value` — see that field's own doc
- *  comment) when one exists, since that's genuine data particular to this
- *  interaction, not invented. Everything else (balance, street address,
- *  city/state/zip) has no real source anywhere in this app's data — see the
- *  const comment above — so it's deterministically synthesized from
- *  `recordId` via `hashSeed`, which at least keeps a given customer's
- *  "invented" details stable across reopens instead of reshuffling every
- *  render. */
+ *  interaction. Resolution order, most authoritative first:
+ *  1. Real data already on THIS interaction itself — "Phone #"/"Email" read
+ *     the real address a voice/email channel was actually opened on
+ *     (`Thread.addressLabel`/`value` — see that field's own doc comment)
+ *     when one exists, since that's genuine data particular to this
+ *     interaction, not invented.
+ *  2. This customer's real database record (`CREATE_NEW_CUSTOMERS`, matched
+ *     by `customerId` — every real-customer launch path already carries
+ *     that same value onto `Interaction.customerId`, which every caller
+ *     passes in as `recordId` here) — per explicit request ("match the
+ *     customer information in the chat to the database information"),
+ *     rather than reinventing independent values that happened to have no
+ *     relationship to whatever the Customers list view already shows for
+ *     that same person.
+ *  3. Deterministically synthesized from `recordId` via `hashSeed` for
+ *     anything left with neither of the above (ad-hoc/unknown contacts,
+ *     with no database record at all) — at least keeps a given customer's
+ *     "invented" details stable across reopens instead of reshuffling every
+ *     render. `recordId` itself always becomes "Contact #" regardless of
+ *     which tier the rest of the row came from. */
 export function buildCustomerInfoFields(
   customerName: string | undefined,
   recordId: string,
@@ -210,22 +223,31 @@ export function buildCustomerInfoFields(
 
   const voiceChannel = channels.find((c) => c.type === "voice");
   const emailChannel = channels.find((c) => c.type === "email");
+  const dbRecord = CREATE_NEW_CUSTOMERS.find((c) => c.customerId === recordId);
 
-  const phone = voiceChannel?.addressLabel ?? voiceChannel?.value ?? synthesizePhone(seed);
-  const email = emailChannel?.value ?? `${firstName.toLowerCase()}.${lastName.toLowerCase()}@example.com`;
+  const phone = voiceChannel?.addressLabel ?? voiceChannel?.value ?? dbRecord?.firstPhone ?? synthesizePhone(seed);
+  const email =
+    emailChannel?.value ??
+    dbRecord?.emailAddress ??
+    `${firstName.toLowerCase()}.${lastName.toLowerCase()}@example.com`;
 
-  const { city, state } = CUSTOMER_INFO_CITY_STATE[seed % CUSTOMER_INFO_CITY_STATE.length];
+  const fallbackCityState = CUSTOMER_INFO_CITY_STATE[seed % CUSTOMER_INFO_CITY_STATE.length];
+  const city = dbRecord?.city ?? fallbackCityState.city;
+  const state = dbRecord?.state ?? fallbackCityState.state;
   const street = CUSTOMER_INFO_STREET_NAMES[Math.floor(seed / 7) % CUSTOMER_INFO_STREET_NAMES.length];
   const houseNumber = 100 + (seed % 900);
-  const zipCode = String(10000 + (seed % 89999)).padStart(5, "0");
-  const balance = (seed % 25000) / 100;
+  const address = dbRecord?.address1 ?? `${houseNumber} ${street}`;
+  const zipCode = dbRecord?.postalCode ?? String(10000 + (seed % 89999)).padStart(5, "0");
+  const balance =
+    dbRecord?.paymentBalance ??
+    ((seed % 25000) / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
 
   return [
     { label: "Phone #", value: phone },
     { label: "Contact #", value: recordId },
     { label: "Email", value: email },
-    { label: "Balance", value: balance.toLocaleString("en-US", { style: "currency", currency: "USD" }) },
-    { label: "Address", value: `${houseNumber} ${street}` },
+    { label: "Balance", value: balance },
+    { label: "Address", value: address },
     { label: "City", value: city },
     { label: "State", value: state },
     { label: "Zip Code", value: zipCode },
@@ -393,8 +415,34 @@ export const COPILOT_SUMMARY_POOL: Array<{ reason: string; journey: string }> = 
 /** Deterministic per-customer Copilot summary — same `hashSeed`-on-`recordId`
  *  approach as `buildLatestInteraction`/`buildLatestNote`, salted with its
  *  own suffix so it doesn't land on the same pool indexes either of those
- *  hash to for the same customer. */
+ *  hash to for the same customer.
+ *
+ *  Marcus Webb is special-cased ahead of the hash, per explicit request: his
+ *  scripted scenario is a password-reset chat, but his `recordId` happened
+ *  to hash into the shared `COPILOT_SUMMARY_POOL`'s "reschedule an upcoming
+ *  service appointment" entry, which doesn't match what he's actually
+ *  messaging in about (or the reset-password-specific detail card
+ *  `MarcusWebbCopilotCard` shows once his interaction opens). Hand-authored
+ *  instead of a new pool entry, since a pool entry is shared by whichever
+ *  OTHER customer happens to hash to the same index — Marcus's wording needs
+ *  to stay pinned to him alone.
+ *
+ *  Checks `MARCUS_WEBB_CUSTOMER_ID` ("MW-DEMO-0001"), NOT `MARCUS_WEBB_ID`
+ *  ("marcus-webb-scenario") — an earlier version of this check compared
+ *  against `MARCUS_WEBB_ID`, which never matched (per explicit follow-up
+ *  report, "this hasn't been updated") because every call site here passes
+ *  `activeInteraction.customerId` as `recordId`, and `buildMarcusWebbInteraction`
+ *  (agent-next-gen-marcus-webb-scenario.ts) sets that field to
+ *  `MARCUS_WEBB_CUSTOMER_ID`, not `MARCUS_WEBB_ID` — `MARCUS_WEBB_ID` is only
+ *  ever the `Interaction.id`/left-nav key, never the customer identity. */
 export function buildCopilotSummary(customerName: string | undefined, recordId: string): CopilotSummary {
+  if (recordId === MARCUS_WEBB_CUSTOMER_ID) {
+    return {
+      reasonForContact: "Marcus Webb would like help resetting his password.",
+      journeySummary:
+        "Marcus created his account 5/14/25 and has accessed it 12 times since then. He has had no open or closed requests for password assistance.",
+    };
+  }
   const seed = hashSeed(`${recordId || customerName || "customer"}-copilot-summary`);
   const { reason, journey } = COPILOT_SUMMARY_POOL[seed % COPILOT_SUMMARY_POOL.length];
   const displayName = customerName ?? "The customer";
@@ -460,12 +508,17 @@ export type CustomerPanelTabLabel = (typeof CUSTOMER_PANEL_TABS)[number];
 export const AGENT_WORKSPACE_CUSTOMER_PANEL_TABS: CustomerPanelTabLabel[] = ["Overview", "Copilot", "Detail", "Notes"];
 
 // Temporarily hides the Overview tab's "Ask about this customer..."
-// `AIInput` footer during an active interaction, per explicit request —
-// flip back to `true` to restore it. Gates both the real panel's own
-// `footer` (`CustomerInformationSidePanel`) and the hover-preview's
-// content-parity copy of the same footer (`CustomerInfoHoverPreview`),
-// so the two stay in sync rather than one showing an input the other
-// doesn't.
+// `AIInput` footer, AND (per a later explicit follow-up — "hide the ask
+// anything input in copilot for now") the Copilot tab's own singleLine
+// `AIInput` footer, during an active interaction. Flip back to `true` to
+// restore both. Gates both the real panel's own `footer`
+// (`CustomerInformationSidePanel`) and the hover-preview's content-parity
+// copy of the same footer (`CustomerInfoHoverPreview`), so the two stay in
+// sync rather than one showing an input the other doesn't. Originally
+// Copilot's own `AIInput` was deliberately left UNgated here (see this
+// file's git history/BEHAVIOR.md §83-era comments) as "a distinct,
+// always-on feature" — reversed by the same follow-up request that added
+// this sentence.
 export const SHOW_CUSTOMER_INFO_AI_INPUT = false;
 
 /** Shared neutral bordered-container treatment for every collapsible
@@ -1923,8 +1976,18 @@ function CustomerRecordSaveFooter({ onSave, onCancel }: { onSave: () => void; on
  *  `duration-500`/`delay-300` (up from the original `duration-300`/
  *  `delay-150`) per the same follow-up request to slow the pacing down —
  *  a more clearly readable half-second fade+slide each, with a noticeable
- *  pause between the two rather than a rushed back-to-back flicker. */
-export function CopilotTabContent({ summary }: { summary: CopilotSummary }) {
+ *  pause between the two rather than a rushed back-to-back flicker.
+ *
+ *  `extra` (per explicit follow-up request — the Marcus Webb scripted
+ *  scenario, `AgentWorkspace2WithDeskPage.tsx`) renders BELOW the Journey
+ *  Summary card, third in the same staggered reveal (`delay-500`) — a
+ *  generic escape hatch rather than any Marcus-specific markup living in
+ *  this shared component: that page builds its own decision/steps/wrap-up
+ *  cards entirely on its own and just hands the finished `ReactNode` down
+ *  through `CustomerInformationPanelBody`/`CustomerInformationSidePanel`'s
+ *  own same-named prop. `undefined` for every other caller/interaction —
+ *  nothing renders here normally. */
+export function CopilotTabContent({ summary, extra }: { summary: CopilotSummary; extra?: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-4 px-4 py-3">
       {/* Reason for contact — plain info box, same background
@@ -1957,6 +2020,12 @@ export function CopilotTabContent({ summary }: { summary: CopilotSummary }) {
           <p className="lyra-body-md text-lyra-fg-default">{summary.journeySummary}</p>
         </div>
       </div>
+
+      {extra && (
+        <div className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-backwards duration-500 delay-500">
+          {extra}
+        </div>
+      )}
     </div>
   );
 }
@@ -1967,6 +2036,7 @@ export function CustomerInformationPanelBody({
   latestInteraction,
   latestNote,
   copilotSummary,
+  copilotExtra,
   recordId,
   channels,
   onOpenConversation,
@@ -2023,6 +2093,12 @@ export function CustomerInformationPanelBody({
   /** Built per-interaction by `buildCopilotSummary` — see that function's
    *  own doc comment. Feeds the Copilot tab (`CopilotTabContent`). */
   copilotSummary: CopilotSummary;
+  /** Passed straight through to `CopilotTabContent`'s own same-named prop —
+   *  see that prop's own doc comment. Only `CustomerInformationSidePanel`
+   *  ever sets this to a real value (the Marcus Webb scripted scenario,
+   *  `AgentWorkspace2WithDeskPage.tsx`); every other caller leaves it
+   *  `undefined`. */
+  copilotExtra?: React.ReactNode;
   /** Supplied by every real consumer of this body — `CustomerInformationSidePanel`
    *  and `CustomerInfoHoverPreview` pass a real active interaction's own
    *  `recordId`/`channels`; `CustomerRowInfoPanel` (Customers-table row, no
@@ -2610,7 +2686,9 @@ export function CustomerInformationPanelBody({
         </div>
       )}
 
-      {activeTab === CUSTOMER_PANEL_TABS.indexOf("Copilot") && <CopilotTabContent summary={copilotSummary} />}
+      {activeTab === CUSTOMER_PANEL_TABS.indexOf("Copilot") && (
+        <CopilotTabContent summary={copilotSummary} extra={copilotExtra} />
+      )}
 
       {activeTab === CUSTOMER_PANEL_TABS.indexOf("Contacts") && recordId && (
         // `relative flex flex-1 min-h-0 overflow-hidden` — restored (was
@@ -3026,18 +3104,16 @@ export function CustomerInfoHoverPreview({
       ) : /* Same Overview-only `AIInput` footer as the real panel (see its own
           `footer` prop above) — kept here too for exact content parity,
           per this component's own doc comment. `SHOW_CUSTOMER_INFO_AI_INPUT`
-          — see that flag's own doc comment — temporarily hides it here too.
-          Copilot's own `AIInput` (per explicit request, matching the
-          reference screenshot's stock defaults — see `CopilotTabContent`'s
-          own doc comment) is NOT gated behind that flag — it's a distinct,
-          always-on feature, not the thing that flag was written to
-          temporarily hide. `singleLine` (per explicit follow-up request)
-          renders it as a single compact row — attach/input/submit all
-          inline — instead of `AIInput`'s own default stacked textarea-
-          above/toolbar-below layout; `helperText=""` suppresses that
-          layout's own default caption text, since a single-row search-bar
-          affordance reads better without one directly underneath it. */
-      activeTab === CUSTOMER_PANEL_TABS.indexOf("Copilot") ? (
+          — see that flag's own doc comment — temporarily hides both this
+          AND Copilot's own singleLine `AIInput` just below, per a later
+          explicit follow-up request. `singleLine` (per an earlier explicit
+          follow-up request) renders it as a single compact row — attach/
+          input/submit all inline — instead of `AIInput`'s own default
+          stacked textarea-above/toolbar-below layout; `helperText=""`
+          suppresses that layout's own default caption text, since a
+          single-row search-bar affordance reads better without one
+          directly underneath it. */
+      SHOW_CUSTOMER_INFO_AI_INPUT && activeTab === CUSTOMER_PANEL_TABS.indexOf("Copilot") ? (
         <PanelFooter className="shrink-0 justify-start">
           <AIInput singleLine helperText="" className="w-full" />
         </PanelFooter>
@@ -3311,6 +3387,7 @@ export function CustomerInformationSidePanel({
   onOverviewEditingChange,
   matchState,
   onCopilotFirstAvailable,
+  copilotExtra,
 }: {
   open: boolean;
   pinned: boolean;
@@ -3434,6 +3511,10 @@ export function CustomerInformationSidePanel({
    *  narrows it to match the effect it's paired with). All 3 page files
    *  wire it to their own `setSidePanelOpen(true)`. */
   onCopilotFirstAvailable?: () => void;
+  /** Passed straight through to `CustomerInformationPanelBody`'s own same-
+   *  named prop — see that prop's own doc comment. `undefined` for every
+   *  interaction except the Marcus Webb scripted scenario. */
+  copilotExtra?: React.ReactNode;
 }) {
   const latestInteraction = useMemo(
     () => buildLatestInteraction(customerName, recordId),
@@ -3701,12 +3782,12 @@ export function CustomerInformationSidePanel({
       // side-panel.tsx), so it's already outside the scroll region and
       // naturally stays fixed to the bottom without any extra CSS.
       // Temporarily hidden — see `SHOW_CUSTOMER_INFO_AI_INPUT`'s own doc
-      // comment. Copilot's own `AIInput` (per explicit request, matching
-      // the reference screenshot's stock defaults) uses this exact same
-      // "shrink-0 sibling after PanelContent" mechanism for its own
-      // fixed-to-bottom placement, checked FIRST since it's not gated
-      // behind `SHOW_CUSTOMER_INFO_AI_INPUT` — see `CopilotTabContent`'s
-      // own doc comment. The Save/Cancel footer
+      // comment, which now also covers Copilot's own `AIInput` just below
+      // (per a later explicit follow-up — "hide the ask anything input in
+      // copilot for now"), uses this exact same "shrink-0 sibling after
+      // PanelContent" mechanism for its own fixed-to-bottom placement,
+      // checked FIRST since the Save/Cancel footer below needs to outrank
+      // it whenever the record is actually dirty. The Save/Cancel footer
       // (`recordDraft.isDirty || overviewEditing` — appears the instant
       // EITHER a field actually changes OR the Customer Overview edit
       // button is clicked, per explicit request) is checked BEFORE either
@@ -3766,7 +3847,7 @@ export function CustomerInformationSidePanel({
               onOverviewEditingChange(false);
             }}
           />
-        ) : activeTab === CUSTOMER_PANEL_TABS.indexOf("Copilot") ? (
+        ) : SHOW_CUSTOMER_INFO_AI_INPUT && activeTab === CUSTOMER_PANEL_TABS.indexOf("Copilot") ? (
           <PanelFooter className="justify-start">
             <AIInput singleLine helperText="" className="w-full" />
           </PanelFooter>
@@ -3817,6 +3898,7 @@ export function CustomerInformationSidePanel({
           latestInteraction={latestInteraction}
           latestNote={latestNote}
           copilotSummary={copilotSummary}
+          copilotExtra={copilotExtra}
           recordId={recordId}
           channels={channels}
           onOpenConversation={onOpenHistoryConversation}
