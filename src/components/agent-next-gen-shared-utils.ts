@@ -567,6 +567,17 @@ function phoneDisplayFromValue(value: PhoneValue): string {
  *  Settings. */
 type Page = "agent-workspace" | "agent" | "agent-with-desk" | "agent-advanced" | "outbound" | "login";
 
+/** Per explicit request ("hide the assignments resolved chip in the home
+ *  tab"): gates the green "{n} Assignments resolved today" `Badge` each of
+ *  the 3 Agent Workspace pages renders in its own home-dashboard `PageHeader`
+ *  `actions` slot. Same "hide for now" flag pattern as
+ *  `SHOW_CUSTOMER_INFO_AI_INPUT` (agent-next-gen-customer-info-panel.tsx) —
+ *  a single shared toggle here rather than duplicated per page, since all 3
+ *  pages render this same Badge from their own copy of the same JSX. The
+ *  underlying `resolvedTodayCount` state/tracking is untouched — only this
+ *  Badge's visibility is gated, so re-enabling it later is a one-line flip. */
+const SHOW_RESOLVED_TODAY_CHIP = false;
+
 export {
   initialsFor,
   generateCaseId,
@@ -603,5 +614,6 @@ export {
   isWithinCustomerHistoryDateRange,
   phoneValueFromDisplay,
   phoneDisplayFromValue,
+  SHOW_RESOLVED_TODAY_CHIP,
 };
 export type { Page };

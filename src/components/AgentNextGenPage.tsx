@@ -75,6 +75,7 @@ import {
   withoutChannelStatus,
   nextCustomerSortDirection,
   synthesizeChannelAddress,
+  SHOW_RESOLVED_TODAY_CHIP,
   type Page,
 } from "@/components/agent-next-gen-shared-utils";
 import {
@@ -127,6 +128,7 @@ import {
   ContactHistoryEntryDetail,
 } from "@/components/agent-next-gen-contact-history";
 import { saveCaseRecord, getCaseRecord } from "@/components/agent-next-gen-case-database";
+import { readAgentLegStatus, saveAgentLegStatus } from "@/components/agent-next-gen-agent-leg-state";
 import {
   type CustomerListRecord,
   CUSTOMER_LIST_RECORDS,
@@ -736,6 +738,16 @@ export function AgentNextGenPage({
   // `connectAgentLegSignal` prop for why a changing number, not a
   // boolean/callback, is what actually triggers this (agent-profile.tsx).
   const [connectAgentLegSignal, setConnectAgentLegSignal] = useState(0);
+  // Seeds `AgentProfile`'s new `initialAgentLegStatus` prop (agent-profile
+  // .tsx) with whatever the agent leg was last doing — possibly on a
+  // DIFFERENT page (see agent-next-gen-agent-leg-state.ts's own top-of-file
+  // doc comment for why this page alone can't be trusted to know that on
+  // its own: switching between Agent Workspace tiers fully unmounts one
+  // page and mounts another). Lazy initializer + `useState` (read once, at
+  // mount) rather than a plain `const` — matches this file's other
+  // read-once-at-mount seeds (e.g. `showWelcomeModal`'s own sibling state
+  // just below) and keeps the read out of the render body proper.
+  const [initialAgentLegStatus] = useState(() => readAgentLegStatus());
   // Whether the dedicated `AgentLegDisconnectedToast` (lyra-ui) is currently
   // showing — same "presence controls mounting" idiom `useToast`'s own
   // `toasts` array already uses for every other toast, just a plain
@@ -797,6 +809,12 @@ export function AgentNextGenPage({
   // notification about it until right after the modal's been answered,
   // instead of showing it immediately or losing it entirely.
   const fireAgentLegStatusToast = (agentLegConnectionStatus: "disconnected" | "connected") => {
+    // Persisted immediately, unconditionally — this is the real, settled
+    // status the moment it happens; only the TOAST announcing it (below) is
+    // ever deferred, not the underlying state a later page mount needs to
+    // pick up from (see agent-next-gen-agent-leg-state.ts's own doc
+    // comment).
+    saveAgentLegStatus(agentLegConnectionStatus);
     if (showWelcomeModal) {
       pendingAgentLegToastRef.current = agentLegConnectionStatus;
       return;
@@ -4685,6 +4703,7 @@ export function AgentNextGenPage({
               timer={formattedTimer}
               onAgentLegStatusChange={fireAgentLegStatusToast}
               connectAgentLegSignal={connectAgentLegSignal}
+              initialAgentLegStatus={initialAgentLegStatus}
               // Standalone AppHeader "?" icon removed — this app now uses
               // `AgentProfile`'s own conditional "Help" row instead (renders
               // below "Agent Leg Disconnected" whenever `onHelpClick` is
@@ -6429,9 +6448,15 @@ export function AgentNextGenPage({
                           // (see that prop's own doc comment, page-header.tsx).
                           titleSize="2xl"
                           actions={
-                            <Badge color="green" variant="subtle">
-                              {resolvedTodayCount} Assignments resolved today
-                            </Badge>
+                            // Per explicit request ("hide the assignments
+                            // resolved chip in the home tab"), gated behind
+                            // `SHOW_RESOLVED_TODAY_CHIP` — see that flag's
+                            // own doc comment (agent-next-gen-shared-utils.ts).
+                            SHOW_RESOLVED_TODAY_CHIP ? (
+                              <Badge color="green" variant="subtle">
+                                {resolvedTodayCount} Assignments resolved today
+                              </Badge>
+                            ) : undefined
                           }
                         />
                       </div>
@@ -6534,7 +6559,7 @@ export function AgentNextGenPage({
                         list — one card showing it twice added nothing a
                         single card + ring didn't already cover. */}
                     <div className="mt-6 lyra-container-grid">
-                      <PerformanceSummaryCard liveResolvedTodayCount={resolvedTodayCount} />
+                      <PerformanceSummaryCard />
                       <PerformanceBreakdownCard />
                     </div>
                   </div>

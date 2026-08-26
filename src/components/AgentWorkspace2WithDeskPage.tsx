@@ -56,6 +56,7 @@ import {
   Select,
   Tooltip,
   Checkbox,
+  Accordion,
   type SelectOption,
   type SortDirection,
   type CreateNewOutboundConfig,
@@ -87,6 +88,7 @@ import {
   withoutChannelStatus,
   nextCustomerSortDirection,
   synthesizeChannelAddress,
+  SHOW_RESOLVED_TODAY_CHIP,
   type Page,
 } from "@/components/agent-next-gen-shared-utils";
 import {
@@ -141,6 +143,7 @@ import {
   ContactHistoryEntryDetail,
 } from "@/components/agent-next-gen-contact-history";
 import { saveCaseRecord, getCaseRecord } from "@/components/agent-next-gen-case-database";
+import { readAgentLegStatus, saveAgentLegStatus } from "@/components/agent-next-gen-agent-leg-state";
 import {
   type CustomerListRecord,
   CUSTOMER_LIST_RECORDS,
@@ -170,6 +173,7 @@ import {
   useCustomerRecordDraft,
   findPossibleCustomerMatches,
   filterCustomersByQuery,
+  CUSTOMER_INFO_ACCORDION_CLASSNAME,
 } from "@/components/agent-next-gen-customer-info-panel";
 // PROTOTYPE — local-only, not in lyra-ui yet. See CollapsedChannelBadge's
 // own doc comment for why, and CLAUDE.md's lyra-ui rules for the convention
@@ -225,6 +229,12 @@ import {
   RotateCcw,
   ShieldAlert,
   Info,
+  BookOpen,
+  Meh,
+  Smile,
+  Copy,
+  Link2,
+  Plus,
   type LucideIcon,
 } from "lucide-react";
 
@@ -711,9 +721,214 @@ function MarcusWebbCopilotCard({
   const latestCardRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     latestCardRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [state.copilotStep, state.selectedAction]);
+  }, [state.copilotStep, state.selectedAction, state.customerRespondedToFirstMessage]);
 
   if (state.copilotStep === "done") return null;
+
+  // Per explicit request ("add the attached cards to the copilot of marcus
+  // webb (hide the How Would You Like To Help Marcus card)"), later trimmed
+  // by a follow-up ("remove the transfer summary card and update the
+  // Self-Service summary to be about Marcus"): 2 static, read-only summary
+  // cards — Self Service Summary, Customer Sentiment — matching the
+  // reference screenshot's visual shape (icon + bold title on a colored
+  // header band over a plain white body, same two-tone shape
+  // `CopilotTabContent`'s own Journey Summary card already established,
+  // agent-next-gen-customer-info-panel.tsx), but with Self Service
+  // Summary's body copy rewritten to actually describe Marcus's own
+  // scripted scenario (a password reset/lockout — see this file's own
+  // Marcus Webb scenario constants) instead of the screenshot's unrelated
+  // "tablet troubleshooting"/"Emery" placeholder text. The Transfer Summary
+  // card from the original request is gone outright (Marcus's scenario is a
+  // direct inbound chat, never transferred from another tier — that card
+  // never fit the scenario to begin with). Self Service Summary is fully
+  // static; Customer Sentiment is NOT — per explicit follow-up requests
+  // (originally "after the agent responds for the first time, update the
+  // sentiment to be positive," later corrected to "change the sentiment
+  // card after the CUSTOMER responds to the agent's first comment"), it
+  // reads `state.customerRespondedToFirstMessage` (see that field's own doc
+  // comment, agent-next-gen-marcus-webb-scenario.ts) and swaps its icon/
+  // color/title/body from the amber "Neutral" look to a green "Positive"
+  // one (`Smile`, `lyra-status-success-subtle`/`-strong`) once the
+  // customer's simulated reply to the agent's first message lands.
+  // Rendered ahead of `decisionCard` in both this function's return points.
+  const sentimentIsPositive = state.customerRespondedToFirstMessage;
+  const marcusSummaryCards = (
+    <div key="marcus-summary-cards" className="flex flex-col gap-3">
+      <div className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-backwards duration-500 overflow-hidden rounded-lyra-md border border-lyra-border-subtle">
+        <div className="flex items-center gap-2 bg-lyra-status-info-subtle px-4 py-2.5">
+          <BookOpen className="h-4 w-4 shrink-0 text-lyra-status-info-strong" strokeWidth={1.5} aria-hidden="true" />
+          <span className="lyra-body-md-emphasis text-lyra-fg-default">Self Service Summary</span>
+        </div>
+        <div className="bg-lyra-bg-surface-base px-4 py-3">
+          <p className="lyra-body-md text-lyra-fg-default">
+            Marcus tried the password reset article and the account recovery guide twice before starting this chat. Neither got him back into his account.
+          </p>
+        </div>
+      </div>
+      <div
+        // `key` here too — same "force a fresh remount so the entrance
+        // animation replays" reasoning as `MarcusWebbCopilotCard`'s own
+        // top-of-file doc comment, so the Neutral→Positive swap itself gets
+        // a visible fade/slide instead of the copy just changing in place.
+        key={sentimentIsPositive ? "sentiment-positive" : "sentiment-neutral"}
+        className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-backwards duration-500 overflow-hidden rounded-lyra-md border border-lyra-border-subtle"
+      >
+        {sentimentIsPositive ? (
+          <>
+            <div className="flex items-center gap-2 bg-lyra-status-success-subtle px-4 py-2.5">
+              <Smile className="h-4 w-4 shrink-0 text-lyra-status-success-strong" strokeWidth={1.5} aria-hidden="true" />
+              <span className="lyra-body-md-emphasis text-lyra-fg-default">Customer Sentiment is Positive</span>
+            </div>
+            <div className="bg-lyra-bg-surface-base px-4 py-3">
+              <p className="lyra-body-md text-lyra-fg-default">Sentiment improved after the agent's first response.</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 bg-lyra-status-warning-subtle px-4 py-2.5">
+              <Meh className="h-4 w-4 shrink-0 text-lyra-status-warning-strong" strokeWidth={1.5} aria-hidden="true" />
+              <span className="lyra-body-md-emphasis text-lyra-fg-default">Customer Sentiment is Neutral</span>
+            </div>
+            <div className="bg-lyra-bg-surface-base px-4 py-3">
+              <p className="lyra-body-md text-lyra-fg-default">Sentiment remained the same since the last message.</p>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  // Per explicit request ("create the attached card and display it after the
+  // agent asks if they want them to reset the password - adjust the content
+  // to be about password resetting and based on a knowledge base"): a
+  // knowledge-base-article-style card matching the reference screenshot's
+  // exact shape — a header band (icon + bold title), a body paragraph, and 3
+  // collapsible sections. The reference screenshot itself showed all 3
+  // expanded, but per explicit follow-up request ("keep these accordions
+  // closed initially") none of the 3 `Accordion`s below set a
+  // `defaultValue` — every section starts collapsed, same as any other
+  // single-item `Accordion` in this app that doesn't opt into
+  // pre-expansion. Reuses this app's own established "collapsible section" idiom
+  // (`CUSTOMER_INFO_ACCORDION_CLASSNAME` + single-item `Accordion`s, one per
+  // section — see `CustomerDetailTabContent`, agent-next-gen-customer-info-
+  // panel.tsx, for the identical pattern) rather than a bespoke
+  // implementation, so this stays visually consistent with every other
+  // collapsible container already in this app. Originally gated by its own
+  // keyword-matched `passwordResetOffered` signal; per explicit follow-up
+  // request ("display the steps to reset card... after the CUSTOMER
+  // responds to the agent's first comment (not triggered by reset)"), now
+  // gated by the same `state.customerRespondedToFirstMessage` the Customer
+  // Sentiment card above reads (see that field's own doc comment,
+  // agent-next-gen-marcus-webb-scenario.ts) — both cards share one trigger.
+  // Rendered directly below `marcusSummaryCards` in both this function's
+  // return points, same placement `decisionCard` used to have.
+  const passwordResetKbCard = state.customerRespondedToFirstMessage ? (
+    <div
+      key="password-reset-kb"
+      className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-backwards duration-500 overflow-hidden rounded-lyra-md border border-lyra-border-subtle"
+    >
+      <div className="flex items-center gap-2 bg-lyra-status-info-subtle px-4 py-2.5">
+        <BookOpen className="h-4 w-4 shrink-0 text-lyra-status-info-strong" strokeWidth={1.5} aria-hidden="true" />
+        <span className="lyra-body-md-emphasis text-lyra-fg-default">Password Reset Policy</span>
+      </div>
+      <div className="bg-lyra-bg-surface-base px-4 py-3 flex flex-col gap-3">
+        <p className="lyra-body-md text-lyra-fg-default">
+          Standard knowledge-base procedure for resetting a customer's account password after failed self-service
+          attempts, like Marcus's.
+        </p>
+        <Accordion
+          className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
+          items={[
+            {
+              id: "internal-use",
+              title: "Internal Use Only",
+              icon: <ShieldAlert className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />,
+              content: (
+                <p className="lyra-body-sm text-lyra-fg-secondary">
+                  Never share a temporary password over chat, email, or voice. Always confirm identity with two
+                  factors (e.g. SSN on file plus one more) before generating or disclosing a reset link or temporary
+                  credential.
+                </p>
+              ),
+            },
+          ]}
+        />
+        <Accordion
+          className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
+          items={[
+            {
+              id: "web-links",
+              title: "Web Links (2)",
+              icon: <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />,
+              content: (
+                <div className="flex flex-col gap-2">
+                  {[
+                    "Password Reset Self-Service Guide",
+                    "Account Recovery & Identity Verification Policy",
+                  ].map((label) => (
+                    <div
+                      key={label}
+                      className="flex items-center justify-between gap-2 rounded-lyra-sm border border-lyra-border-subtle bg-lyra-bg-surface-sunken px-3 py-2"
+                    >
+                      <span className="lyra-body-sm text-lyra-status-info-strong truncate">{label}</span>
+                      <ActionIconButton
+                        aria-label={`Copy ${label} link`}
+                        size="sm"
+                        className="shrink-0 text-lyra-fg-secondary hover:text-lyra-fg-secondary"
+                        onClick={() => {
+                          void navigator.clipboard?.writeText(label).catch(() => {});
+                        }}
+                      >
+                        <Copy className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+                      </ActionIconButton>
+                    </div>
+                  ))}
+                </div>
+              ),
+            },
+          ]}
+        />
+        <Accordion
+          className={CUSTOMER_INFO_ACCORDION_CLASSNAME}
+          items={[
+            {
+              id: "process-steps",
+              title: "Process Steps",
+              icon: <CheckCircle2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />,
+              content: (
+                <div className="flex flex-col gap-2">
+                  {[
+                    "Verify the customer's identity (name, DOB, and SSN or security question on file).",
+                    "Send a secure password-reset link to the verified email or phone number on file.",
+                    "Confirm the customer has opened the link and set a new password.",
+                    "Confirm successful login and log the resolution on the case.",
+                  ].map((step, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between gap-2 rounded-lyra-sm border border-lyra-border-subtle bg-lyra-bg-surface-sunken px-3 py-2"
+                    >
+                      <div className="flex items-start gap-2 min-w-0">
+                        <span className="lyra-body-sm text-lyra-fg-default">
+                          {i + 1}. {step}
+                        </span>
+                      </div>
+                      <ActionIconButton
+                        aria-label={`Add step ${i + 1} to reply`}
+                        size="sm"
+                        className="shrink-0 text-lyra-fg-secondary hover:text-lyra-fg-secondary"
+                      >
+                        <Plus className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+                      </ActionIconButton>
+                    </div>
+                  ))}
+                </div>
+              ),
+            },
+          ]}
+        />
+      </div>
+    </div>
+  ) : null;
 
   // Per explicit follow-up request ("add a green checkmark and disable the
   // menu item but keep the card (shift the copilot down like a normal
@@ -727,6 +942,16 @@ function MarcusWebbCopilotCard({
   // unconditionally (not just inside the `copilotStep === "decision"`
   // branch) since it also needs to keep rendering, resolved, for every
   // LATER step too.
+  // Per explicit request ("hide the How Would You Like To Help Marcus
+  // card"), gates `decisionCard` below off entirely — a `false` here means
+  // the agent never sees or clicks its 3 action options, so nothing ever
+  // advances `state.copilotStep` past "decision" for the rest of this
+  // scenario; that's the deliberate, requested trade-off (this card was the
+  // only entry point into the reset/options/investigate flows), not an
+  // oversight. `marcusSummaryCards` above is unaffected — those 3 cards
+  // still render regardless.
+  const SHOW_MARCUS_DECISION_CARD = false;
+
   const decisionCard = (
     <div key="decision" className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-backwards duration-500 flex flex-col gap-3 rounded-lyra-md border border-lyra-border-subtle bg-lyra-bg-surface-base p-4">
       <div className="flex items-center gap-2">
@@ -796,7 +1021,25 @@ function MarcusWebbCopilotCard({
   );
 
   if (state.copilotStep === "decision") {
-    return decisionCard;
+    return (
+      <div className="flex flex-col gap-3">
+        {marcusSummaryCards}
+        {SHOW_MARCUS_DECISION_CARD && decisionCard}
+        {passwordResetKbCard}
+        {/* Zero-height scroll target — see this function's own top-of-file
+            doc comment for the full "scroll to the latest card" reasoning.
+            Per explicit request ("when the new card appears the copilot
+            should scroll to the bottom"): this early return is the ONE
+            actually reached on every render right now (`copilotStep` never
+            advances past "decision" — see `SHOW_MARCUS_DECISION_CARD`'s own
+            doc comment above), so the sentinel has to live here too, not
+            just in the bottom return below. Without it, `latestCardRef`
+            never attaches to anything and the scroll effect silently
+            no-ops — exactly why marcusSummaryCards/passwordResetKbCard
+            appearing wasn't auto-scrolling. */}
+        <div ref={latestCardRef} />
+      </div>
+    );
   }
 
   let nextCard: React.ReactNode = null;
@@ -1017,7 +1260,9 @@ function MarcusWebbCopilotCard({
   // for free exactly like a normal chat transcript growing with new turns.
   return (
     <div className="flex flex-col gap-3">
-      {decisionCard}
+      {marcusSummaryCards}
+      {SHOW_MARCUS_DECISION_CARD && decisionCard}
+      {passwordResetKbCard}
       {nextCard}
       {/* Zero-height scroll target — see this function's own top-of-file
           doc comment for the full "scroll to the latest card" reasoning. */}
@@ -1279,6 +1524,16 @@ export function AgentWorkspace2WithDeskPage({
   // `connectAgentLegSignal` prop for why a changing number, not a
   // boolean/callback, is what actually triggers this (agent-profile.tsx).
   const [connectAgentLegSignal, setConnectAgentLegSignal] = useState(0);
+  // Seeds `AgentProfile`'s new `initialAgentLegStatus` prop (agent-profile
+  // .tsx) with whatever the agent leg was last doing — possibly on a
+  // DIFFERENT page (see agent-next-gen-agent-leg-state.ts's own top-of-file
+  // doc comment for why this page alone can't be trusted to know that on
+  // its own: switching between Agent Workspace tiers fully unmounts one
+  // page and mounts another). Lazy initializer + `useState` (read once, at
+  // mount) rather than a plain `const` — matches this file's other
+  // read-once-at-mount seeds (e.g. `showWelcomeModal`'s own sibling state
+  // just below) and keeps the read out of the render body proper.
+  const [initialAgentLegStatus] = useState(() => readAgentLegStatus());
   // Whether the dedicated `AgentLegDisconnectedToast` (lyra-ui) is currently
   // showing — same "presence controls mounting" idiom `useToast`'s own
   // `toasts` array already uses for every other toast, just a plain
@@ -1340,6 +1595,12 @@ export function AgentWorkspace2WithDeskPage({
   // notification about it until right after the modal's been answered,
   // instead of showing it immediately or losing it entirely.
   const fireAgentLegStatusToast = (agentLegConnectionStatus: "disconnected" | "connected") => {
+    // Persisted immediately, unconditionally — this is the real, settled
+    // status the moment it happens; only the TOAST announcing it (below) is
+    // ever deferred, not the underlying state a later page mount needs to
+    // pick up from (see agent-next-gen-agent-leg-state.ts's own doc
+    // comment).
+    saveAgentLegStatus(agentLegConnectionStatus);
     if (showWelcomeModal) {
       pendingAgentLegToastRef.current = agentLegConnectionStatus;
       return;
@@ -3902,6 +4163,19 @@ export function AgentWorkspace2WithDeskPage({
       )
     );
 
+    // Marcus Webb's own "is this the agent's first message on this
+    // interaction" snapshot — read BEFORE `agentHasReplied` itself flips
+    // just below, same "snapshot now, not whenever a later callback happens
+    // to fire" reasoning `isMarcusWebbWrapupSend` (further below) already
+    // follows. See `MarcusWebbScenarioState.customerRespondedToFirstMessage`'s
+    // own doc comment (agent-next-gen-marcus-webb-scenario.ts) for why the
+    // delayed simulated-customer-reply callback needs to know this, not just
+    // whether the agent has EVER replied by the time that callback fires.
+    const isFirstMarcusWebbAgentMessage = interactionId === MARCUS_WEBB_ID && !marcusWebbState.agentHasReplied;
+    if (isFirstMarcusWebbAgentMessage) {
+      setMarcusWebbState(saveMarcusWebbScenario({ agentHasReplied: true }));
+    }
+
     // "Customer is typing" — see `customerTyping`'s own doc comment. Per
     // explicit follow-up request ("do not display the typing indicator
     // until 2s after the agent message is sent"), no longer set the
@@ -3977,6 +4251,21 @@ export function AgentWorkspace2WithDeskPage({
             : interaction
         )
       );
+      // Per explicit request, with a screenshot of the agent's first reply
+      // landing without the Copilot card changing yet: "display the steps
+      // to reset card and change the sentiment card after the CUSTOMER
+      // responds to the agent's first comment (not triggered by reset)."
+      // Fires exactly once, the moment THIS simulated customer reply lands,
+      // but only when `isFirstMarcusWebbAgentMessage` (snapshotted above, at
+      // send time) was true for the agent message it's replying to — a
+      // reply following the agent's 2nd+ message does nothing here. See
+      // `MarcusWebbScenarioState.customerRespondedToFirstMessage`'s own doc
+      // comment for the full reasoning, including why this replaces the
+      // two earlier, separate `agentHasReplied`/`passwordResetOffered`
+      // signals with one.
+      if (isFirstMarcusWebbAgentMessage) {
+        setMarcusWebbState(saveMarcusWebbScenario({ customerRespondedToFirstMessage: true }));
+      }
       // Per explicit follow-up ("don't set the checked as completed until
       // after the message is sent"), then corrected by a further explicit
       // follow-up ("once the step is completed (ie. the customer
@@ -5478,6 +5767,7 @@ export function AgentWorkspace2WithDeskPage({
               timer={formattedTimer}
               onAgentLegStatusChange={fireAgentLegStatusToast}
               connectAgentLegSignal={connectAgentLegSignal}
+              initialAgentLegStatus={initialAgentLegStatus}
               // Standalone AppHeader "?" icon removed — this app now uses
               // `AgentProfile`'s own conditional "Help" row instead (renders
               // below "Agent Leg Disconnected" whenever `onHelpClick` is
@@ -6483,6 +6773,35 @@ export function AgentWorkspace2WithDeskPage({
                                         onSaveNewCustomer: handleSaveNewCustomer,
                                       }
                                 }
+                                // Per explicit request ("make sure to update
+                                // the hover state of copilot to match the
+                                // docked state") — the exact same
+                                // `MarcusWebbCopilotCard` element the docked
+                                // panel's own `copilotExtra` renders below
+                                // (see that call site's own doc comment,
+                                // further down this file). A second,
+                                // independent instance (not the same mounted
+                                // element moved around) — harmless, since it
+                                // reads the same shared `marcusWebbState` and
+                                // fires the same handlers either way, same
+                                // "duplicate at each call site" pattern this
+                                // hover preview already follows for
+                                // `matchState`/`tabs` above.
+                                copilotExtra={
+                                  activeInteraction.id === MARCUS_WEBB_ID ? (
+                                    <MarcusWebbCopilotCard
+                                      state={marcusWebbState}
+                                      onSelectAction={handleMarcusWebbSelectAction}
+                                      onCompleteActivity={handleMarcusWebbCompleteActivity}
+                                      onSelectMessage={handleMarcusWebbSelectMessage}
+                                      onWrapUp={handleMarcusWebbWrapUp}
+                                      onResetVerifyIdentity={handleMarcusWebbResetVerifyIdentity}
+                                      onResetGeneratePassword={handleMarcusWebbResetGeneratePassword}
+                                      onResetRegeneratePassword={handleMarcusWebbResetRegeneratePassword}
+                                      onResetConfirmLogin={handleMarcusWebbResetConfirmLogin}
+                                    />
+                                  ) : undefined
+                                }
                               />
                             }
                           >
@@ -7455,9 +7774,15 @@ export function AgentWorkspace2WithDeskPage({
                           // (see that prop's own doc comment, page-header.tsx).
                           titleSize="2xl"
                           actions={
-                            <Badge color="green" variant="subtle">
-                              {resolvedTodayCount} Assignments resolved today
-                            </Badge>
+                            // Per explicit request ("hide the assignments
+                            // resolved chip in the home tab"), gated behind
+                            // `SHOW_RESOLVED_TODAY_CHIP` — see that flag's
+                            // own doc comment (agent-next-gen-shared-utils.ts).
+                            SHOW_RESOLVED_TODAY_CHIP ? (
+                              <Badge color="green" variant="subtle">
+                                {resolvedTodayCount} Assignments resolved today
+                              </Badge>
+                            ) : undefined
                           }
                         />
                       </div>
@@ -7555,7 +7880,7 @@ export function AgentWorkspace2WithDeskPage({
                         list — one card showing it twice added nothing a
                         single card + ring didn't already cover. */}
                     <div className="mt-6 lyra-container-grid">
-                      <PerformanceSummaryCard liveResolvedTodayCount={resolvedTodayCount} />
+                      <PerformanceSummaryCard />
                       <PerformanceBreakdownCard />
                     </div>
                   </div>

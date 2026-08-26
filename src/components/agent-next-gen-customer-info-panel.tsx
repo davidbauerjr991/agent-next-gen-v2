@@ -2815,6 +2815,7 @@ export function CustomerInfoHoverPreview({
   overviewEditing,
   onOverviewEditingChange,
   matchState,
+  copilotExtra,
 }: {
   customerName?: string;
   recordId: string;
@@ -2874,6 +2875,18 @@ export function CustomerInfoHoverPreview({
     onBackToSearch: () => void;
     onSaveNewCustomer: () => void;
   };
+  /** Per explicit request ("make sure to update the hover state of copilot
+   *  to match the docked state"): passed straight through to
+   *  `CustomerInformationPanelBody`'s own same-named prop (see that prop's
+   *  own doc comment) exactly like `CustomerInformationSidePanel` already
+   *  does — this hover preview never had this prop at all before, so its
+   *  own Copilot tab was silently missing whatever the docked panel's own
+   *  `copilotExtra` was showing (the Marcus Webb scenario's summary cards/
+   *  decision flow) even though every OTHER piece of Copilot content
+   *  (`copilotSummary`) was already shared between the two. `undefined` for
+   *  every interaction that has no scripted extra content, same default
+   *  every other consumer gets. */
+  copilotExtra?: React.ReactNode;
 }) {
   const latestInteraction = useMemo(
     () => buildLatestInteraction(customerName, recordId),
@@ -3027,6 +3040,7 @@ export function CustomerInfoHoverPreview({
             latestInteraction={latestInteraction}
             latestNote={latestNote}
             copilotSummary={copilotSummary}
+            copilotExtra={copilotExtra}
             // Was left unwired (Contacts rendered nothing here, same
             // stub treatment as Tasks/Notes/Accounts/Tickets) — but unlike
             // those genuinely-unimplemented tabs, this data is already

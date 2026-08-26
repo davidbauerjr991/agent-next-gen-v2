@@ -258,6 +258,28 @@ export interface ContactHistoryEntry {
    * contact with no dedicated `whatsappHandle`-style field on file yet.
    */
   whatsappHandle?: string;
+  /**
+   * The real message thread this row's own conversation actually had, when
+   * known — populated by `buildDismissedContactHistoryEntry` from the
+   * dismissed `Interaction`'s own `liveMessages` (the same real transcript
+   * data the record view's live "Conversation" panel reads — see
+   * `TranscriptMessage`, agent-next-gen-transcript.tsx), converted into this
+   * file's own `ContactHistoryMessage` shape. Per explicit bug report, with
+   * a screenshot of a Marcus Webb Contact History row's own detail panel
+   * showing generic wrap-up chatter that never actually happened in his
+   * real chat: "contact history of Marcus Webb should reflect the actual
+   * conversation in the right conversation area of the interior panel."
+   * Undefined for every hand-authored `CONTACT_HISTORY`/
+   * `EXTENDED_CONTACT_HISTORY` row and every `CREATE_NEW_CUSTOMERS`-backed
+   * row (`buildContactHistoryFromCustomers`) — neither of those was ever a
+   * real live `Interaction`, so there's no real transcript to carry
+   * through; `ContactHistoryEntryDetail` falls back to its own synthesized
+   * `buildContactHistoryMessages` for those, unchanged. Also undefined for
+   * a real dismissed row whose primary channel never actually accumulated
+   * any `liveMessages` (e.g. a voice call, where `InteractionComposer`'s
+   * typed-message flow doesn't apply) — same fallback applies there too.
+   */
+  messages?: ContactHistoryMessage[];
 }
 
 /**
@@ -650,6 +672,16 @@ export function buildDismissedContactHistoryEntry(interaction: Interaction, cloc
   // which case `contactHistoryDisplayIdentity` (above) falls back to
   // `name` rather than showing nothing.
   const channelAddress = primaryChannel?.addressLabel ?? primaryChannel?.value;
+  // This row's own real `messages` (see that field's own doc comment) —
+  // `interaction.liveMessages` is keyed by `Thread.id ?? .type`, same
+  // scheme `primaryChannel` itself was resolved with above, so the same key
+  // reads back the exact turns the agent/customer actually exchanged on
+  // this thread. `undefined` (not `[]`) when there's nothing real to show —
+  // `ContactHistoryEntryDetail` treats an empty/`undefined` `messages` the
+  // same, falling back to its own synthesized content, but `undefined` here
+  // keeps this field's own semantics ("no real transcript exists") distinct
+  // from "a real, but genuinely empty, transcript."
+  const primaryChannelMessages = interaction.liveMessages?.[primaryChannel?.id ?? primaryChannel?.type ?? ""];
   // Nothing on `Interaction` tracks which skill it was originally routed
   // under (channels/threads carry no such field — see `Interaction`'s own
   // type), so a dismissed row falls back to this generic label rather than
@@ -718,6 +750,12 @@ export function buildDismissedContactHistoryEntry(interaction: Interaction, cloc
     phone: channelType === "voice" || channelType === "sms" ? channelAddress : undefined,
     whatsappHandle:
       channelType === "whatsapp" ? channelAddress ?? `@${interaction.customerName ?? "Customer"}` : undefined,
+    messages:
+      primaryChannelMessages && primaryChannelMessages.length > 0
+        ? primaryChannelMessages.map(
+            (m): ContactHistoryMessage => ({ sender: m.sender, text: m.text, timestampDisplay: m.timestamp })
+          )
+        : undefined,
   };
 }
 
@@ -1237,6 +1275,18 @@ export function ContactHistoryEntryDetail({ entry }: { entry: ContactHistoryEntr
   const isVoice = entry.channelType === "voice";
   const isMessageChannel =
     isVoice || entry.channelType === "chat" || entry.channelType === "sms" || entry.channelType === "whatsapp";
+  // Per explicit bug report, with a screenshot of a Marcus Webb Contact
+  // History row's own detail panel showing generic wrap-up chatter that
+  // never actually happened in his real chat: "contact history of Marcus
+  // Webb should reflect the actual conversation in the right conversation
+  // area of the interior panel." `entry.messages` (see that field's own doc
+  // comment) is the row's real transcript, when one exists — preferred over
+  // this component's own synthesized `buildContactHistoryMessages` fallback,
+  // which stays exactly as it was for every row with no real transcript
+  // behind it (every hand-authored/`CREATE_NEW_CUSTOMERS`-backed row, and
+  // any dismissed row whose primary channel just never had real messages —
+  // e.g. voice).
+  const messages = entry.messages ?? buildContactHistoryMessages(entry);
   return (
     <div className="flex flex-col gap-3 p-4">
       <span className="lyra-body-sm text-lyra-fg-secondary">
@@ -1256,7 +1306,7 @@ export function ContactHistoryEntryDetail({ entry }: { entry: ContactHistoryEntr
         <div className="flex flex-col gap-2">
           <Label label={isVoice ? "Transcript" : "Conversation"} />
           <div className="rounded-lyra-md border border-lyra-border-subtle flex flex-col gap-4 p-4">
-            {buildContactHistoryMessages(entry).map((message, i) =>
+            {messages.map((message, i) =>
               isVoice ? (
                 <ContactHistoryTranscriptLine key={i} message={message} customerName={entry.name} />
               ) : (

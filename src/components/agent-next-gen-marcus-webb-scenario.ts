@@ -180,6 +180,46 @@ export interface MarcusWebbScenarioState {
    *  it in place without re-deriving anything else. `undefined` until step 2
    *  is clicked at least once. */
   resetTempPassword?: string;
+  /** True from the moment the agent sends their very first message on this
+   *  interaction, set once by `AgentWorkspace2WithDeskPage.tsx`'s
+   *  `handleSendMessage` at the synchronous send moment (not the delayed
+   *  simulated-customer-reply callback) the first time
+   *  `interactionId === MARCUS_WEBB_ID` there. Originally drove the
+   *  Customer Sentiment card directly (per an earlier explicit request,
+   *  "after the agent responds for the first time, update the sentiment to
+   *  be positive") — per a further explicit correction ("change the
+   *  sentiment card after the CUSTOMER responds to the agent's first
+   *  comment"), it no longer does; see `customerRespondedToFirstMessage`
+   *  below for what does now. Kept purely as an internal bookkeeping flag:
+   *  `handleSendMessage` still needs to know, synchronously at send time,
+   *  "is this the agent's first message on this interaction" so it can
+   *  snapshot that fact before it flips (same reasoning as
+   *  `isMarcusWebbWrapupSend`'s own snapshot-at-send-time pattern) for the
+   *  delayed simulated-customer-reply callback to read 2.5s later. Never
+   *  reset back to `false` once set. */
+  agentHasReplied: boolean;
+  /** Per explicit request, with a screenshot of the agent's first reply
+   *  landing without the Copilot card changing yet: "display the steps to
+   *  reset card and change the sentiment card after the CUSTOMER responds
+   *  to the agent's first comment (not triggered by reset)." Supersedes two
+   *  earlier, separate signals — `agentHasReplied` alone (which drove the
+   *  Customer Sentiment card at the AGENT's own send moment) and a keyword-
+   *  matched `passwordResetOffered` (which looked for "reset"+"password" in
+   *  the agent's own message text to reveal the KB card) — both replaced by
+   *  this ONE signal, since the request folds both cards onto the same
+   *  trigger. Set by `AgentWorkspace2WithDeskPage.tsx`'s `handleSendMessage`
+   *  inside its delayed simulated-customer-reply `window.setTimeout`
+   *  callback (not the agent's own synchronous send — this needs the
+   *  CUSTOMER's simulated reply to actually land), guarded by a snapshot of
+   *  `agentHasReplied` taken BEFORE that field flips at send time (so this
+   *  only ever fires once, for the reply that follows the agent's
+   *  genuinely first message — a customer "reply" following the agent's
+   *  2nd+ message does nothing here). Read by `MarcusWebbCopilotCard` to
+   *  both flip the Customer Sentiment card from Neutral to Positive AND
+   *  reveal the "Password Reset Policy" knowledge-base card — the same
+   *  boolean now gates both, per the request folding them onto one trigger.
+   *  Never reset back to `false` once set. */
+  customerRespondedToFirstMessage: boolean;
 }
 
 /** `resetSteps`' own shape — see that field's own doc comment above. Named
@@ -225,6 +265,8 @@ const DEFAULT_STATE: MarcusWebbScenarioState = {
   // practice), keeping the two conceptually distinct fields visually
   // distinct here too.
   resetStepsConfirmed: { identityVerified: false, passwordGenerated: false, loginConfirmed: false },
+  agentHasReplied: false,
+  customerRespondedToFirstMessage: false,
 };
 
 // Lazy-hydrated cache, `localStorage`-backed with a `try`/`catch` fallback

@@ -2411,10 +2411,10 @@ export function InteractionTranscript({
             `TranscriptSessionSeparator` row (the sticky "N Messages |
             #contactId · date" bar) renders edge-to-edge across the full
             scrollable width instead of being boxed into the same centered
-            1200px column as the message bubbles below it — that row picked
+            1024px column as the message bubbles below it — that row picked
             its own `px-6` back up directly on its root (see that
             component's own doc comment) since it no longer inherits an
-            inset from this now-unconstrained parent. The 1200px-centered
+            inset from this now-unconstrained parent. The 1024px-centered
             column lives on a new wrapper around just the message content,
             per session (see `sessionContentDimmed`'s own wrapper div
             further down) — message bubbles are unaffected visually, still
@@ -2562,9 +2562,9 @@ export function InteractionTranscript({
                     `TranscriptSessionSeparator` above (a SIBLING of this
                     div, same as before) — so its own `sticky top-0` keeps
                     working exactly as already documented there.
-                    `w-full max-w-[1200px] mx-auto px-6` — per the
+                    `w-full max-w-[1024px] mx-auto px-6` — per the
                     un-revert back to full width (see the outer scroll
-                    container's own doc comment above), the 1200px-centered
+                    container's own doc comment above), the 1024px-centered
                     column moved back down onto THIS wrapper, around just
                     the message content — message bubbles are unaffected
                     visually, still centered at the same width and
@@ -2605,7 +2605,7 @@ export function InteractionTranscript({
                     content collapsed" state are unrelated flags — see
                     `TranscriptSessionSeparator`'s own `collapsed` prop doc
                     comment). Wraps the div below rather than replacing it, so
-                    every existing class on that div (the 1200px-centered
+                    every existing class on that div (the 1024px-centered
                     column, the dim/opacity transition, the last-session
                     `pb-9`) is untouched — this only adds a height animation
                     around it. Still a DOM descendant of the outer
@@ -2623,8 +2623,15 @@ export function InteractionTranscript({
                 <AccordionPrimitive.Item value={session.id} className="border-none">
                 <AccordionPrimitive.Content className="overflow-hidden data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up">
                 <div
+                  // `max-w-[1024px]` — per explicit request, narrowed down
+                  // from the previous 1200px (see this wrapper's own
+                  // top-of-block doc comment above for the full "why 1200px
+                  // lives here at all" history). The composer's own matching
+                  // wrapper (`InteractionComposer`, further down this file)
+                  // is kept in sync at the same 1024px so the message column
+                  // and the input box directly below it stay the same width.
                   className={cn(
-                    "w-full max-w-[1200px] mx-auto px-6",
+                    "w-full max-w-[1024px] mx-auto px-6",
                     sessionContentDimmed && "opacity-50 transition-opacity",
                     session.id === lastSessionId && "pb-9"
                   )}
@@ -3190,7 +3197,11 @@ export function InteractionComposer({
         className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-transparent to-lyra-bg-surface-base"
         aria-hidden="true"
       />
-      <div className="w-full max-w-[1200px] mx-auto">
+      {/* `max-w-[1024px]` — kept in sync with the message-column wrapper's
+          own matching width above (per explicit request narrowing both from
+          1200px), so the composer stays the same width as the transcript
+          content sitting above it. */}
+      <div className="w-full max-w-[1024px] mx-auto">
         {quickReplyOpen && (
           // Normal flow, NOT `absolute` — this used to float over the
           // transcript above (a sibling `flex-1 overflow-y-auto` box, not
