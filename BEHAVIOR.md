@@ -1761,3 +1761,25 @@ Both apps already live in the same `pinnedKeys` state (`Record<PanelKey, boolean
 Files touched: `AgentNextGenPage.tsx`/`AgentWorkspace2WithDeskPage.tsx`/`AgentWorkspaceAdvancedPage.tsx` (`pinnedKeys` initial state + doc comment, all 3 identical).
 
 Verified tsc-clean (51-error baseline unchanged) and eslint-clean (same pre-existing errors/warnings as prior sections — unused `PanelLeftClose` import and one unrelated hand-rolled `<button>` per page file, plus the same `react-hooks/exhaustive-deps` warnings; zero new).
+
+## 114. Acknowledge quick reply gets a scripted customer response instead of a random pool pick (all 3 tiers)
+
+Per two explicit follow-ups: first, "update the acknowledge quick reply in agent-next-gen-v2 to say 'Hello. Thank you for contacting us.  I would be happy to look into that for you.'" (double space after "us." is intentional, taken verbatim from the request); then, with a screenshot of that quick reply and a customer reply of "Okay, that makes sense.": "when that quick reply is typed make sure Marcus responds with 'That's great! Thanks for the quick reply'".
+
+The `QUICK_REPLIES` "acknowledge" entry's `template` (shared `agent-next-gen-transcript.tsx`) was updated to the new wording first. For the reply behavior, the screenshot's "Marcus Webb" turned out to be a regular interaction with a customer who happens to have that name from the general customer pool, not the scripted `MARCUS_WEBB_ID` decision-card scenario (§80 ff.) — that scenario lives only in `AgentWorkspace2WithDeskPage.tsx`/`agent-next-gen-marcus-webb-scenario.ts` and has no acknowledge-specific logic. So the fix is general and tier-agnostic: any customer's simulated auto-reply now depends on what the agent just sent, not a pure random pick.
+
+Added a shared `resolveCustomerAutoReply(agentMessageText)` helper (`agent-next-gen-transcript.tsx`, next to `CUSTOMER_AUTO_REPLY_POOL`) plus an exported `ACKNOWLEDGE_QUICK_REPLY_RESPONSE = "That's great! Thanks for the quick reply"` constant. The helper returns that constant when the sent message matches the Acknowledge quick reply's template, otherwise falls back to a random `CUSTOMER_AUTO_REPLY_POOL` pick as before. All 3 tiers' `handleSendMessage` now call `resolveCustomerAutoReply(trimmed)` instead of indexing `CUSTOMER_AUTO_REPLY_POOL` directly. In `AgentWorkspace2WithDeskPage.tsx` this sits as the else-branch of the existing `isMarcusWebbWrapupSend ? MARCUS_WEBB_THANKS_MESSAGE : ...` ternary, so the scripted Marcus Webb scenario's own wrap-up message still takes priority untouched.
+
+Files touched: `agent-next-gen-transcript.tsx` (quick reply text + new helper/constant), `AgentNextGenPage.tsx`, `AgentWorkspaceAdvancedPage.tsx`, `AgentWorkspace2WithDeskPage.tsx` (call sites + import swaps).
+
+Verified tsc-clean (277-error baseline unchanged, touched files checked line-by-line for new errors — none).
+
+## 115. InteriorPanel test fork: width now clamps to the parent container instead of forcing full/fixed width
+
+Per explicit request, with a screenshot of a right-docked "Interaction Details" panel: "do not force interior panels to full width in agent-next-gen-v2 but they should shrink with the width of the parent container."
+
+Scoped to the local experimental fork only (`agent-next-gen-interior-panel-1440-test.tsx`, §57/§105/§602 — not lyra-ui's own `interior-panel.tsx`, per that file's own "local copy, port to lyra-ui only if it sticks" convention). Previously `displayWidth` was either the raw drag/cookie-remembered width (`currentWidth`, default 350-425px) or, in the user-triggered full-screen state, a literal `"100%"` — neither was clamped to the panel's actual measured `parentWidth`, so a panel nested inside another narrow container (e.g. this one, opened from inside the docked Customer Information panel) could render wider than the space available and get visually cut off at the container edge. `displayWidth` is now `isFullScreen ? parentWidth : Math.min(currentWidth, parentWidth)` — both cases are bounded by the live `ResizeObserver`-measured parent width, so the panel shrinks to fit a narrow container instead of overflowing it, while keeping its ordinary size whenever the container has room.
+
+Files touched: `agent-next-gen-interior-panel-1440-test.tsx` (`displayWidth` calc + doc comment, this app only).
+
+Verified tsc-clean (277-error baseline unchanged; the file's own single pre-existing `@nicecxone/lyra-ui` module-resolution error is untouched, no new errors).

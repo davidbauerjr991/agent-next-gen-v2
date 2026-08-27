@@ -14,7 +14,7 @@
 // imports if the experiment doesn't stick; port the two changes below into
 // lyra-ui's own interior-panel.tsx (and delete this file) if it does.
 //
-// Exactly two behavioral changes from the original, both scoped to this
+// Exactly three behavioral changes from the original, all scoped to this
 // copy only:
 //   1. `isNarrow`'s absolute-overlay threshold: 1024px → 1440px.
 //   2. `isAutoFullScreen` (the automatic <400px "no room for anything, just
@@ -25,6 +25,11 @@
 //      Maximize2/Minimize2 button) is UNCHANGED — only the automatic,
 //      width-triggered full-screen behavior was requested to be removed,
 //      not the opt-in manual one.
+//   3. `displayWidth` is clamped to the measured `parentWidth` (both the
+//      ordinary and full-screen cases) instead of rendering the raw
+//      drag/cookie width or a literal `"100%"` — per explicit request, the
+//      panel now shrinks with its parent container's width rather than
+//      ever forcing itself wider than the space actually available.
 //
 // Everything else (props, JSX structure, drag-resize plumbing, close
 // animation, full-screen toggle button) is an unmodified copy — including
@@ -260,7 +265,22 @@ const InteriorPanel = React.forwardRef<HTMLDivElement, InteriorPanelTestProps>(
       </div>
     ) : null;
 
-    const displayWidth: number | string = isFullScreen ? "100%" : currentWidth;
+    /* ── EXPERIMENT CHANGE #3: was `isFullScreen ? "100%" : currentWidth`,
+       an unclamped width — `currentWidth` (the drag/cookie-remembered width,
+       default 350-425) rendered at that fixed size even when the measured
+       `parentWidth` was narrower, overflowing past the panel's own
+       container edge (visible as clipped/cut-off header text when this
+       panel is nested inside another narrow container, e.g. the docked
+       Customer Information panel). `"100%"` on this panel's `position:
+       absolute` wrapper resolves against the nearest positioned ancestor,
+       which isn't necessarily the same element `parentWidth` measures,
+       so it could bleed wider than the actual container too. Per explicit
+       request: "do not force interior panels to full width in
+       agent-next-gen-v2 but they should shrink with the width of the
+       parent container" — both branches are now clamped to the live
+       `parentWidth` (falls back to `currentWidth`'s ordinary size whenever
+       the container has room for it). ── */
+    const displayWidth: number | string = isFullScreen ? parentWidth : Math.min(currentWidth, parentWidth);
 
     const inner = (
       <div

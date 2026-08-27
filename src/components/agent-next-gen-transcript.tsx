@@ -501,6 +501,31 @@ export const CUSTOMER_AUTO_REPLY_POOL = [
   "Perfect, that answers my question.",
 ];
 
+/** Per explicit request ("when that quick reply is typed make sure Marcus
+ *  responds with 'That's great! Thanks for the quick reply'"), the
+ *  "Acknowledge" quick reply (`QUICK_REPLIES` above) gets its own scripted
+ *  simulated-customer response instead of a random `CUSTOMER_AUTO_REPLY_POOL`
+ *  pick — reads as a direct reaction to the agent's specific message rather
+ *  than a generic one. Not actually Marcus-specific (the request's own
+ *  screenshot just happened to be an interaction with a customer named
+ *  Marcus Webb) — this applies to every simulated customer reply, in every
+ *  interaction, on every tier, exactly like `CUSTOMER_AUTO_REPLY_POOL`
+ *  itself already does. */
+export const ACKNOWLEDGE_QUICK_REPLY_RESPONSE = "That's great! Thanks for the quick reply";
+
+/** Resolves the canned simulated-customer reply text for a given
+ *  `handleSendMessage` call — the single place all 3 tiers' own
+ *  `window.setTimeout` simulated-reply callbacks should call instead of
+ *  reading `CUSTOMER_AUTO_REPLY_POOL` directly, so the "Acknowledge" special
+ *  case (and any future one like it) only needs to be taught here once. */
+export function resolveCustomerAutoReply(agentMessageText: string): string {
+  const acknowledgeTemplate = QUICK_REPLIES.find((reply) => reply.id === "acknowledge")?.template;
+  if (acknowledgeTemplate && agentMessageText === acknowledgeTemplate) {
+    return ACKNOWLEDGE_QUICK_REPLY_RESPONSE;
+  }
+  return CUSTOMER_AUTO_REPLY_POOL[Math.floor(Math.random() * CUSTOMER_AUTO_REPLY_POOL.length)];
+}
+
 // Expanded to 25 (per explicit request, to actually exercise TagPicker's
 // scrollable checkbox list rather than a 5-row set that never needed to
 // scroll) — a realistic support-conversation tag vocabulary, not filler:
@@ -2844,7 +2869,7 @@ export interface QuickReplyItem {
 
 export const QUICK_REPLIES: QuickReplyItem[] = [
   { id: "greeting", title: "Greeting", template: "Thank you for contacting us. How can I assist you today?" },
-  { id: "acknowledge", title: "Acknowledge", template: "I understand your concern. Let me look into that for you." },
+  { id: "acknowledge", title: "Acknowledge", template: "Hello. Thank you for contacting us.  I would be happy to look into that for you." },
   { id: "account", title: "Request Account #", template: "Could you please provide me with your account number?" },
   { id: "reviewed", title: "Account Reviewed", template: "I've reviewed your account and I can see the issue." },
   { id: "escalate", title: "Escalate", template: "I'm escalating this to our specialist team right away." },

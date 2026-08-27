@@ -91,7 +91,7 @@ import {
   OUTCOME_TAG_OPTIONS,
   OUTCOME_DISPOSITION_OPTIONS,
   OUTCOME_DEFAULT_SUMMARY,
-  CUSTOMER_AUTO_REPLY_POOL,
+  resolveCustomerAutoReply,
   InteractionTranscript,
   InteractionComposer,
   TRANSCRIPT_SESSIONS,
@@ -3215,7 +3215,7 @@ export function AgentNextGenPage({
         name: "Customer",
         initials: "C",
         timestamp: new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }),
-        text: CUSTOMER_AUTO_REPLY_POOL[Math.floor(Math.random() * CUSTOMER_AUTO_REPLY_POOL.length)],
+        text: resolveCustomerAutoReply(trimmed),
       };
       setInteractions((prev) =>
         prev.map((interaction) =>

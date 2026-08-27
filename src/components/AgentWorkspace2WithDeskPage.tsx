@@ -104,7 +104,7 @@ import {
   OUTCOME_TAG_OPTIONS,
   OUTCOME_DISPOSITION_OPTIONS,
   OUTCOME_DEFAULT_SUMMARY,
-  CUSTOMER_AUTO_REPLY_POOL,
+  resolveCustomerAutoReply,
   InteractionTranscript,
   InteractionComposer,
   TRANSCRIPT_SESSIONS,
@@ -4276,9 +4276,13 @@ export function AgentWorkspace2WithDeskPage({
     // already swaps every customer-sender message's name/initials for this
     // interaction's real customer at render time (see its own doc comment),
     // so this reads correctly without needing the real name threaded
-    // through here too. Marcus's own scenario overrides both the reply text
-    // (his scripted thanks message, not a random pool pick) and advances his
-    // Copilot card to "wrapup" once it lands.
+    // through here too. Marcus's own scripted wrap-up send still takes
+    // priority (his scripted thanks message, not a random pool pick, and it
+    // advances his Copilot card to "wrapup" once it lands) — every other
+    // send (including his own earlier messages) falls to
+    // `resolveCustomerAutoReply` (agent-next-gen-transcript.tsx), which
+    // itself special-cases the "Acknowledge" quick reply's exact text
+    // before falling back to `CUSTOMER_AUTO_REPLY_POOL`.
     window.setTimeout(() => {
       if (isTextChannelAtSend) {
         setCustomerTyping((prev) => ({ ...prev, [typingKey]: false }));
@@ -4291,7 +4295,7 @@ export function AgentWorkspace2WithDeskPage({
         timestamp: new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }),
         text: isMarcusWebbWrapupSend
           ? MARCUS_WEBB_THANKS_MESSAGE
-          : CUSTOMER_AUTO_REPLY_POOL[Math.floor(Math.random() * CUSTOMER_AUTO_REPLY_POOL.length)],
+          : resolveCustomerAutoReply(trimmed),
       };
       setInteractions((prev) =>
         prev.map((interaction) =>
