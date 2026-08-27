@@ -26,7 +26,6 @@ import {
   NotificationsBell,
   AgentProfile,
   Container,
-  InteriorPanel,
   PageHeader,
   Button,
   InlineNotification,
@@ -72,6 +71,15 @@ import {
   CHANNEL_TYPE_META,
 } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_CUSTOMERS, type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
+// EXPERIMENTAL: `InteriorPanel` sourced from a local, agent-next-gen-v2-only
+// fork instead of `@nicecxone/lyra-ui` — per explicit request to trial a
+// 1440px absolute-overlay breakpoint (was 1024px) and remove the automatic
+// full-screen breakpoint entirely, without changing the shared lyra-ui
+// component (and therefore agent-next-gen-v1/anything else consuming it)
+// until/unless the trial is kept. See that file's own top-of-file doc
+// comment for the full reasoning; revert this import to
+// `@nicecxone/lyra-ui` to go back to the real component.
+import { InteriorPanel } from "@/components/agent-next-gen-interior-panel-1440-test";
 import { useScheduleContent } from "@/components/SchedulePanel";
 import {
   initialsFor,
@@ -88,7 +96,6 @@ import {
   withoutChannelStatus,
   nextCustomerSortDirection,
   synthesizeChannelAddress,
-  SHOW_RESOLVED_TODAY_CHIP,
   type Page,
 } from "@/components/agent-next-gen-shared-utils";
 import {
@@ -120,6 +127,7 @@ import {
   type AssignmentSortValue,
   sortAssignments,
   AssignmentsSectionCaption,
+  interactionHasBreachedSla,
   NOTIFICATION_CHANNEL,
   INITIAL_NOTIFICATIONS,
   type LatestContact,
@@ -143,7 +151,7 @@ import {
   ContactHistoryEntryDetail,
 } from "@/components/agent-next-gen-contact-history";
 import { saveCaseRecord, getCaseRecord } from "@/components/agent-next-gen-case-database";
-import { readAgentLegStatus, saveAgentLegStatus } from "@/components/agent-next-gen-agent-leg-state";
+import { readAgentLegStatus, saveAgentLegStatus, consumeInitialAgentLegAnnouncement } from "@/components/agent-next-gen-agent-leg-state";
 import {
   type CustomerListRecord,
   CUSTOMER_LIST_RECORDS,
@@ -235,6 +243,8 @@ import {
   Copy,
   Link2,
   Plus,
+  ChevronRight,
+  CircleAlert,
   type LucideIcon,
 } from "lucide-react";
 
@@ -1314,14 +1324,17 @@ export function AgentWorkspace2WithDeskPage({
   const [interactions, setInteractions] = useState<Interaction[]>(
     () => (initialInteraction ? [initialInteraction] : [])
   );
-  // Real "Assignments resolved today" count for the dashboard header badge
-  // (see that `PageHeader`'s own `actions` doc comment) — per explicit
-  // request, starts at 0 every session (a freshly-logged-in agent hasn't
-  // resolved anything yet) rather than reading a static mock figure off
-  // `PERFORMANCE_DATA_BY_RANGE`, and increments live as `handleInteraction-
-  // StatusChange` below actually marks a channel "Resolved", instead of
-  // staying frozen until the next full page reload.
-  const [resolvedTodayCount, setResolvedTodayCount] = useState(0);
+  // Real "Assignments resolved today" count — previously read by the
+  // dashboard header's own `SHOW_RESOLVED_TODAY_CHIP`-gated Badge (see
+  // that flag's own doc comment, agent-next-gen-shared-utils.ts, and the
+  // `PageHeader` `actions` slot below, now showing the "{N} Active
+  // Assignments" chip instead). That Badge was already hidden behind the
+  // flag before this change; now nothing reads the value at all, so only
+  // the setter is destructured — `handleInteractionStatusChange` below
+  // still increments it live on every real Resolved transition, so
+  // re-enabling the old badge later only needs this destructure changed
+  // back, not the tracking logic itself.
+  const [, setResolvedTodayCount] = useState(0);
   // Keeps `agent-next-gen-case-database.ts`'s own local "database" in sync
   // with every live interaction's TRUE current state — see this same
   // effect's own doc comment in AgentNextGenPage.tsx for the full
@@ -1607,6 +1620,28 @@ export function AgentWorkspace2WithDeskPage({
     }
     showAgentLegToast(agentLegConnectionStatus);
   };
+  // Per explicit request: "I want it to display a not connected toast [on
+  // login] but if connected, keep it connected when going to premium,
+  // advanced, basic (and likewise keep it disconnected but don't fire the
+  // toast again)." `consumeInitialAgentLegAnnouncement()` (agent-next-gen-
+  // agent-leg-state.ts) is only `true` for the very FIRST Agent Workspace
+  // page mounted in this browser tab — a genuine login — and `false` for
+  // every subsequent tier switch (App.tsx itself never unmounts across
+  // Premium/Advanced/Basic, so the module-level flag behind that function
+  // survives every switch). Reuses `fireAgentLegStatusToast` (not
+  // `showAgentLegToast` directly) so this goes through the exact same
+  // welcome-modal deferral every other agent-leg toast already does. Only
+  // fires for `"disconnected"` — a fresh login that's already carrying a
+  // CONNECTED status (e.g. a real browser reload after connecting earlier
+  // this same tab) has nothing to announce; a genuine in-session connect
+  // event is still covered by the ordinary `showAgentLegToast("connected")`
+  // success toast, unchanged.
+  useEffect(() => {
+    if (initialAgentLegStatus === "disconnected" && consumeInitialAgentLegAnnouncement()) {
+      fireAgentLegStatusToast("disconnected");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // "Outcome" popover (`ChannelRow`'s own `outcome` prop, channel-row.tsx) —
   // logs Resolution/Tags/Disposition code/Summary for whichever channel's
   // Outcome button was clicked. Only one can be open across the entire left
@@ -2245,6 +2280,19 @@ export function AgentWorkspace2WithDeskPage({
   // started" elapsed display — independent of `elapsedSeconds` below, which
   // is the agent's own status timer and resets on status change.
   const [clockTick, setClockTick] = useState(0);
+  // Whether ANY assignment in the whole Personal Queue has a channel that's
+  // actually breached SLA (red/"critical", not just "warning") — drives the
+  // home header's "Personal Queue" chip color per explicit request ("make
+  // the personal queue chip success when empty and warn when there are
+  // assignments, make it red when an sla is breached in an assignment and
+  // add a ! icon"). See `interactionHasBreachedSla`'s own doc comment
+  // (agent-next-gen-interaction-dashboard.tsx) for why this re-derives the
+  // same per-channel severity check each LeftNav card's own render loop
+  // already applies, rather than importing that inline logic directly.
+  const hasBreachedSlaAssignment = useMemo(
+    () => interactions.some((i) => interactionHasBreachedSla(i, clockTick)),
+    [interactions, clockTick]
+  );
   // Mirrors `clockTick` for code that needs the CURRENT tick inside a
   // callback that itself fires later (`handleSendMessage`'s simulated
   // customer-reply `setTimeout`, 2s after the call that scheduled it) —
@@ -2758,9 +2806,15 @@ export function AgentWorkspace2WithDeskPage({
   // dropdown (unpinned)") just hides their header icon — all three stay
   // reachable via "View All Apps".
   const [pinnedKeys, setPinnedKeys] = useState<Record<PanelKey, boolean>>({
-    notif: true,
+    // Notifications/Schedule swapped per explicit follow-up ("move the
+    // notifications into the app menu list unpinned and pin the Schedule
+    // so it is visible when the app loads") — Notifications no longer
+    // starts pinned (still a normal, clickable "View All Apps" row with
+    // its own `PanelPinButton`, same as Schedule was before this change),
+    // Schedule now starts pinned instead (persistent header icon on load).
+    notif: false,
     conversations: true,
-    schedule: false,
+    schedule: true,
     screenpop: false,
     customers: false,
     accounts: false,
@@ -6566,17 +6620,19 @@ export function AgentWorkspace2WithDeskPage({
                           activeInteraction.customerId
                         )
                       }
-                      // "Active" specifically (not "Closed", which is a
-                      // definite, real state regardless of channel) only
-                      // ever shows because of chat — per explicit request,
-                      // every other channel type has no way to actually
-                      // tell whether the customer is still there (a call
-                      // could've been dropped, an SMS/WhatsApp/email thread
-                      // has no presence signal at all), so labeling those
-                      // "Active" overclaims a certainty this app doesn't
-                      // have. `badge={undefined}` renders nothing at all
-                      // (see `PageHeader`'s own `{badge && <Badge>...}`
-                      // guard, page-header.tsx) rather than an empty pill.
+                      // "Online" (was "Active" — renamed per explicit
+                      // request, same underlying signal) specifically (not
+                      // "Closed", which is a definite, real state regardless
+                      // of channel) only ever shows because of chat — per
+                      // explicit request, every other channel type has no
+                      // way to actually tell whether the customer is still
+                      // there (a call could've been dropped, an SMS/
+                      // WhatsApp/email thread has no presence signal at
+                      // all), so labeling those "Online" overclaims a
+                      // certainty this app doesn't have. `badge={undefined}`
+                      // renders nothing at all (see `PageHeader`'s own
+                      // `{badge && <Badge>...}` guard, page-header.tsx)
+                      // rather than an empty pill.
                       //
                       // Per a further explicit follow-up request ("leave the
                       // active badge visible if the agent switches between
@@ -6592,7 +6648,7 @@ export function AgentWorkspace2WithDeskPage({
                       // gone anywhere just because a different tab is
                       // showing, so the badge now stays put for as long as
                       // that chat thread remains on the card.
-                      badge={activeInteraction.closed ? "Closed" : hasOpenChatThread ? "Active" : undefined}
+                      badge={activeInteraction.closed ? "Closed" : hasOpenChatThread ? "Online" : undefined}
                       badgeColor={activeInteraction.closed ? "slate" : "green"}
                       actions={
                         <>
@@ -7774,15 +7830,90 @@ export function AgentWorkspace2WithDeskPage({
                           // (see that prop's own doc comment, page-header.tsx).
                           titleSize="2xl"
                           actions={
-                            // Per explicit request ("hide the assignments
-                            // resolved chip in the home tab"), gated behind
-                            // `SHOW_RESOLVED_TODAY_CHIP` — see that flag's
-                            // own doc comment (agent-next-gen-shared-utils.ts).
-                            SHOW_RESOLVED_TODAY_CHIP ? (
-                              <Badge color="green" variant="subtle">
-                                {resolvedTodayCount} Assignments resolved today
-                              </Badge>
-                            ) : undefined
+                            // Per explicit request ("add a chip to the top
+                            // right (where the Assignments Completed today
+                            // used to be) that says '{N} Active Assignments'
+                            // and when clicked open the left rail") — this
+                            // is the exact spot the `SHOW_RESOLVED_TODAY_CHIP`-
+                            // gated Badge above used to occupy (still hidden,
+                            // see that flag's own doc comment,
+                            // agent-next-gen-shared-utils.ts). Unlike that
+                            // static badge, this one is a real `Button`
+                            // (Rule zero — no hand-rolled `<button>`),
+                            // styled to read as a chip via the same
+                            // `bg-lyra-status-info-subtle`/
+                            // `text-lyra-status-info-strong` pairing other
+                            // info callouts in this file already use as
+                            // plain classNames (not just inline style).
+                            // `interactions.length` is the exact same count
+                            // `AssignmentsSectionCaption` below renders as
+                            // "({count})" for the LeftNav's own caption —
+                            // one live number, two places it shows up.
+                            // `setNavOpen(true)` expands the LeftNav rail
+                            // (its 52px/256px collapsed/expanded states —
+                            // see `navOpen`'s own declaration) exactly like
+                            // clicking its own collapse/expand toggle would.
+                            //
+                            // Per direct follow-up: label renamed again to
+                            // "Personal Queue: {N}" (was "{N} Personal
+                            // Queue Assignments"), showing "Empty" in place
+                            // of "0" once the queue has nothing in it —
+                            // same live `interactions.length` count either
+                            // way, just never printing a bare "0" on
+                            // screen. The trailing `ChevronRight`
+                            // clickability affordance is unchanged.
+                            //
+                            // Tooltip copy renamed to "Toggle Assignment
+                            // Panel" and the click behavior changed from
+                            // always-open to a real toggle —
+                            // `setNavOpen((v) => !v)`, the exact same
+                            // toggle function the LeftNav's own collapse/
+                            // expand button (`onToggle={() =>
+                            // setNavOpen((v) => !v)}` at that button's own
+                            // call site) already uses, so this chip is now
+                            // a second trigger for that identical action
+                            // rather than a one-way "always expand."
+                            // Per direct follow-up: the chip's color now
+                            // reflects the queue's own worst-case state
+                            // instead of a fixed "info" blue — success
+                            // (green) once the queue is genuinely empty,
+                            // warning (amber) once it holds any assignment
+                            // at all, escalating to critical (red) the
+                            // moment ANY of those assignments has actually
+                            // breached SLA (not just nearing it) — same
+                            // success/warning/critical three-tier language
+                            // `getAwaitingSeverity`/the record-header
+                            // channel tab's own escalation already use,
+                            // just rolled up across the WHOLE queue instead
+                            // of one channel. `hasBreachedSlaAssignment`
+                            // (declared alongside `clockTick` above) is the
+                            // one live signal driving both the red tier AND
+                            // the trailing `CircleAlert` "!" mark — the same
+                            // icon `ChannelTab` (lyra-ui, channel-row.tsx)
+                            // already reserves for a genuinely breached (not
+                            // just late) channel, kept consistent here
+                            // rather than inventing a second "!" glyph.
+                            <Tooltip content="Toggle Assignment Panel" placement="bottom" asLabel>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setNavOpen((v) => !v)}
+                                className={cn(
+                                  "h-6 shrink-0 gap-0.5 rounded-lyra-md px-2 lyra-body-md-emphasis",
+                                  hasBreachedSlaAssignment
+                                    ? "bg-lyra-status-critical-subtle text-lyra-status-critical-strong hover:bg-lyra-status-critical-subtle hover:opacity-80"
+                                    : interactions.length > 0
+                                    ? "bg-lyra-status-warning-subtle text-lyra-status-warning-strong hover:bg-lyra-status-warning-subtle hover:opacity-80"
+                                    : "bg-lyra-status-success-subtle text-lyra-status-success-strong hover:bg-lyra-status-success-subtle hover:opacity-80"
+                                )}
+                              >
+                                Personal Queue: {interactions.length > 0 ? interactions.length : "Empty"}
+                                {hasBreachedSlaAssignment && (
+                                  <CircleAlert className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+                                )}
+                                <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+                              </Button>
+                            </Tooltip>
                           }
                         />
                       </div>

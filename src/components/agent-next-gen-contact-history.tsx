@@ -911,7 +911,13 @@ export function buildContactHistoryByRange(
    (no custom-range case to handle). */
 export function ContactHistoryDateFilterChip({ onValueChange }: { onValueChange?: (value: ContactHistoryDateFilterValue) => void }) {
   const [open, setOpen] = useState(false);
-  const [value, setValue] = useState<ContactHistoryDateFilterValue>("today");
+  // Default "Last 48 Hours" per explicit request — must match
+  // `ContactHistoryCard`'s own `dateFilter` initial state below, since
+  // that's a second, independent piece of state this chip doesn't own
+  // (kept in sync only via `onValueChange`); a mismatched default here
+  // would show "Today" in the trigger while the card was actually
+  // filtered to the 48-hour window underneath it.
+  const [value, setValue] = useState<ContactHistoryDateFilterValue>("last48h");
 
   const selectedLabel = CONTACT_HISTORY_DATE_FILTER_OPTIONS.find((o) => o.value === value)?.label ?? "";
 
@@ -999,7 +1005,10 @@ export function ContactHistoryCard({
    */
   hideCustomerNames?: boolean;
 }) {
-  const [dateFilter, setDateFilter] = useState<ContactHistoryDateFilterValue>("today");
+  // Default "Last 48 Hours" per explicit request (was "Today") — see
+  // `ContactHistoryDateFilterChip`'s own `value` state above for why this
+  // default must stay matched to that one.
+  const [dateFilter, setDateFilter] = useState<ContactHistoryDateFilterValue>("last48h");
   const [searchQuery, setSearchQuery] = useState("");
   // Footer pagination (replaces the old reliance on `DashboardCard`'s own
   // `max-h-[600px] overflow-y-auto` body scroll — see `CONTACT_HISTORY_STRESS_BATCH`'s

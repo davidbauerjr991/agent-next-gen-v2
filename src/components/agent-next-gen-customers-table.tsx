@@ -1062,7 +1062,15 @@ export function CustomersListView({
         }
         actionDefs={[
           { key: "refresh", label: "Refresh", icon: <RefreshCw className="h-4 w-4" strokeWidth={1.5} /> },
-          { key: "new", label: "New", icon: <Plus className="h-4 w-4" strokeWidth={1.5} /> },
+          // Per explicit request, with a screenshot of the lucide "user-plus"
+          // icon: "update the icon for new customers to be user-plus instead
+          // of just + to avoid confusion with launching new interactions."
+          // This was previously a plain `Plus`, visually identical to every
+          // "launch a new interaction" trigger elsewhere in the app (e.g.
+          // `CreateNew`'s "New Outbound" button, `AddChannelAdHocButton`),
+          // making this toolbar button easy to misread as one of those
+          // rather than as customer creation specifically.
+          { key: "new", label: "New Customer", icon: <UserPlus className="h-4 w-4" strokeWidth={1.5} /> },
         ]}
         actions={
           <ColumnToggle
@@ -1144,7 +1152,31 @@ export function CustomersListView({
                   </TableCell>
                 )}
                 {leadingChannelStack && (
-                  <CustomerChannelStack row={row} onStartInteraction={onStartInteraction} />
+                  // Per a real, reported bug (console warnings: "In HTML,
+                  // <div> cannot be a child of <tr>. This will cause a
+                  // hydration error." / "<tr> cannot contain a nested
+                  // <div>"): `CustomerChannelStack` returns a plain `<div>`
+                  // (its own `absolute inset-y-0 left-0` overlay — see that
+                  // component's own doc comment), which used to render here
+                  // as a direct sibling of the `<TableCell>`s below —
+                  // i.e. a raw `<div>` as an immediate child of this row's
+                  // `<tr>`, which the HTML table content model never allows
+                  // (only `<td>`/`<th>` can be). Wrapped in a real `<td>` so
+                  // this row stays valid HTML — `display: contents` on that
+                  // `<td>` removes its own box entirely (so it contributes
+                  // no width/gap to the row's flex layout, and doesn't
+                  // become a new positioning ancestor for the overlay div's
+                  // own `absolute` — the row's own `relative` above, per
+                  // `leadingChannelStack && "relative"`, is still what the
+                  // div positions against, unchanged from before this fix),
+                  // while the `<td>` element itself still satisfies
+                  // `<tr>`'s content model. `role="presentation"` — this
+                  // `<td>` carries no real cell semantics of its own (the
+                  // interactive content inside, the channel buttons, is
+                  // what actually matters to assistive tech).
+                  <td role="presentation" style={{ display: "contents" }}>
+                    <CustomerChannelStack row={row} onStartInteraction={onStartInteraction} />
+                  </td>
                 )}
                 {/* `stopPropagation` below — same reason the channel popover
                     buttons already stop it (see `CustomerChannelCell`):

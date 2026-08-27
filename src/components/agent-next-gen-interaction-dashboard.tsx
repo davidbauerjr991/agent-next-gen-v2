@@ -29,6 +29,7 @@ import {
   makeCaseId,
   formatCreateDate,
   percentOfTeam,
+  getAwaitingSeverity,
 } from "@/components/agent-next-gen-shared-utils";
 import { cn } from "@/lib/utils";
 import {
@@ -442,6 +443,39 @@ export interface Interaction {
   threadStatuses?: Record<string, string>;
 }
 
+/** Whether ANY currently-open channel on this Interaction is actually
+ *  red/"critical" — i.e. has genuinely breached SLA, not merely nearing
+ *  it — per explicit request to color the "Personal Queue" header chip
+ *  (all 3 pages) red once that's true. Deliberately mirrors, rather than
+ *  reuses, the exact same isClosed/slaSuppressed/hasCustomerResponded/
+ *  `getAwaitingSeverity` computation each `InteractionNavItem` card's own
+ *  per-channel severity already applies in the LeftNav render loop (see
+ *  each page's own `channelAwaitingWaitSeconds`/`hasCustomerResponded`
+ *  locals there) — that version is itself inline (built once per card,
+ *  closing over card-local `clockTick`/`interaction`), so there's no single
+ *  existing function to import instead; this is the same three checks
+ *  (closed-or-interaction-closed, Resolved, "has the customer actually
+ *  written something") distilled into one small, dependency-free
+ *  Interaction-level query a header chip (which has no per-card render
+ *  loop of its own) can call directly across the WHOLE `interactions`
+ *  array, not just the one card currently being rendered. `clockTick` is
+ *  the same incrementing seconds counter every other elapsed/awaiting
+ *  reading in this app already uses — passed in rather than read from
+ *  `Date.now()` so this stays as "pure" as the rest of this file's own
+ *  helpers (agent-next-gen-shared-utils.ts's own top-of-file note) and
+ *  re-evaluates on the exact same per-second tick everything else does. */
+export function interactionHasBreachedSla(interaction: Interaction, clockTick: number): boolean {
+  return interaction.threads.some((c) => {
+    const isClosed = interaction.threadStatuses?.[c.id] === "Closed" || !!interaction.closed;
+    const slaSuppressed = isClosed || interaction.threadStatuses?.[c.id] === "Resolved";
+    const hasCustomerResponded = c.lastCustomerMessageTick !== undefined;
+    const effectiveAwaitingResponse = !slaSuppressed && (c.awaitingResponse ?? false);
+    if (!hasCustomerResponded || !effectiveAwaitingResponse) return false;
+    const waitSeconds = clockTick - (c.lastCustomerMessageTick ?? c.startTick);
+    return getAwaitingSeverity(waitSeconds) === "critical";
+  });
+}
+
 /* ── Left nav items ──
    Built from whether an interaction is currently active (see
    `activeInteraction` below) rather than a static array, so "Home" (the
@@ -638,7 +672,7 @@ export function AssignmentsExpandCollapseAllButton({
   );
 }
 
-/* "Assignments (N active)" section caption — sits at the very top of
+/* "Assignments (N)" section caption — sits at the very top of
    LeftNav's scrollable `header` region (left-nav.tsx), directly under the
    "New Outbound" `pinnedHeader` (fixed above it, exempt from scrolling —
    see that call site's own comment for "New Outbound"'s own back-and-forth
@@ -693,9 +727,14 @@ export function AssignmentsSectionCaption({
   }
   return (
     // `Separator` moved below the heading row (was above it) — per
-    // explicit request, it should read as "under the Assignments (N
-    // active) caption," separating the heading from the card list below,
+    // explicit request, it should read as "under the Assignments (N)
+    // caption," separating the heading from the card list below,
     // not separating the caption from "New Outbound" above it.
+    //
+    // "active" dropped from the count text itself (was "(N active)") per
+    // a direct follow-up: just the bare number in parentheses now, no
+    // qualifier — `count` is still the exact same live `interactions.length`
+    // as before, only the surrounding text changed.
     //
     // No `gap` at all now (was `gap-0.5`/2px, before that `gap-3`/12px) —
     // per explicit follow-up request, removed entirely: the heading row's
@@ -714,7 +753,7 @@ export function AssignmentsSectionCaption({
       <div className="flex items-center justify-between gap-2 pl-2 py-2">
         <div className="flex items-baseline gap-1">
           <span className="lyra-body-md-emphasis text-lyra-fg-default">Assignments</span>
-          <span className="lyra-body-md text-lyra-fg-secondary">({count} active)</span>
+          <span className="lyra-body-md text-lyra-fg-secondary">({count})</span>
         </div>
         {showSort && (
           <div className="flex items-center gap-1">

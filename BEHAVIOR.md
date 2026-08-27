@@ -1553,3 +1553,211 @@ This replaced two separate, narrower signals with one shared one. Previously: th
 Files touched: `agent-next-gen-marcus-webb-scenario.ts` (`agentHasReplied`'s doc comment rewritten to describe its new purely-internal role, `passwordResetOffered` field removed, new `customerRespondedToFirstMessage` field + doc comment, `DEFAULT_STATE` updated), `AgentWorkspace2WithDeskPage.tsx` (`handleSendMessage`'s two separate send-time blocks collapsed into one `isFirstMarcusWebbAgentMessage` snapshot + a new setter inside the simulated-reply `setTimeout`, `sentimentIsPositive`/`passwordResetKbCard` gates + doc comments updated, scroll-effect dependency array updated).
 
 Verified tsc-clean (51-error baseline unchanged, same known pre-existing errors only) and eslint-clean (same 2 pre-existing errors — `PanelLeftClose` unused import, hand-rolled-button rule — confirmed unrelated; zero errors in `agent-next-gen-marcus-webb-scenario.ts`).
+
+## 100. Fixed two real console warnings: Tooltip controlled↔uncontrolled, and an invalid `<div>` inside `<tr>`
+
+Per explicit bug report, with a screenshot of the console flooded with dozens of copies of "Tooltip is changing from controlled to uncontrolled. Components should not switch from controlled to uncontrolled (or vice versa)... tooltip.tsx:143": "i keep getting these console warnings. can you investigate and fix?" A second console screenshot, sent mid-investigation, showed a separate, unrelated pair of warnings — "In HTML, `<div>` cannot be a child of `<tr>`. This will cause a hydration error." / "`<tr>` cannot contain a nested `<div>`" — pointing at `agent-next-gen-customers-table.tsx:728` and lyra-ui's `table.tsx:397`. Both are genuine bugs (not demo-data artifacts), fixed at the root:
+
+**Tooltip (lyra-ui, `tooltip.tsx`).** `TooltipPrimitive.Root`'s `open` prop was `disabled || !allowOpen ? false : undefined` — a literal `false` (a CONTROLLED value) for as long as either guard held, then `undefined` (UNCONTROLLED, handing control to Radix's own internal state) the instant `allowOpen` flipped true ~50ms after mount (see `allowOpen`'s own doc comment — a guard against a tooltip firing on mount from a synthesized pointer event). React fixes whether a component started controlled or uncontrolled at its very first render and warns on any later switch — since `allowOpen` starts `false` and flips true on every single mount, this fired on literally every `Tooltip` in the app, ~50ms after it appeared. Fixed by giving the component its own `open`/`setOpen` state (wired through `onOpenChange`, same as any fully-controlled Radix primitive) that stands in for Radix's internal one once neither guard is active — `open` is now a plain boolean for the component's entire lifetime, never `undefined`, so there's no controlled/uncontrolled transition to warn about. The guards work exactly as before (forcing `false` while active); only the mechanism changed.
+
+**Customer table row (`agent-next-gen-customers-table.tsx`).** `CustomerChannelStack` (§407) returns a plain `<div>` — its own `absolute inset-y-0 left-0` hover overlay (§412) — and was rendered directly as a sibling of the row's `<TableCell>`s inside `<TableRow>` (a `<tr>`). The HTML table content model only permits `<td>`/`<th>` as direct children of `<tr>`; a raw `<div>` there is invalid markup, which is exactly what both warnings were reporting (and, per the first warning's own text, a genuine SSR/hydration-mismatch risk, not just a lint nit — browsers' own HTML parsers silently relocate an invalid `<div>` out of a `<tr>` during initial parse, which can diverge from what React's virtual DOM expects). Fixed by wrapping `CustomerChannelStack` in a real `<td role="presentation" style={{ display: "contents" }}>` at its one call site — a real `<td>` element satisfies `<tr>`'s content model (fixing the warnings), while `display: contents` removes that `<td>`'s own box entirely so it contributes no width/gap to the row's flex layout and doesn't become a new CSS positioning ancestor for the overlay `<div>`'s own `absolute` positioning — the row's own `relative` (`leadingChannelStack && "relative"`, unchanged) is still what the div positions against, so the visual result is identical to before this fix. Confirmed via `grep` that `CustomerChannelStack` has exactly one call site in the app, so no other consumer needed the same fix.
+
+Files touched: `tooltip.tsx` (lyra-ui — `open`/`setOpen` state + `onOpenChange` wiring replacing the `false`/`undefined` toggle), `agent-next-gen-customers-table.tsx` (`CustomerChannelStack`'s call site wrapped in a `<td role="presentation" style={{ display: "contents" }}>`).
+
+Verified tsc-clean (app: 51-error baseline unchanged, zero errors in `agent-next-gen-customers-table.tsx`; lyra-ui's own `tsc --noEmit` — its `lint` script — came back with only its 2 pre-existing errors, `admin-shell.tsx`'s "Expected 1 arguments" and `list-item.tsx`'s `ReactNode`-not-assignable, zero in `tooltip.tsx`) and eslint-clean for the app-side file (same pre-existing warnings/errors only — 5 `react-refresh/only-export-components` warnings, 2 hand-rolled-button errors, 1 unused `InteractionsTable` import, none introduced by or near this change).
+
+## 101. Swapped the Customers table's "New" toolbar icon from `Plus` to `UserPlus`
+
+Per explicit request, with a screenshot of the lucide "user-plus" icon in an icon-picker UI: "update the icon for new customers to be user-plus instead of just + to avoid confusion with launching new interactions." An investigation (read-only, no edits) first confirmed the only literal `Plus`-icon "new customer" affordance in the app is `agent-next-gen-customers-table.tsx`'s `CustomersListView` toolbar `actionDefs`' `"new"` entry (label "New", no `onClick` wired — a stub button); the two "Create New Customer" buttons in `agent-next-gen-customer-info-panel.tsx` currently render with no icon at all, so they were left untouched (adding an icon there would be a net-new addition, not the requested swap, and the user's phrasing — "instead of just +" — specifically describes an existing Plus-icon button, which only the table toolbar has).
+
+Changed the `"new"` actionDef's icon from `<Plus className="h-4 w-4" strokeWidth={1.5} />` to `<UserPlus className="h-4 w-4" strokeWidth={1.5} />` (`UserPlus` was already imported in this file, used elsewhere for "Assign to me" row actions — §200-ish territory, unrelated). The toolbar's unrelated "Filter" button (a few lines above, its own separate `<Plus>` for opening the add-filter menu) was left as-is; it's a different affordance with no risk of the same confusion (a filter picker, not a "launch new interaction" trigger).
+
+Files touched: `agent-next-gen-customers-table.tsx` (one icon swap on the `"new"` toolbar `actionDef`, no import changes needed).
+
+Verified tsc-clean (51-error baseline unchanged) and eslint-clean (same 3 pre-existing errors/5 warnings — 2 hand-rolled-button errors, 1 unused `InteractionsTable` import, 5 `react-refresh/only-export-components` warnings — none introduced by or near this change).
+
+**Investigated but explicitly not implemented, per instruction ("just suggest don't implement"):** good lucide-react icon candidates for "launching a new interaction" (distinct from "creating a new customer"), to resolve the confusion the user flagged. The current `Plus` icon appears in three "launch new interaction" spots: lyra-ui's `CreateNew`'s main "New Outbound" trigger, `OutboundAddButton`'s default icon, and `AddChannelAdHocButton`'s trigger (the record-header ad-hoc Add Channel popover). Candidates that read clearly as "start a conversation/contact" rather than "add a person":
+
+- **`PhoneOutgoing`** — already used elsewhere in this codebase for outbound-call context, strong fit if outbound voice is the dominant mental model for "new interaction."
+- **`MessageSquarePlus`** — a chat bubble with a plus, reads as "start a new conversation" across any channel (chat, SMS, email), probably the most channel-agnostic option.
+- **`Send`** — very literal "launch/dispatch," but was just removed from the Copilot card's Process Steps rows (§97 follow-up) for being visually noisy/repetitive — reusing it here risks the same "too generic an icon, shows up everywhere" complaint.
+- **`Rocket`** — strongly reads as "launch," but skews playful/marketing rather than matching this app's other utilitarian glyphs (RefreshCw, UserPlus, etc.).
+
+`MessageSquarePlus` is the strongest single-icon fit for "new interaction" generally (channel-agnostic, visually distinct from `UserPlus`'s person silhouette); `PhoneOutgoing` is worth it specifically wherever the trigger is voice-only. No code changed for this part.
+
+## 102. Renamed the Customers table's "New" toolbar button label to "New Customer"
+
+Follow-up to §101, per explicit request: "update the tooltip to say 'New Customer'." The `actionDef`'s `label` field (`"New"`) doubles as both the button's native `title` tooltip (`TableToolbar`'s wide layout, `table.tsx`) and its visible text in the "More actions" overflow dropdown (narrow layout) — one field change fixes both surfaces. Changed to `"New Customer"`.
+
+Files touched: `agent-next-gen-customers-table.tsx` (one label string change).
+
+Verified tsc-clean (51-error baseline unchanged) and eslint-clean (same pre-existing 3 errors/5 warnings only).
+
+## 103. Agent leg now announces "not connected" on a genuine fresh login, still without re-firing on Premium/Advanced/Basic tier switches
+
+Per explicit request: "the agent leg is automatically connecting - I want it to display a not connected toast but if connected, keep it connected when going to premium, advanced, basic (and likewise keep it disconnected but don't fire the toast again)."
+
+Context: §89 already made the agent leg's CONNECTED/DISCONNECTED status itself survive switching between the 3 Agent Workspace tiers (`readAgentLegStatus`/`saveAgentLegStatus`, agent-next-gen-agent-leg-state.ts), and already suppressed the toast from re-firing on that switch (`AgentProfile`'s `isFirstAgentLegRender` mount-skip guard in lyra-ui, seeded via `initialAgentLegStatus` rather than always defaulting to `"disconnected"`). What §89 never did is announce the disconnected state on an actual fresh login at all — a brand-new browser tab starts genuinely disconnected (correct), but silently, with no toast, since seeding a value is deliberately NOT treated as a connect/disconnect event. What likely read as "automatically connecting" in the report is really this same tab persisting a `"connected"` status from earlier in the same session (§89 working as designed) with no earlier "you're disconnected" toast ever having been shown to make the later "still connected" carry-over legible as a return to a known state, rather than an unannounced default.
+
+Fixed by adding one new export to agent-next-gen-agent-leg-state.ts: `consumeInitialAgentLegAnnouncement()`, backed by an in-memory-only module `let` (deliberately NOT persisted to `localStorage`, unlike this file's existing `cache`) — returns `true` the very first time it's called in a browser tab's lifetime, `false` every time after. This works because `App.tsx`'s top-level `App` component never actually unmounts when switching Agent Workspace tiers — Premium → Advanced → Basic is just a hash-route change that swaps which page component `App` renders (see `App.tsx`'s own `useHashRouter`) — so a plain module-level singleton naturally survives every tier switch within a tab while still resetting on a genuine browser reload (a fresh module instance), which is exactly the "login" vs. "switching tiers" distinction this needed. Deliberately consumed from inside a mount-only `useEffect` in each page, not a `useState` lazy initializer — this app runs under `React.StrictMode` (main.tsx), which double-invokes lazy initializers during render as an impurity check; that would silently burn a "consume once" flag on a throwaway, discarded render. Effects don't have that problem: StrictMode's dev-only effect double-invoke is mount → cleanup → mount, so a second invocation still correctly finds the flag already consumed by the first, and the user only ever sees the toast once either way.
+
+Each of the 3 pages (AgentNextGenPage.tsx, AgentWorkspace2WithDeskPage.tsx, AgentWorkspaceAdvancedPage.tsx) got the same new mount effect, placed right after `fireAgentLegStatusToast`'s own definition:
+```tsx
+useEffect(() => {
+  if (initialAgentLegStatus === "disconnected" && consumeInitialAgentLegAnnouncement()) {
+    fireAgentLegStatusToast("disconnected");
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+```
+Reuses `fireAgentLegStatusToast` itself (not `showAgentLegToast` directly) so this goes through the exact same welcome-modal deferral every other agent-leg toast already does — if the welcome modal is still open at login, the announcement waits behind it like any other agent-leg toast, per §89's own existing behavior. Only fires for `"disconnected"` — a fresh login that's already carrying a CONNECTED status (e.g. a real browser reload after connecting earlier in the same tab) has nothing to announce; a genuine in-session connect event later is still covered by the ordinary `showAgentLegToast("connected")` success toast, unchanged. Net result: true login → disconnected → toast shown once; connect via the toast's own "Connect" button → stays connected across every later tier switch, no announcement repeats; never connect → stays disconnected across every later tier switch, same — the original disconnected toast (from login) is the only one ever shown, exactly matching "don't fire the toast again."
+
+Files touched: `agent-next-gen-agent-leg-state.ts` (new `consumeInitialAgentLegAnnouncement` export + module-level flag), `AgentNextGenPage.tsx`/`AgentWorkspace2WithDeskPage.tsx`/`AgentWorkspaceAdvancedPage.tsx` (import + one new mount effect each).
+
+Verified tsc-clean (51-error baseline unchanged) and eslint-clean across all 4 touched files (same pre-existing errors/warnings only — `PanelLeftClose` unused import, hand-rolled-button rule, a pre-existing `useMemo` missing-dep warning, and 3 pre-existing unused-eslint-disable-directive warnings elsewhere in each file, all shifted down by this change's own line insertions but not introduced by it; zero errors/warnings in agent-next-gen-agent-leg-state.ts, and the new effect's own `eslint-disable-next-line` was confirmed NOT flagged as unused, meaning it's correctly suppressing a real missing-dependency warning there).
+
+## 104. Fixed §103's own root cause: agent leg still read "connected" on a genuine fresh login
+
+Per explicit follow-up report: "it's still showing connected on initial log in - it should be disconnected."
+
+Root cause: §103's `consumeInitialAgentLegAnnouncement()` correctly re-armed on every real browser reload (a fresh JS module instance), but `readAgentLegStatus()`/`saveAgentLegStatus()` — the functions that track the actual CONNECTED/DISCONNECTED value itself, from §89 — persisted `cache` to `localStorage`. `localStorage` survives a real reload or a brand-new tab, not just an in-app tier switch, so once the leg had ever been connected once (in any earlier session, including earlier testing), every subsequent fresh login kept reading that same stale `"connected"` value straight back — §103's new toast logic never even had a chance to fire, since it's gated on the status actually being `"disconnected"`.
+
+Fixed by removing `localStorage` entirely from `agent-next-gen-agent-leg-state.ts` — `cache` is now a plain in-memory module variable, always starting `"disconnected"`. This still satisfies §89's original request (state survives Premium ↔ Advanced ↔ Basic) because `App.tsx`'s top-level `App` component never unmounts across a tier switch — only a genuine browser reload creates a fresh module instance, which is exactly when the status should reset. Net behavior now: real login → always starts disconnected → §103's toast fires; connect via the toast's "Connect" button → stays connected across every later tier switch this same tab, no toast repeats; a real reload → back to disconnected, toast fires again (a new login).
+
+Files touched: `agent-next-gen-agent-leg-state.ts` (removed `localStorage`/`STORAGE_KEY`/`readCache`, `cache` is now a plain always-`"disconnected"`-by-default module variable; doc comments rewritten to explain why `localStorage` was wrong here).
+
+Verified tsc-clean (51-error baseline unchanged) and eslint-clean (zero errors/warnings in the touched file).
+
+## 105. Experimental InteriorPanel fork (1440px absolute-overlay breakpoint, no auto-full-screen) — agent-next-gen-v2 only, NOT applied to lyra-ui
+
+Per explicit request: "for agent-next-gen-v1 I'd like to test the absolute position happening at 1440px parent container width and remove the full screen breakpoint entirely - if I like it I will apply it to lyra-ui" (corrected mid-conversation to target agent-next-gen-v2, not v1).
+
+Both agent-next-gen-v1 and agent-next-gen-v2's own `vite.config.ts` alias `@nicecxone/lyra-ui` straight to lyra-ui's own `src/index.ts` — editing lyra-ui's real `interior-panel.tsx` directly would have changed behavior for BOTH apps (and anything else consuming lyra-ui) immediately, with no way to trial the idea first, contradicting "if I like it I will apply it to lyra-ui." Confirmed this trade-off with the user before proceeding (a temporary local fork scoped to just this app, vs. editing lyra-ui directly) and built the local-fork option.
+
+New file `agent-next-gen-interior-panel-1440-test.tsx`: a full copy of lyra-ui's `InteriorPanel` (including `usePanelDragResize`, inlined since it's internal-only wiring not exported from lyra-ui's `index.ts`), with exactly two behavioral changes:
+1. `isNarrow`'s absolute-overlay threshold: `parentWidth < 1024` → `parentWidth < 1440`.
+2. `isAutoFullScreen` (the automatic <400px "no room for anything, go full-screen" breakpoint, added in §57 and lowered from 768px in that same section) removed entirely — every downstream reference (`fullScreenToggle`'s visibility, `dragHandle`'s visibility, `displayWidth`, and the absolute-vs-inline branch condition) had its `isAutoFullScreen` check dropped to match. The user-triggered `allowFullScreen` toggle (the Maximize2/Minimize2 button) is UNCHANGED — only the automatic, width-triggered full-screen behavior was requested to be removed, not the opt-in manual one.
+
+One incidental fix during the copy: the original's full-screen toggle hand-rolls a `<button>`, which is fine in lyra-ui itself but tripped CLAUDE.md's "Rule zero" no-hand-rolled-button lint rule once copied into agent-next-gen-v2's own linted `src/` — swapped for lyra-ui's `ActionIconButton` atom (visually/behaviorally equivalent) so this experimental file stays lint-clean like everything else in the app.
+
+Wired into the app by changing exactly the `InteriorPanel` import at all 4 real render sites — `AgentNextGenPage.tsx`, `AgentWorkspace2WithDeskPage.tsx`, `AgentWorkspaceAdvancedPage.tsx`, `agent-next-gen-customer-info-panel.tsx` (2 usages) — from `@nicecxone/lyra-ui` to `@/components/agent-next-gen-interior-panel-1440-test`, each with a comment explaining this is experimental and how to revert. `AgentNextGenPage.pre-split-backup.tsx` (a stale, non-live pre-refactor backup) was deliberately left untouched.
+
+To make this permanent: port the two behavioral changes above into lyra-ui's own `interior-panel.tsx`, then delete the local fork file and revert the 4 import lines back to `@nicecxone/lyra-ui`. To abandon it: same revert, discard the fork file.
+
+Files touched: `agent-next-gen-interior-panel-1440-test.tsx` (new), `AgentNextGenPage.tsx`/`AgentWorkspace2WithDeskPage.tsx`/`AgentWorkspaceAdvancedPage.tsx`/`agent-next-gen-customer-info-panel.tsx` (import swap only, no other changes).
+
+Verified tsc-clean (51-error baseline unchanged, zero errors attributable to the new file) and eslint-clean across all 5 touched files (same pre-existing errors/warnings only in the 4 page/panel files; zero in the new fork file after the `ActionIconButton` fix).
+
+## 106. Added a visible "View Details" link to the session row, and a `compactHeader` mode that hides everything but it below 768px — so the right-hand action cluster stops wrapping
+
+Per explicit request: "add an html link to the left of the chevron and right of the date in the session details that says 'View Details' and when the parent container drops below 768px just display the 'View Details' and the chevron (hide the rest of the copy) - my goal is to keep the action buttons in the top right and not wrap to the next line when the container is smaller."
+
+**"View Details" link.** The session row's left-hand toggle (`TranscriptSessionSeparator`, agent-next-gen-transcript.tsx) already carried this exact string, but only as a hover `Tooltip` — never visible text. Added a real `<span>` reading "View Details" between the date and the chevron, styled `text-lyra-fg-link hover:underline` (the same inline-text-link token `DesktopDesignsPage.tsx`'s own link cell already uses, for consistency). The now-redundant `Tooltip` wrapper was removed — once the same string is always on-screen, a hover tooltip repeating it added nothing.
+
+**`compactHeader` (the 768px behavior).** The "{n} Messages | # contactId · date" portion was pulled into its own inner `<span className="inline-flex items-center gap-1.5">` (preserving its internal spacing now that it's one flex item instead of several direct ones) and given a new `compactHeader` prop that adds `hidden` to it — leaving just "View Details" + the chevron once true. Per the stated goal ("keep the action buttons ... not wrap"): this row already uses `flex-wrap` (§14's own doc comment) specifically so the right-hand Consult/Transfer + Outcome + status tag + Unassign & Dismiss cluster drops to its own line rather than clipping when the row runs out of space — shrinking the LEFT side down to its shortest form frees up enough room that the right cluster usually doesn't need to wrap at all anymore.
+
+Rather than adding a second `ResizeObserver` to measure this row's own width, `compactHeader` is fed from `InteractionTranscript`'s existing `transcriptBubbleFullWidth` state — the SAME `<768px` reading already measured off the shared scroll container (via one `ResizeObserver`, established in the "chat bubble full-width" breakpoint work) that this row already lives inside. One shared measurement, two consumers now.
+
+Files touched: `agent-next-gen-transcript.tsx` (`TranscriptSessionSeparator`: new `compactHeader` prop + doc comment, row markup restructured into an inner hideable span + always-visible "View Details" link, `Tooltip` wrapper removed; `InteractionTranscript`'s own call site: `compactHeader={transcriptBubbleFullWidth}`).
+
+Verified tsc-clean (51-error baseline unchanged, zero errors attributable to this file) and eslint-clean (same 2 pre-existing unrelated errors — unused `TagPicker`/`Copy` imports — and pre-existing `react-refresh/only-export-components` warnings only; nothing new).
+
+**Follow-up:** per explicit request, "add a line between the date and View Details (hide when responsive)" — added the same plain `|` divider glyph this row already uses between the message count and `#contactId` (visual consistency, not a new pattern), rendered only when `!compactHeader`. Tied to the same flag as the date cluster itself rather than its own condition — once the date cluster hides, there's nothing left for a leading divider to separate "View Details" from. Verified tsc/eslint-clean (same baseline as above, unchanged).
+
+## 107. Default Contact History filter changed from "Today" to "Last 48 Hours"
+
+Per explicit request: "set the default contact history to 48 hours."
+
+The Contact History card's date range (`agent-next-gen-contact-history.tsx`, §16's own "Today / Last 48 Hours / Last 72 Hours" `ContactHistoryDateFilterChip`) is tracked in two separate places that have to agree: the chip's own internal `value` state (drives what label/selection shows in the trigger and popover) and `ContactHistoryCard`'s own `dateFilter` state (drives which `historyByRange` bucket actually gets rendered, via `onValueChange` keeping the two in sync after the first render). Both defaulted to `"today"`; both changed to `"last48h"` so the card opens already matching what the trigger displays, instead of the two starting out of sync until the agent's first click.
+
+Files touched: `agent-next-gen-contact-history.tsx` (`ContactHistoryDateFilterChip`'s `value` initial state and `ContactHistoryCard`'s `dateFilter` initial state, `"today"` → `"last48h"`, both with doc comments cross-referencing each other).
+
+Verified tsc-clean (51-error baseline unchanged) and eslint-clean (same 13 pre-existing `react-refresh/only-export-components` warnings only; zero errors, nothing new).
+
+## 108. Added a clickable "{N} Active Assignments" chip to the home header, replacing the hidden "Assignments resolved today" spot; clicking it opens the LeftNav
+
+Per explicit request: "add a chip to the top right (where the Assignments Completed today used to be) that says '{N} Active Assignments' and when clicked open the left rail."
+
+Same `PageHeader` `actions` slot §91's `SHOW_RESOLVED_TODAY_CHIP`-gated Badge used to occupy (all 3 pages' own home-dashboard header) — that Badge is still hidden behind the flag (untouched), but this new chip now fills the same visual spot unconditionally. Unlike the old static `Badge`, this one has to be interactive, so it's a real `Button` (Rule zero — no hand-rolled `<button>`), `variant="ghost"`/`size="sm"`, restyled to read as a pill chip via `bg-lyra-status-info-subtle`/`text-lyra-status-info-strong` — the same info-accent classNames other callouts in these files already apply directly (not just via inline style), rather than inventing a new clickable-badge pattern. Wrapped in a `Tooltip` ("Open assignments") for hover discoverability, consistent with this app's other icon/chip actions.
+
+The count is `interactions.length` — the exact same live number `AssignmentsSectionCaption` (LeftNav's own "({count} active)" caption, lyra-ui) already renders from, so the header chip and the LeftNav's own caption can never disagree. `onClick` calls `setNavOpen(true)`, expanding the LeftNav rail from its collapsed 52px state to its full 256px state — the same state `navOpen`'s own toggle button flips, just forced open rather than toggled (clicking the chip again while already open is a no-op, not a close, since "open the left rail" was the request, not "toggle it").
+
+`resolvedTodayCount`'s own `useState` in each page is now destructured as `const [, setResolvedTodayCount]` — the read side is genuinely unused now that nothing renders it (the old Badge was already hidden, and this new chip reads `interactions.length` instead), so keeping the read binding would be a bare unused-var lint error. `handleInteractionStatusChange`'s own live incrementing of the setter is untouched, so re-enabling the old badge later still only needs its destructure changed back.
+
+Files touched: `AgentNextGenPage.tsx`/`AgentWorkspace2WithDeskPage.tsx`/`AgentWorkspaceAdvancedPage.tsx` (`PageHeader` `actions` slot replaced with the new `Tooltip`+`Button` chip; `SHOW_RESOLVED_TODAY_CHIP` import removed from all 3, now unused there; `resolvedTodayCount` destructure narrowed to setter-only in all 3).
+
+Verified tsc-clean (51-error baseline unchanged) and eslint-clean (same pre-existing 2 errors per page file — unused `PanelLeftClose` import, one unrelated hand-rolled `<button>` elsewhere in that file — and the same pre-existing `react-hooks/exhaustive-deps` warnings; zero new errors anywhere).
+
+## 109. Renamed the record-header chat-presence badge from "Active" to "Online"
+
+Per explicit request (screenshot of the "Marcus Webb · Active" record header): "update chat status chips to say 'Online' instead of 'Active'."
+
+§208's own chat-only badge (`badge={activeInteraction.closed ? "Closed" : hasOpenChatThread ? "Active" : undefined}`, all 3 pages' record header `PageHeader`) is the exact chip in the screenshot — same green pill, same `hasOpenChatThread` gating, only the label text changes, to `"Online"`. Left every other part of that logic untouched: still chat-only (every other channel type still renders no badge at all, per §208's own "no presence signal" reasoning), still sticky across tab switches within the same interaction, still shows `"Closed"` (unchanged label) once the interaction itself closes. Doc comments above the `badge=` line in all 3 files updated to say "Online" in place of "Active" while keeping the original reasoning intact, with a one-line note that this was a rename, not a new gating rule.
+
+Files touched: `AgentNextGenPage.tsx`/`AgentWorkspace2WithDeskPage.tsx`/`AgentWorkspaceAdvancedPage.tsx` (`badge=` string literal + adjacent doc comments only — no logic changes).
+
+Verified tsc-clean (51-error baseline unchanged) and eslint-clean (same pre-existing errors/warnings as §108 above; zero new).
+
+## 110. Dropped "active" from the LeftNav "Assignments (N)" caption; renamed the header chip to "{N} Personal Queue Assignments" with a clickability chevron
+
+Per explicit request, with a screenshot of the LeftNav's "Assignments (0 active)" caption: "remove 'Active' from the assignment number - just say Assignments (N) - and rename the 0 Active Assignments badge to '{N} Personal Queue Assignments' > (add a chevron to indicate clickability)."
+
+**LeftNav caption (lyra-ui).** `AssignmentsSectionCaption` (`assignments-section-caption.tsx`) is a real lyra-ui component — not one of this app's local forks — so this edit applies everywhere it's consumed (both agent-next-gen apps, LeftNav.stories.tsx, AgentNextGenTemplate.stories.tsx), not just agent-next-gen-v2; a plain label-text change carries none of the "editing lyra-ui affects both apps immediately" risk §105's `InteriorPanel` fork was built to avoid, so no local fork was needed here. `({count} active)` → `({count})`; `count`, its live-list-length source, and every other part of the caption (sort/expand-all buttons, `count > 1` gating, collapsed-rail behavior) are unchanged.
+
+**Header chip (all 3 pages).** §108's home-header chip — `{interactions.length} Active Assignments`, `setNavOpen(true)` on click — renamed to `{interactions.length} Personal Queue Assignments`, same count, same click target. Added a trailing `ChevronRight` (16px, `strokeWidth={1.5}`, `aria-hidden`) purely as a static clickability affordance, matching the plain ">"-as-hint convention `DesktopDesignsPage`'s own clickable table-cell links use — it doesn't rotate, point at anything, or carry any state of its own.
+
+Files touched: `assignments-section-caption.tsx` (lyra-ui) — caption text + its own doc comment; `AgentNextGenPage.tsx`/`AgentWorkspace2WithDeskPage.tsx`/`AgentWorkspaceAdvancedPage.tsx` — chip label text, `ChevronRight` import + render, doc comments updated for both changes.
+
+Verified tsc-clean (agent-next-gen-v2's own combined 51-error baseline unchanged; lyra-ui's own standalone `tsc --noEmit` shows the same 3 pre-existing errors in `admin-shell.tsx`/`list-item.tsx`, unrelated to this file, unchanged) and eslint-clean on the 3 app page files (same pre-existing errors/warnings as §108/§109; zero new). lyra-ui has no runnable `eslint.config.*` of its own in this workspace (bare `npx eslint` there errors "couldn't find an eslint.config.* file"), and running the app's own eslint against a lyra-ui path just warns "File ignored because outside of base path" rather than linting it — so `assignments-section-caption.tsx` was verified via `tsc` only.
+
+## 111. "Toggle Assignment Panel" tooltip, real toggle click behavior, and "Personal Queue: {N/Empty}" chip label
+
+Per explicit request, with a screenshot of the "0 Personal Queue Assignments >" header chip and its "Open assignments" tooltip bubble: "make the tooltip say 'Toggle Assignment Panel' and if the left nav is open close it or if it's closed, open it - also rename the chip to say 'Personal Queue: {N/Empty}'."
+
+**Tooltip.** §110's chip tooltip copy ("Open assignments") renamed to "Toggle Assignment Panel" in all 3 pages, reflecting the new toggle behavior below rather than a one-way "open" action.
+
+**Click behavior.** `onClick` changed from `setNavOpen(true)` (§108's original always-open behavior) to `setNavOpen((v) => !v)` — the exact same toggle function LeftNav's own collapse/expand button already calls at its own call site (`onToggle={() => setNavOpen((v) => !v)}`). The chip is now a second trigger for that identical toggle, not a separate one-way-open action: clicking it while the rail is open now collapses it, matching the literal request ("if the left nav is open close it or if it's closed, open it").
+
+**Label.** §110's `{interactions.length} Personal Queue Assignments` renamed to `Personal Queue: {interactions.length}`, with `interactions.length` printed as `"Empty"` in place of a bare `"0"` when the queue has nothing in it (`interactions.length > 0 ? interactions.length : "Empty"`). Same live count as before — still the exact `interactions.length` the LeftNav's own `AssignmentsSectionCaption` reads — only the zero-case display text and the surrounding label wording change. The trailing `ChevronRight` clickability affordance is unchanged.
+
+Files touched: `AgentNextGenPage.tsx`/`AgentWorkspace2WithDeskPage.tsx`/`AgentWorkspaceAdvancedPage.tsx` (chip `Tooltip` content string, `Button` `onClick`, and chip label JSX; doc comments above the chip updated to explain all three changes together).
+
+Verified tsc-clean (51-error baseline unchanged) and eslint-clean (same pre-existing errors/warnings as §108–§110 — unused `PanelLeftClose` import and one unrelated hand-rolled `<button>` per page file, plus the same `react-hooks/exhaustive-deps` warnings; zero new).
+
+## 115. "Personal Queue" chip: success/warning/critical color tiers + SLA-breach "!" icon
+
+Per explicit request, with a screenshot of the "Personal Queue: Empty" chip: "make the personal queue chip success when empty and warn when there are assignments, make it red when an sla is breached in an assignment and add a ! icon."
+
+**New shared helper.** Added `interactionHasBreachedSla(interaction, clockTick)` to `agent-next-gen-interaction-dashboard.tsx` (exported, alongside `Interaction`/`Thread`) — walks an Interaction's own threads and asks the same three questions each `InteractionNavItem` card's own inline per-channel severity computation already asks in the LeftNav render loop (closed-or-interaction-closed, Resolved, "has the customer actually written something"), then feeds the resulting wait time through the existing `getAwaitingSeverity` (agent-next-gen-shared-utils.ts) and checks for `"critical"` — i.e. genuinely breached, not just nearing breach. This is a small, deliberate re-derivation of that inline per-card logic rather than a shared extraction, since the card's own version is built inline per-card closing over card-local state; a header chip has no per-card render loop of its own and needs to ask this across the WHOLE `interactions` array at once.
+
+**Wiring (all 3 pages).** Added a memoized `hasBreachedSlaAssignment = interactions.some(i => interactionHasBreachedSla(i, clockTick))` alongside each page's own `clockTick` state, so it re-evaluates on the same per-second tick every other elapsed/awaiting reading already uses.
+
+**Chip color.** The chip's fixed "info" blue (`bg-lyra-status-info-subtle`/`text-lyra-status-info-strong`) is now conditional, three-tier, matching the same success/warning/critical language `getAwaitingSeverity` and the record-header channel tab's own escalation already use: `bg-lyra-status-success-subtle`/`text-lyra-status-success-strong` once the queue is empty, `bg-lyra-status-warning-subtle`/`text-lyra-status-warning-strong` once it holds any assignment at all, escalating to `bg-lyra-status-critical-subtle`/`text-lyra-status-critical-strong` the moment `hasBreachedSlaAssignment` is true — regardless of how many assignments are in the queue at that point.
+
+**"!" icon.** A `CircleAlert` (lucide-react) renders next to the label only when `hasBreachedSlaAssignment` is true — the exact same icon `ChannelTab` (lyra-ui, channel-row.tsx) already reserves for a channel that's genuinely breached SLA (as opposed to `TriangleAlert` for merely nearing it), reused here rather than inventing a second "!" glyph for the same meaning.
+
+Files touched: `agent-next-gen-interaction-dashboard.tsx` (new exported `interactionHasBreachedSla` helper + `getAwaitingSeverity` import); `AgentNextGenPage.tsx`/`AgentWorkspace2WithDeskPage.tsx`/`AgentWorkspaceAdvancedPage.tsx` (import `interactionHasBreachedSla` + `CircleAlert`; `hasBreachedSlaAssignment` memo; chip `className` and icon).
+
+Verified tsc-clean (51-error baseline unchanged) and eslint-clean on the 3 page files (same pre-existing errors/warnings as prior sections; zero new). `agent-next-gen-interaction-dashboard.tsx` picked up one additional pre-existing-category `react-refresh/only-export-components` warning (23 → 24) — expected, not a regression: this file already mixes component and non-component exports throughout (the same warning already fires for `sortAssignments` and others), and the new `interactionHasBreachedSla` export is one more non-component export in that same already-established pattern.
+
+## 112. Correction: §110's caption fix targeted the wrong component — fixed the real one
+
+Per explicit follow-up, with a screenshot of the LeftNav caption still reading "Assignments (1 active)": "remove the word Active in the left nav assignments header - just have the number in parentheses."
+
+§110 edited lyra-ui's `assignments-section-caption.tsx` `AssignmentsSectionCaption`, believing it was the component the 3 pages render. It isn't: all 3 pages import `AssignmentsSectionCaption` from `@/components/agent-next-gen-interaction-dashboard` — a separate, app-local component of the same name that happens to live alongside `AssignmentsSortButton`/`AssignmentsExpandCollapseAllButton` (also app-local). The lyra-ui component is real and used elsewhere (LeftNav.stories.tsx, AgentNextGenTemplate.stories.tsx) so that edit wasn't wrong to make, it just didn't reach this app's own screens — the local copy still read `({count} active)` the whole time, which is what the screenshot caught.
+
+Fixed the actual render path: `agent-next-gen-interaction-dashboard.tsx`'s own `AssignmentsSectionCaption`, `({count} active)` → `({count})`, plus its doc comment (title + inline note) updated to match. No change needed in any of the 3 page files — they already call the local component, just via a still-stale copy.
+
+Files touched: `agent-next-gen-interaction-dashboard.tsx` (caption text + doc comments only).
+
+Verified tsc-clean (51-error baseline unchanged) and eslint-clean on this file (only pre-existing `react-refresh/only-export-components` warnings from this file exporting both components and helpers — unrelated to this change, zero new problems).
+
+## 113. Swapped Notifications and Schedule's default pinned state in the app header
+
+Per explicit request: "move the notifications into the app menu list unpinned and pin the Schedule so it is visible when the app loads."
+
+Both apps already live in the same `pinnedKeys` state (`Record<PanelKey, boolean>`, all 3 pages) that drives both the persistent header-icon row and the "View All Apps" menu's per-row `PanelPinButton` — nothing structural needed to change, just which two keys start `true`/`false`. `notif` flipped from `true` to `false` (no more persistent `NotificationsBell` header icon on load); `schedule` flipped from `false` to `true` (persistent header icon on load, same slot Notifications used to occupy). Neither key is in `HIDDEN_FROM_APPS_MENU`, so both remain normal, clickable "View All Apps" rows regardless of pinned state — unpinning Notifications doesn't remove it from that menu, only from the always-visible header row, matching the literal request ("move into the app menu list unpinned," not "remove"). Every other default (`conversations`/`search` pinned; `screenpop`/`customers`/`accounts`/`tickets`/`wem` unpinned) is untouched.
+
+Files touched: `AgentNextGenPage.tsx`/`AgentWorkspace2WithDeskPage.tsx`/`AgentWorkspaceAdvancedPage.tsx` (`pinnedKeys` initial state + doc comment, all 3 identical).
+
+Verified tsc-clean (51-error baseline unchanged) and eslint-clean (same pre-existing errors/warnings as prior sections — unused `PanelLeftClose` import and one unrelated hand-rolled `<button>` per page file, plus the same `react-hooks/exhaustive-deps` warnings; zero new).

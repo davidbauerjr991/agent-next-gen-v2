@@ -12,7 +12,6 @@ import {
   TableToolbar,
   DateRangeFilterChip,
   Label,
-  InteriorPanel,
   Button,
   TabList,
   Tab,
@@ -45,6 +44,15 @@ import {
   ChatMessage,
 } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_CUSTOMERS, type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
+// EXPERIMENTAL: `InteriorPanel` sourced from a local, agent-next-gen-v2-only
+// fork instead of `@nicecxone/lyra-ui` — per explicit request to trial a
+// 1440px absolute-overlay breakpoint (was 1024px) and remove the automatic
+// full-screen breakpoint entirely, without changing the shared lyra-ui
+// component (and therefore agent-next-gen-v1/anything else consuming it)
+// until/unless the trial is kept. See that file's own top-of-file doc
+// comment for the full reasoning; revert this import to
+// `@nicecxone/lyra-ui` to go back to the real component.
+import { InteriorPanel } from "@/components/agent-next-gen-interior-panel-1440-test";
 import { type Thread } from "@/components/agent-next-gen-interaction-dashboard";
 import {
   splitCustomerName,

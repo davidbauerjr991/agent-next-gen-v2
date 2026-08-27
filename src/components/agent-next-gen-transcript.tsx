@@ -1002,6 +1002,7 @@ export function TranscriptSessionSeparator({
   isNewThread = false,
   collapsed = false,
   onToggleCollapsed,
+  compactHeader = false,
 }: {
   session: Contact;
   open: boolean;
@@ -1132,6 +1133,20 @@ export function TranscriptSessionSeparator({
    *  `InteractionTranscript`'s own `getSessionStatus`) — an in-progress
    *  session has nothing to collapse away yet. */
   onToggleCollapsed?: () => void;
+  /** Per explicit request: below 768px of the transcript's own container
+   *  width, the left-hand "{n} Messages | # contactId · date" cluster hides
+   *  entirely, leaving only "View Details" + the expand/collapse chevron —
+   *  the goal being to keep the right-hand action cluster (Consult/
+   *  Transfer, Outcome, status tag, Unassign & Dismiss) pinned on the same
+   *  row instead of wrapping onto its own line (`flex-wrap` on the row
+   *  above) as the container narrows. `InteractionTranscript`'s own call
+   *  site passes its already-measured `transcriptBubbleFullWidth` (see that
+   *  state's own doc comment — the SAME `<768px` ResizeObserver reading
+   *  the chat-bubble-width breakpoint already uses, off the same scroll
+   *  container this row lives in) rather than this component measuring its
+   *  own width a second time. Defaults `false` — every other call site (if
+   *  any are ever added) keeps the full label. */
+  compactHeader?: boolean;
 }) {
   const isClosed = !isCurrentSession || !!channelClosed;
   // Local to the Outcome popover's own "Status" field — same "one popover
@@ -1203,30 +1218,42 @@ export function TranscriptSessionSeparator({
               reason — it now left-aligns under this cluster once wrapped,
               rather than floating to the far right on its own line. */}
           <div className="flex flex-wrap items-center gap-1.5 lyra-body-sm text-lyra-fg-secondary">
-            {/* "# contactId · date" + the expand/collapse chevron — per
-                explicit request, stays a real, always-toggleable `Button`
-                regardless of `isClosed`: a closed session's own Session
-                Details can still be opened/collapsed to review it, same as
-                an open one — only the status chip/composer/etc. actually
-                lock down once closed, not this. (Previously swapped to
-                plain, non-interactive text here once `isClosed` — that's
-                been removed.) Not an icon-shaped `Button` (`variant="ghost"`,
-                real visible text content), so `Button` itself never wraps it
-                in a tooltip on its own (that built-in behavior is
-                `isIconVariant && title`-gated, see button.tsx — this doesn't
-                qualify) — wrapped in a real `Tooltip` here explicitly
-                instead of passing `title`. */}
-            <Tooltip content="View Details" placement="bottom">
-              <Button
-                variant="ghost"
-                onClick={onToggle}
-                aria-expanded={open}
-                // Same `hover:bg-transparent active:bg-transparent`
-                // override as the status-tag `Button` above, and for the
-                // same reason — the wrapping pill div owns the one,
-                // whole-pill hover now.
-                className="h-auto shrink-0 gap-1.5 p-0 hover:bg-transparent active:bg-transparent lyra-body-sm text-lyra-fg-secondary"
-              >
+            {/* "# contactId · date" + "View Details" + the expand/collapse
+                chevron — per explicit request, stays a real, always-
+                toggleable `Button` regardless of `isClosed`: a closed
+                session's own Session Details can still be opened/collapsed
+                to review it, same as an open one — only the status chip/
+                composer/etc. actually lock down once closed, not this.
+                (Previously swapped to plain, non-interactive text here once
+                `isClosed` — that's been removed.)
+
+                Per a later explicit request, "View Details" is now real,
+                always-visible text (a link-styled span, `text-lyra-fg-link`
+                — same token `DesktopDesignsPage.tsx`'s own inline text link
+                uses) between the date and the chevron, not just a hover
+                tooltip — the `Tooltip` that used to carry this exact same
+                string on hover was removed as redundant once the text
+                itself is always on-screen. The "{n} Messages | # contactId ·
+                date" portion is now its own inner `span` (its own
+                `inline-flex items-center gap-1.5` to keep that internal
+                spacing once it's no longer a set of direct flex children of
+                the outer `Button`) so it can be hidden as one unit via
+                `compactHeader` (that prop's own doc comment) — leaving just
+                "View Details" + the chevron once the container narrows
+                below 768px, which is the whole point: less content on this
+                side means the right-hand action cluster has room to stay on
+                this same row instead of wrapping under it. */}
+            <Button
+              variant="ghost"
+              onClick={onToggle}
+              aria-expanded={open}
+              // Same `hover:bg-transparent active:bg-transparent`
+              // override as the status-tag `Button` above, and for the
+              // same reason — the wrapping pill div owns the one,
+              // whole-pill hover now.
+              className="h-auto shrink-0 gap-1.5 p-0 hover:bg-transparent active:bg-transparent lyra-body-sm text-lyra-fg-secondary"
+            >
+              <span className={cn("inline-flex items-center gap-1.5", compactHeader && "hidden")}>
                 {messageCount != null && (
                   <>
                     <span>{messageCount} Message{messageCount === 1 ? "" : "s"}</span>
@@ -1237,13 +1264,23 @@ export function TranscriptSessionSeparator({
                 <span>{session.contactId}</span>
                 <span aria-hidden="true">·</span>
                 <span>{session.date}</span>
-                {open ? (
-                  <ChevronDown className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
-                ) : (
-                  <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
-                )}
-              </Button>
-            </Tooltip>
+              </span>
+              {/* Divider between the date cluster and "View Details" — same
+                  plain "|" glyph this row already uses for the messageCount/
+                  contactId divider above, for visual consistency. Hidden
+                  together with the date cluster under `compactHeader`
+                  (rather than its own separate condition) since it only
+                  means anything as a separator BETWEEN two visible things —
+                  once the date cluster hides, there's nothing left of "View
+                  Details" for a leading divider to separate it from. */}
+              {!compactHeader && <span aria-hidden="true">|</span>}
+              <span className="text-lyra-fg-link hover:underline">View Details</span>
+              {open ? (
+                <ChevronDown className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+              )}
+            </Button>
           </div>
           {/* Consult/Transfer + Outcome — same real buttons/icons
               `ChannelRow`'s own trailing cluster uses (channel-row.tsx). No
@@ -2553,6 +2590,12 @@ export function InteractionTranscript({
                       ? () => toggleSessionCollapsed(session.id)
                       : undefined
                   }
+                  // Reuses the SAME `<768px` reading `transcriptBubbleFullWidth`
+                  // already measures off this scroll container (see that
+                  // state's own doc comment) rather than a second
+                  // ResizeObserver — see `compactHeader`'s own doc comment
+                  // on why 768px specifically, and what it does.
+                  compactHeader={transcriptBubbleFullWidth}
                 />
                 {/* Everything below the separator (mock/live message
                     bubbles, the Voice/Email placeholder) is what actually
