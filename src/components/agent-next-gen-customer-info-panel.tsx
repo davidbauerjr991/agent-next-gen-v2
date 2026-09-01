@@ -63,7 +63,7 @@ import { type ContactHistoryStatusVariant } from "@/components/agent-next-gen-co
 import { OUTBOUND_AGENTS } from "@/components/agent-next-gen-outbound-data";
 import { MARCUS_WEBB_CUSTOMER_ID } from "@/components/agent-next-gen-marcus-webb-scenario";
 import { OUTCOME_TAG_OPTIONS } from "@/components/agent-next-gen-transcript";
-import { type CustomerListRecord, CustomerAddChannelButton } from "@/components/agent-next-gen-customers-table";
+import { type CustomerListRecord, CUSTOMER_LIST_RECORDS, CustomerAddChannelButton } from "@/components/agent-next-gen-customers-table";
 import { cn } from "@/lib/utils";
 import {
   type LucideIcon,
@@ -252,6 +252,39 @@ export function buildCustomerInfoFields(
     { label: "State", value: state },
     { label: "Zip Code", value: zipCode },
   ];
+}
+
+/** Resolves this interaction's own customer database row, if it has one —
+ *  same identity space `buildCustomerInfoFields`'s own `dbRecord` lookup
+ *  just above already relies on (`recordId` === `Interaction.customerId` ===
+ *  `CustomerListRecord.contactNumber`, all sourced from `CREATE_NEW_CUSTOMERS`
+ *  — see `CUSTOMER_LIST_RECORDS`'s own doc comment, agent-next-gen-customers-
+ *  table.tsx, for that 1:1 mapping).
+ *
+ *  Per explicit request ("put the customer available channels in the
+ *  Customer Overview in the same row as the edit (like in the customer
+ *  table in Premium) for all Customer Information panels") —
+ *  `CustomerAddChannelButton`'s wide mode (rendered by
+ *  `CustomerInformationPanelBody`'s own Customer Overview top row) already
+ *  IS that exact available-channels icon row, one button per channel the
+ *  customer's own `CustomerListRecord.channels` lists, same component the
+ *  Customers table itself renders per row. It was previously only ever fed
+ *  a real `row` by the two Customers-table-ORIGINATED consumers
+ *  (`CustomerRowInfoPanel`/`CustomerFullScreenTabContent`, which already
+ *  carry the clicked row directly) — `CustomerInformationSidePanel` and
+ *  `CustomerInfoHoverPreview` never called this at all, so their own top
+ *  row only ever showed Edit, with no channel icons next to it, EVEN for a
+ *  real customer with real known channels on file. Not a data gap, just a
+ *  lookup nobody had wired up yet for those two consumers — this is that
+ *  lookup, shared so both derive it the same way `buildCustomerInfoFields`
+ *  already does for its own fields.
+ *
+ *  `null` for an ad-hoc/unknown contact with no matching database record —
+ *  `CustomerAddChannelButton` already renders nothing at all for a `null`
+ *  row (see that component's own doc comment), so this is a safe default,
+ *  not a special case callers need to branch on themselves. */
+export function resolveCustomerListRecord(recordId: string): CustomerListRecord | null {
+  return CUSTOMER_LIST_RECORDS.find((r) => r.contactNumber === recordId) ?? null;
 }
 
 // "Latest Interaction" summary shown on the Overview tab, below the
@@ -2048,6 +2081,8 @@ export function CustomerInformationPanelBody({
   overviewEditing = false,
   onOverviewEditingChange = () => {},
   allowOverviewEdit,
+  row,
+  onStartInteraction,
 }: {
   activeTab: number;
   /** Overview's "Open Conversation" deep link (Latest Interaction
@@ -2153,6 +2188,28 @@ export function CustomerInformationPanelBody({
    *  since it's a transient mouse-hover popover with no footer of its own
    *  to commit or cancel an edit through. */
   allowOverviewEdit?: boolean;
+  /** Per explicit request ("move the contact icon buttons into the
+   *  customer overview and put them next to the edit button in a row
+   *  above the other information") — the row this customer came from,
+   *  feeding `CustomerAddChannelButton` (always its "wide" one-button-
+   *  per-channel shape here, matching `CustomerFullScreenTabContent`'s
+   *  own prior header usage) so the channel launch buttons live inside
+   *  this card's own top row instead of the panel/tab header. `undefined`/
+   *  `null` for every consumer with no such row to launch a channel
+   *  from — `CustomerInformationSidePanel` (an already-open interaction,
+   *  never had these buttons at all) and `CustomerInfoHoverPreview`
+   *  (never offered `allowOverviewEdit` either) simply omit this, and the
+   *  new top row renders with no channel buttons in it (just the Edit
+   *  button, if `allowOverviewEdit` is set) — same as `CustomerAddChannelButton`
+   *  itself already does for a `null` row (see that component's own doc
+   *  comment). */
+  row?: CustomerListRecord | null;
+  /** Required whenever `row` is a real (non-null) record — same signature
+   *  `CustomerAddChannelButton` itself takes, just forwarded straight
+   *  through. Optional here (not required outright) only so a consumer
+   *  that never passes `row` doesn't also have to pass a never-called
+   *  handler. */
+  onStartInteraction?: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
 }) {
   // Controlled (not `defaultValue`, unlike Latest Interaction beside it)
   // specifically so the stacked column below knows whether Latest Note
@@ -2389,6 +2446,56 @@ export function CustomerInformationPanelBody({
                     title: "Customer Overview",
                     content: (
                       <div className="flex flex-col gap-3">
+                        {/* Channel launch buttons + Edit, together in one row
+                            above the field list — per explicit request
+                            ("move the contact icon buttons into the customer
+                            overview and put them next to the edit button in
+                            a row above the other information"). Previously
+                            the channel buttons lived in the panel/tab
+                            header's own `headerActions`/`actions`
+                            (`CustomerRowInfoPanel`/`CustomerFullScreenTabContent`
+                            — see each call site's own doc comment on `row`/
+                            `onStartInteraction` below) and Edit sat alone
+                            below the LAST field row; both now share this one
+                            row instead. Only rendered while NOT editing —
+                            same reasoning the Edit button itself already
+                            had (see `allowOverviewEdit`'s own doc comment):
+                            once editing starts, Save/Cancel in the footer
+                            are the only way back out, and launching a new
+                            channel mid-edit would be a confusing detour.
+                            `justify-between` splits the channel buttons
+                            (left) from Edit (right) — matches the reference
+                            screenshot's layout. */}
+                        {((row && !overviewEditing) || (allowOverviewEdit && !overviewEditing)) && (
+                          <div className="flex items-center justify-between gap-2">
+                            {/* `gap-1` (4px) between the channel buttons
+                                themselves — per explicit request ("make the
+                                gap between the buttons 4px") — distinct from
+                                the wrapping row's own `gap-2`/`justify-
+                                between`, which is the (much larger) space
+                                between this whole button cluster and Edit. */}
+                            <div className="flex items-center gap-1">
+                              {row && (
+                                <CustomerAddChannelButton
+                                  row={row}
+                                  isNarrow={false}
+                                  onStartInteraction={onStartInteraction!}
+                                />
+                              )}
+                            </div>
+                            {allowOverviewEdit && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => onOverviewEditingChange(true)}
+                                className="gap-1.5"
+                              >
+                                <Pencil className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                                Edit
+                              </Button>
+                            )}
+                          </div>
+                        )}
                         {draft.overviewFields.map((field, index) => (
                           <div key={field.label} className="flex flex-col gap-3">
                             {overviewEditing ? (
@@ -2465,24 +2572,6 @@ export function CustomerInformationPanelBody({
                             {!overviewEditing && index < draft.overviewFields.length - 1 && <Separator />}
                           </div>
                         ))}
-                        {/* Enter-edit-mode action — sits below the last field row,
-                            left-aligned to match the field rows' own start edge.
-                            Only rendered while NOT editing (one-way trigger into
-                            edit mode); Save/Cancel in the footer are the only way
-                            back out, see CustomerRecordSaveFooter. */}
-                        {allowOverviewEdit && !overviewEditing && (
-                          <div className="flex justify-start">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => onOverviewEditingChange(true)}
-                              className="gap-1.5"
-                            >
-                              <Pencil className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-                              Edit
-                            </Button>
-                          </div>
-                        )}
                       </div>
                     ),
                   },
@@ -2816,6 +2905,7 @@ export function CustomerInfoHoverPreview({
   onOverviewEditingChange,
   matchState,
   copilotExtra,
+  onStartInteraction,
 }: {
   customerName?: string;
   recordId: string;
@@ -2887,12 +2977,26 @@ export function CustomerInfoHoverPreview({
    *  every interaction that has no scripted extra content, same default
    *  every other consumer gets. */
   copilotExtra?: React.ReactNode;
+  /** Per explicit request ("put the customer available channels in the
+   *  Customer Overview in the same row as the edit... for all Customer
+   *  Information panels... make sure this is reflected in the hover panel
+   *  as well") — feeds `CustomerInformationPanelBody`'s own `row`/
+   *  `onStartInteraction` props exactly like `CustomerInformationSidePanel`
+   *  does (see that prop's own doc comment); `row` itself is derived from
+   *  `recordId` right below via `resolveCustomerListRecord`, same as the
+   *  docked panel. */
+  onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
 }) {
   const latestInteraction = useMemo(
     () => buildLatestInteraction(customerName, recordId),
     [customerName, recordId]
   );
   const latestNote = useMemo(() => buildLatestNote(customerName, recordId), [customerName, recordId]);
+  // See `resolveCustomerListRecord`'s own doc comment above — same lookup
+  // `CustomerInformationSidePanel` performs, so the hover preview's own
+  // Customer Overview row shows the identical channel icons the docked
+  // panel does for this same interaction.
+  const row = useMemo(() => resolveCustomerListRecord(recordId), [recordId]);
   const copilotSummary = useMemo(() => buildCopilotSummary(customerName, recordId), [customerName, recordId]);
   // Re-enabled per explicit follow-up request ("re-add Copilot as one of
   // the tabs") — back to its original conditional gating rather than the
@@ -3066,6 +3170,13 @@ export function CustomerInfoHoverPreview({
             allowOverviewEdit
             overviewEditing={overviewEditing}
             onOverviewEditingChange={onOverviewEditingChange}
+            // Per explicit request ("...make sure this is reflected in the
+            // hover panel as well") — same `row`/`onStartInteraction` wiring
+            // as `CustomerInformationSidePanel`'s own identical call site;
+            // see this component's own `row` const above for how it's
+            // derived.
+            row={row}
+            onStartInteraction={onStartInteraction}
           />
         )}
       </div>
@@ -3402,6 +3513,7 @@ export function CustomerInformationSidePanel({
   matchState,
   onCopilotFirstAvailable,
   copilotExtra,
+  onStartInteraction,
 }: {
   open: boolean;
   pinned: boolean;
@@ -3529,6 +3641,16 @@ export function CustomerInformationSidePanel({
    *  named prop — see that prop's own doc comment. `undefined` for every
    *  interaction except the Marcus Webb scripted scenario. */
   copilotExtra?: React.ReactNode;
+  /** Per explicit request ("put the customer available channels in the
+   *  Customer Overview in the same row as the edit... for all Customer
+   *  Information panels") — feeds `CustomerInformationPanelBody`'s own
+   *  `row`/`onStartInteraction` props (see `resolveCustomerListRecord`'s own
+   *  doc comment above for how `row` itself gets derived from `recordId`
+   *  right below). Every real page-file call site already has a working
+   *  `handleStartCall`-backed handler of this exact shape — see
+   *  `CustomerRowInfoPanel`'s own identically-named, non-optional prop for
+   *  the established wiring pattern this mirrors. */
+  onStartInteraction: (contact: CreateNewOutboundContact, channel: ChannelType, phone: string, skillId: string) => void;
 }) {
   const latestInteraction = useMemo(
     () => buildLatestInteraction(customerName, recordId),
@@ -3538,6 +3660,10 @@ export function CustomerInformationSidePanel({
     () => buildLatestNote(customerName, recordId),
     [customerName, recordId]
   );
+  // See `resolveCustomerListRecord`'s own doc comment above for why this
+  // panel — an already-open interaction, never fed a `row` from a
+  // Customers-table row click — still has one to look up.
+  const row = useMemo(() => resolveCustomerListRecord(recordId), [recordId]);
   const copilotSummary = useMemo(() => buildCopilotSummary(customerName, recordId), [customerName, recordId]);
   // Re-enabled per explicit follow-up request ("re-add Copilot as one of
   // the tabs") — back to its original conditional gating rather than the
@@ -3935,6 +4061,16 @@ export function CustomerInformationSidePanel({
           // Per explicit request — this is one of the two real panels, so it
           // offers the Customer Overview edit button.
           allowOverviewEdit
+          // Per explicit request ("put the customer available channels in
+          // the Customer Overview in the same row as the edit... for all
+          // Customer Information panels") — `row` (derived above, see
+          // `resolveCustomerListRecord`'s own doc comment) feeds the same
+          // `CustomerAddChannelButton` channel-icon row `CustomerRowInfoPanel`/
+          // `CustomerFullScreenTabContent` already show; `null` (an ad-hoc/
+          // unknown contact) simply renders no channel icons, same as those
+          // two consumers already do for their own `row`-less case.
+          row={row}
+          onStartInteraction={onStartInteraction}
         />
       )}
     </SidePanel>
@@ -4225,29 +4361,16 @@ export function CustomerRowInfoPanel({
       // cluster, per explicit request.
       headerActions={
         <>
-          {/* Add Channel stays its own always-visible action(s) here
-              regardless of full-screen state — it opens a whole "Select
-              Channel/Address/Skill" form (`CustomerChannelPicker`), which
-              doesn't belong as a plain row inside the Refresh/Delete kebab
-              below; only true single-click actions collapse there.
-              Previously floated into `headerTitleBadge` (next to the
-              customer name) while full-screen instead of sitting here —
-              reverted per explicit follow-up request to keep it with the
-              rest of the action cluster in every mode; that floated
-              placement was also what forced the title+subhead box taller
-              than its plain-text case (see `container-header.tsx`'s own
-              `min-h-10` fix), so this also removes the one real consumer
-              that ever needed that extra headroom.
-
-              Per later explicit request, `isNarrow` now also drives WHICH
-              shape this renders as — same narrow/wide split the active-
-              interaction record header's own channel buttons use (see
-              `CustomerAddChannelButton`'s own doc comment): a single
-              solid-primary "+" while narrow/docked, or one button per
-              channel (Voice as a large solid-primary "Call" button, the
-              rest as always-visible outline icons) once full-screen gives
-              this row enough width. */}
-          <CustomerAddChannelButton row={row} isNarrow={isNarrowActions} onStartInteraction={onStartInteraction} />
+          {/* Add Channel moved out of this header entirely — per explicit
+              follow-up request ("move the contact icon buttons into the
+              customer overview and put them next to the edit button in a
+              row above the other information"), it now lives inside the
+              Customer Overview accordion's own top row instead (see
+              `CustomerInformationPanelBody`'s `row`/`onStartInteraction`
+              props, wired below at this panel's own body call site). This
+              header keeps only Refresh/Delete/prev/next/kebab/Open-Tab —
+              the momentary record-level actions that were never Add
+              Channel's own narrow/wide-mode concern to begin with. */}
           {isNarrowActions ? (
             // `KebabMenuButton`'s own default trigger is a fixed h-6 w-6
             // (24px) — visibly smaller than every other icon button in
@@ -4401,6 +4524,18 @@ export function CustomerRowInfoPanel({
         // Per explicit request — this is the other real panel, so it also
         // offers the Customer Overview edit button.
         allowOverviewEdit
+        // Feeds the Customer Overview accordion's own new top row of
+        // channel-launch buttons — see `CustomerInformationPanelBody`'s
+        // `row`/`onStartInteraction` doc comments. Was rendered in this
+        // panel's OWN header via `CustomerAddChannelButton` before (see
+        // `headerActions` above); moved here per explicit follow-up
+        // request. Always the "wide" one-button-per-channel shape now
+        // (not `isNarrowActions`-dependent like the old header placement
+        // was) — the Customer Overview card has its own fixed width
+        // regardless of whether this panel itself is docked or full
+        // screen, so there's no narrow/wide distinction left to make.
+        row={row}
+        onStartInteraction={onStartInteraction}
       />
     </InteriorPanel>
   );
@@ -4508,11 +4643,13 @@ export function CustomerFullScreenTabContent({
         subhead={recordId}
         actions={
           <>
-            {/* Always the "wide" (one button per channel) shape — this tab
-                fills the full desk-tab content column, never the narrow
-                docked width `CustomerRowInfoPanel`'s own `isNarrowActions`
-                measurement exists to detect. */}
-            <CustomerAddChannelButton row={row} isNarrow={false} onStartInteraction={onStartInteraction} />
+            {/* Add Channel moved out of this header — per explicit follow-up
+                request ("move the contact icon buttons into the customer
+                overview and put them next to the edit button in a row above
+                the other information"), it now lives inside the Customer
+                Overview accordion's own top row instead (see
+                `CustomerInformationPanelBody`'s `row`/`onStartInteraction`
+                props, wired below at this component's own body call site). */}
             <KebabMenuButton
               items={recordActionItems}
               ariaLabel="Record actions"
@@ -4561,6 +4698,13 @@ export function CustomerFullScreenTabContent({
           overviewEditing={overviewEditing}
           onOverviewEditingChange={setOverviewEditing}
           allowOverviewEdit
+          // Feeds the Customer Overview accordion's own new top row of
+          // channel-launch buttons — see `CustomerInformationPanelBody`'s
+          // `row`/`onStartInteraction` doc comments, and this component's
+          // own `actions` above (where `CustomerAddChannelButton` used to
+          // render before this follow-up request moved it here).
+          row={row}
+          onStartInteraction={onStartInteraction}
         />
       </PanelContent>
       {(recordDraft.isDirty || overviewEditing) && (

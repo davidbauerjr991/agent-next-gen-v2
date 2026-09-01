@@ -1281,6 +1281,19 @@ export function TranscriptSessionSeparator({
               className="h-auto shrink-0 gap-1.5 p-0 hover:bg-transparent active:bg-transparent lyra-body-sm text-lyra-fg-secondary"
             >
               <span className={cn("inline-flex items-center gap-1.5", compactHeader && "hidden")}>
+                {/* Per explicit follow-up request ("add the channel type to
+                    the summary row at the left (voice, sms, webchat, chat,
+                    whatsapp, etc.)") — `session.channel` is already a real,
+                    populated display label on every `Contact` this row ever
+                    renders (`freshSessionChannelLabel`/the historical mock
+                    arrays above all set it), so this just surfaces it rather
+                    than adding a new field. Grouped inside this same
+                    collapsible span (not a separate always-visible one) so
+                    it hides together with the rest of this cluster under
+                    `compactHeader`, same reasoning as every other piece
+                    here. */}
+                <span>{session.channel}</span>
+                <span aria-hidden="true">|</span>
                 {messageCount != null && (
                   <>
                     <span>{messageCount} Message{messageCount === 1 ? "" : "s"}</span>

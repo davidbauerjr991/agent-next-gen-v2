@@ -594,6 +594,20 @@ type Page = "agent-workspace" | "agent" | "agent-with-desk" | "agent-advanced" |
  *  Badge's visibility is gated, so re-enabling it later is a one-line flip. */
 const SHOW_RESOLVED_TODAY_CHIP = false;
 
+/** Per explicit request ("now hide the '+' button on interactions in the
+ *  page header - I may bring it back though if I need it but hide for
+ *  now"): gates the blue "+" `AddChannelAdHocButton`/`getHeaderAction`
+ *  trigger each of the 3 Agent Workspace pages renders in its own
+ *  record-header action cluster (2.0's `showAddChannelActions &&
+ *  activeChannel` branch; Premium/Advanced's unconditional
+ *  `getHeaderAction(...) ?? <AddChannelAdHocButton />` branch). Same
+ *  "hide for now" flag pattern as `SHOW_RESOLVED_TODAY_CHIP` right above —
+ *  a single shared toggle here rather than duplicating the on/off logic
+ *  per page. `handleAddAdHocChannel` and everything else this button
+ *  would have triggered are untouched — only the button's own visibility
+ *  is gated, so re-enabling it later is a one-line flip. */
+const SHOW_ADD_CHANNEL_HEADER_BUTTON = false;
+
 export {
   initialsFor,
   generateCaseId,
@@ -633,5 +647,6 @@ export {
   phoneValueFromDisplay,
   phoneDisplayFromValue,
   SHOW_RESOLVED_TODAY_CHIP,
+  SHOW_ADD_CHANNEL_HEADER_BUTTON,
 };
 export type { Page };

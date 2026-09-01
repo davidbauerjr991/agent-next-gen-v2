@@ -432,6 +432,7 @@ export function CustomerChannelPopoverButton({
   onStartInteraction,
   alwaysVisible = false,
   overlay = false,
+  size = "sm",
 }: {
   row: CustomerListRecord;
   channel: ChannelType;
@@ -462,6 +463,17 @@ export function CustomerChannelPopoverButton({
    *  opacity classes at all) because the icon never renders unless its
    *  parent overlay is already showing. */
   overlay?: boolean;
+  /** Forwarded straight through to the inner `ActionIconButton`'s own
+   *  `size` — per explicit request ("match the sizes of the channel
+   *  buttons to the size of the edit button"), `CustomerAddChannelButton`'s
+   *  wide-mode branch passes `"xs"` here (24px, matches lyra-ui `Button`
+   *  `size="sm"`'s own height — see that component's own doc comment on
+   *  its `xs` tier) so these icons line up with the Customer Overview
+   *  card's `size="sm"` Edit button sitting in the same row. Defaults to
+   *  `"sm"` (32px) — every other existing consumer (the Customers table's
+   *  own per-row hover icons, `CustomerChannelStack`'s overlay) is
+   *  unaffected. */
+  size?: "xs" | "sm";
 }) {
   const [open, setOpen] = useState(false);
   const meta = CHANNEL_ICON_META[channel];
@@ -475,7 +487,7 @@ export function CustomerChannelPopoverButton({
       onOpenChange={setOpen}
       trigger={
         <ActionIconButton
-          size="sm"
+          size={size}
           title={meta.label}
           aria-expanded={open}
           onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.stopPropagation()}
@@ -611,9 +623,18 @@ export function CustomerAddChannelButton({
             open={openChannel === channel}
             onOpenChange={(open) => setOpenChannel(open ? channel : null)}
             trigger={
+              // `size="sm"` (was `"md"`) — per explicit request ("match the
+              // sizes of the channel buttons to the size of the edit
+              // button"), this wide-mode branch is now only ever rendered
+              // inside the Customer Overview card's own top row (see this
+              // component's own call site, agent-next-gen-customer-info-
+              // panel.tsx), right next to that card's `size="sm"` Edit
+              // button — matching height/label-scale here keeps the whole
+              // row reading as one consistent size, not Call standing out
+              // larger than its neighbors.
               <Button
                 variant="default"
-                size="md"
+                size="sm"
                 aria-expanded={openChannel === channel}
                 className="gap-1.5"
               >
@@ -630,6 +651,10 @@ export function CustomerAddChannelButton({
             available={available}
             onStartInteraction={onStartInteraction}
             alwaysVisible
+            // `"xs"` (24px) — same reasoning as the Call button's own
+            // `size="sm"` swap just above: matches the Customer Overview
+            // card's `size="sm"` Edit button sitting in the same row.
+            size="xs"
           />
         )
       )}

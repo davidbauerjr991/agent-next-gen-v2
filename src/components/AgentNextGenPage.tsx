@@ -72,6 +72,7 @@ import {
   withoutChannelStatus,
   nextCustomerSortDirection,
   synthesizeChannelAddress,
+  SHOW_ADD_CHANNEL_HEADER_BUTTON,
   type Page,
 } from "@/components/agent-next-gen-shared-utils";
 import {
@@ -134,7 +135,11 @@ import {
   CustomersListView,
 } from "@/components/agent-next-gen-customers-table";
 import { useSearchPanelContent, type SearchPanelTabKey } from "@/components/agent-next-gen-search-panel";
-import { type InteractionHistoryRecord } from "@/components/agent-next-gen-interactions-table";
+import {
+  InteractionsListView,
+  type InteractionHistoryRecord,
+  buildContactHistoryEntryFromInteractionRecord,
+} from "@/components/agent-next-gen-interactions-table";
 import {
   type CustomerHistorySessionEntry,
   HistoryConversationView,
@@ -173,6 +178,7 @@ import {
   History,
   Maximize2,
   Minimize2,
+  PanelRightClose,
   IdCard,
   PhoneOutgoing,
   RotateCcw,
@@ -1350,10 +1356,44 @@ export function AgentNextGenPage({
      (unlike `setActiveInteractionId`, which has several). */
   const [showSettings, setShowSettings] = useState(false);
 
+  // Per explicit request ("detach the contacts table from the search panel
+  // and have it exist on its own") — a fourth top-level view alongside
+  // Desk/interaction-record/Settings, shown in place of all three when the
+  // Home dashboard's "All Contacts" button (`ContactHistoryCard`'s own
+  // `headerTitleBadge`) is clicked. Previously this button opened the
+  // shared right-docked Search panel's own "Contacts" tab, maximized to
+  // full screen (see BEHAVIOR.md §134) — that panel-based approach is
+  // superseded here; `InteractionsListView` now also renders directly in
+  // the content column below, completely independent of `Draggable`/
+  // `ContainerHeader`/`activePanelKey`/`panelFullScreen`.
+  //
+  // Per a further explicit follow-up ("if the agent has all contacts open
+  // and navigates away from home, keep home page (all contacts) at the
+  // last state before navigating away") — this flag is NO LONGER cleared
+  // just because Settings opens or an interaction starts; it only gets
+  // cleared by the All Contacts view's own breadcrumb ("Dashboard" →
+  // explicitly leaving All Contacts for the plain dashboard). Settings/an
+  // active interaction still take visual priority over this view while
+  // they're showing — enforced by the ternary's own `showAllContacts &&
+  // !activeInteraction` condition further down (not by resetting this
+  // flag) — so once Settings closes or the interaction ends, whichever of
+  // them was active before (plain dashboard vs. All Contacts) is exactly
+  // what reappears. `selectedAllContactsRecord` (this view's own selected-
+  // row summary panel, below) is preserved the same way, for the same
+  // reason — the whole point is that "Home" always resumes right where the
+  // agent left it.
+  const [showAllContacts, setShowAllContacts] = useState(false);
+
   // Effect rather than touching every `setActiveInteractionId` call site
-  // individually.
+  // individually. Only closes Settings — does NOT touch `showAllContacts`/
+  // `selectedAllContactsRecord` (see that state's own doc comment above for
+  // why): an active interaction still visually pre-empts All Contacts via
+  // the content-column ternary's own `!activeInteraction` guard, without
+  // discarding All Contacts' own state for when the interaction ends.
   useEffect(() => {
-    if (activeInteractionId) setShowSettings(false);
+    if (activeInteractionId) {
+      setShowSettings(false);
+    }
   }, [activeInteractionId]);
   const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
   const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
@@ -1657,13 +1697,12 @@ export function AgentNextGenPage({
   // DEFAULT on load — an agent can still pin it back from that menu, which
   // then persists for the rest of the session same as any other app.
   const [pinnedKeys, setPinnedKeys] = useState<Record<PanelKey, boolean>>({
-    // Notifications/Schedule swapped per explicit follow-up ("move the
-    // notifications into the app menu list unpinned and pin the Schedule
-    // so it is visible when the app loads") — Notifications no longer
-    // starts pinned (still a normal, clickable "View All Apps" row with
-    // its own `PanelPinButton`, same as Schedule was before this change),
-    // Schedule now starts pinned instead (persistent header icon on load).
-    notif: false,
+    // Notifications re-pinned per explicit follow-up request ("pin
+    // notifications in 2.0 only") — 2.0-only change, so this file's
+    // `notif` flips back to `true`; Premium/Advanced keep the earlier
+    // "Notifications/Schedule swapped" treatment (Notifications unpinned,
+    // a normal "View All Apps" row; Schedule pinned instead).
+    notif: true,
     conversations: true,
     schedule: true,
     screenpop: false,
@@ -1671,7 +1710,12 @@ export function AgentNextGenPage({
     accounts: false,
     tickets: false,
     wem: false,
-    search: true,
+    // Unpinned per explicit follow-up request ("hide the search app") —
+    // fully hidden, not just unpinned (see `HIDDEN_FROM_APPS_MENU` below,
+    // which now also drops "search"), so this starts `false` rather than
+    // moving to the WEM/Schedule/Screen-Pop treatment (unpinned but still
+    // a reachable "View All Apps" row).
+    search: false,
   });
   const [appsMenuOpen, setAppsMenuOpen] = useState(false);
 
@@ -1690,6 +1734,42 @@ export function AgentNextGenPage({
      (Case Details default, Queue drill-down, this) take priority over one
      another. */
   const [selectedContactHistoryEntry, setSelectedContactHistoryEntry] = useState<ContactHistoryEntry | null>(null);
+
+  /* Which row (if any) is selected in the standalone "All Contacts" view's
+     own `InteractionsListView` — per explicit follow-up request ("in the
+     dashboard / contacts table - when one of the rows is clicked, open an
+     interior panel like the ones in My Contact History"), clicking a row
+     there opens a summary panel of its own (a second, independent
+     `InteriorPanel`/`selectedContactHistoryEntry`-style pair, NOT the
+     dashboard's shared one above — the "All Contacts" view is a fully
+     standalone view with no dashboard content mounted alongside it to
+     share that docked slot with, see `showAllContacts`'s own doc comment),
+     instead of immediately opening the row as a live assignment the way it
+     used to (`handleOpenInteractionRow`, still what the panel's own
+     "Re-open"/"Redial" footer button calls). `InteractionHistoryRecord` has
+     no `ContactHistoryEntry`-shaped summary of its own —
+     `buildContactHistoryEntryFromInteractionRecord` (agent-next-gen-
+     interactions-table.tsx) adapts one on the fly so this reuses
+     `ContactHistoryEntryDetail` unchanged, same "Duration"/"Chat Summary"/
+     "Conversation" layout the My Contact History card's own row-click panel
+     already renders. */
+  const [selectedAllContactsRecord, setSelectedAllContactsRecord] = useState<InteractionHistoryRecord | null>(null);
+
+  // Per explicit follow-up request ("below the dashboard / all contacts
+  // page header at tabs for Contacts (Active), Messages and Threads") — a
+  // "(Active)" was dropped from the tab label per a follow-up ("Remove
+  // (Active) from the contacts tab") — the tab is just "Contacts" now.
+  // `TabList` row inside the All Contacts view itself, below its
+  // `PageHeader`, same `TabList`/`Tab`/`activeTab`-string pattern already
+  // used elsewhere in this app (e.g. the Customer Information panel's own
+  // `CUSTOMER_PANEL_TABS`). Only "Contacts" has real content (the
+  // existing `InteractionsListView` table + its own `InteriorPanel`,
+  // below) — "Messages" and "Threads" are placeholders for now (same empty
+  // `<div className="flex-1 overflow-y-auto" />` the Settings view already
+  // uses as its own placeholder body), pending a real data model for
+  // per-message/per-thread rows.
+  const ALL_CONTACTS_TABS = ["Contacts", "Messages", "Threads"] as const;
+  const [allContactsTab, setAllContactsTab] = useState<(typeof ALL_CONTACTS_TABS)[number]>("Contacts");
 
   /* ── Live queue simulation ──
      The home tab's queue widgets should look "live" — wait time ticks up
@@ -1878,16 +1958,19 @@ export function AgentNextGenPage({
   // `Popover` preview of the panel, not the panel itself.
   const [customerInfoPreviewOpen, setCustomerInfoPreviewOpen] = useState(false);
   const customerInfoPreviewTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  // The agent's own last explicit open/closed choice (the header's
-  // "Customer History" toggle icon while pinned, or the panel's own close
-  // button) — per explicit request, a freshly started/quick-dialed/
-  // redialed/reopened interaction's panel now starts in WHICHEVER state the
-  // agent last picked, not hardcoded open every time. A ref, not state: it
-  // only needs to be read at the moment a new interaction launches, never
-  // drives a render itself. Hover-preview opens/closes (only relevant while
-  // unpinned) are deliberately NOT recorded here — those are transient,
-  // not a real choice the agent made.
-  const lastSidePanelOpenChoice = useRef(true);
+  // Per explicit follow-up request ("keep the customer information panel
+  // closed when a new assignment is opened") — reverses an earlier feature
+  // that had every freshly started/quick-dialed/redialed/reopened
+  // interaction's panel open in whichever state the agent last picked (see
+  // this file's own git history for that version's `lastSidePanelOpenChoice`
+  // ref, removed here along with every call site that read it). Every "new
+  // interaction" launch path below now hardcodes `setSidePanelOpen(false)`
+  // instead — a brand-new assignment's Customer Information panel always
+  // starts closed, full stop, regardless of what the agent did on any
+  // other assignment. Switching between two ALREADY-active assignments is
+  // a separate mechanism (`sidePanelStateByAssignmentId`, just below) and
+  // is untouched by this — an assignment the agent already opened the
+  // panel on still shows it open again when switched back to.
 
   // Container-width pin guard — `SidePanel` has no built-in "too narrow,
   // force an overlay" handling of its own (unlike `InteriorPanel`), so this
@@ -1906,7 +1989,8 @@ export function AgentNextGenPage({
   // `sidePanelPinned`'s effective value changes here; `sidePanelOpen` is
   // untouched by width and only ever changes via an explicit agent action
   // (the panel's own close button, the header icon toggle, or a new
-  // interaction applying `lastSidePanelOpenChoice`).
+  // interaction launching — which always starts it closed, per the doc
+  // comment a few lines above).
   const isSidePanelContainerNarrow = sidePanelContainerWidth < 768;
   const effectiveSidePanelPinned = isSidePanelContainerNarrow ? false : sidePanelPinned;
 
@@ -1955,10 +2039,12 @@ export function AgentNextGenPage({
   // Used to force-close (and reset pinned) whenever the agent left the
   // interaction view entirely (dismissing it, or navigating to Desk/
   // Settings/another tab) — removed per explicit request: the panel now
-  // just keeps whatever open/closed state the agent last left it in
-  // (`lastSidePanelOpenChoice` covers re-applying that to the NEXT
-  // interaction too), rather than being force-closed by navigating away
-  // and force-reopened for every new one. Only an explicit close (the
+  // just keeps whatever open/closed state the agent last left it in for
+  // an EXISTING assignment (a NEW one always starts closed regardless —
+  // see the "keep the customer information panel closed when a new
+  // assignment is opened" doc comment above), rather than being force-
+  // closed by navigating away and force-reopened for every new one. Only
+  // an explicit close (the
   // panel's own close button, or the header icon toggle while pinned)
   // changes it now.
 
@@ -1985,7 +2071,6 @@ export function AgentNextGenPage({
   const handleSidePanelClose = () => {
     setSidePanelOpen(false);
     setSidePanelFullScreen(false);
-    lastSidePanelOpenChoice.current = false;
   };
 
   /* Per-assignment memory for the Customer Information panel's open/closed
@@ -2024,9 +2109,10 @@ export function AgentNextGenPage({
      `fullScreen: false` — a fresh assignment should never silently inherit
      full-screen from whatever was active before — but `sidePanelOpen` is
      deliberately left untouched here: each "new interaction" call site
-     below already decides that correctly via `lastSidePanelOpenChoice`
-     right after calling this, and re-deciding it here too would just be a
-     second, competing source of truth for the same value.
+     below already decides that correctly (hardcoded `setSidePanelOpen(false)`
+     — see that doc comment above) right after calling this, and re-deciding
+     it here too would just be a second, competing source of truth for the
+     same value.
 
      Restoring a different assignment's own open/full-screen values here
      used to still visibly play `SidePanel`'s own width/opacity transitions
@@ -2088,11 +2174,7 @@ export function AgentNextGenPage({
   // auto-close the panel still needs a working click target to bring it
   // back, and hovering a plain click button isn't a real affordance there.
   const handleSidePanelIconToggle = () => {
-    setSidePanelOpen((v) => {
-      const next = !v;
-      lastSidePanelOpenChoice.current = next;
-      return next;
-    });
+    setSidePanelOpen((v) => !v);
     // Clicking always opens the real panel from here (this icon only
     // renders while it's closed — see the render site's own comment), which
     // unmounts the hover-preview `Popover` right along with it. Explicitly
@@ -2297,6 +2379,13 @@ export function AgentNextGenPage({
       handlePanelButtonClick("conversations")();
       return;
     }
+    // Per explicit request: launching an interaction closes whichever app
+    // panel (Search/Notifications/Schedule/WEM/etc.) is currently open —
+    // the agent's attention moves to the interaction itself, not left
+    // split with an unrelated panel still docked open. Placed after the
+    // agent+chat early-return above, since that branch isn't really
+    // "launching an interaction" (it explicitly opens a panel instead).
+    setPanelOpen(false);
     const skillLabel = OUTBOUND_CONFIG.skillOptions.find((o) => o.value === selection.skillId)?.label;
     // `phoneOptions` only has a value→label mapping for phone numbers (raw
     // digits → formatted display string) — email/WhatsApp addresses are
@@ -2471,10 +2560,11 @@ export function AgentNextGenPage({
     // open/closed state at all — starting a second interaction with a
     // customer who already has one open leaves the panel exactly as the
     // agent last left it for THAT card, rather than re-applying anything
-    // here. A new one opens/stays closed per `lastSidePanelOpenChoice` —
-    // the agent's own last explicit choice (not hardcoded open) — per
-    // explicit follow-up request.
-    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
+    // here. A new one always starts closed — see the `lastSidePanelOpen
+    // Choice` doc comment (its own declaration site, now removed — see
+    // this file's own git history) for the earlier "remember last choice"
+    // version this reverses, per explicit follow-up request.
+    if (isNewInteraction) setSidePanelOpen(false);
     // Closes `CustomerRowInfoPanel` (the Customers table's own row-detail
     // flyout — a DIFFERENT panel from Customer Information/`setSidePanelOpen`
     // just above, which is the active-interaction record's own panel) any
@@ -2548,6 +2638,9 @@ export function AgentNextGenPage({
   }, []);
 
   const handleQuickDial = (phoneNumber: string) => {
+    // Per explicit request — see `handleStartCall`'s own comment: launching
+    // an interaction closes whichever app panel is currently open.
+    setPanelOpen(false);
     // No contact record for a quick-dialed number — key the card off the
     // number itself so redialing the same number restarts its card rather
     // than stacking up duplicates.
@@ -2594,7 +2687,7 @@ export function AgentNextGenPage({
       );
     });
     switchActiveInteraction(id);
-    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
+    if (isNewInteraction) setSidePanelOpen(false);
   };
 
   /* "Redial" from the home tab's Contact History card — same merge-by-id
@@ -2623,6 +2716,9 @@ export function AgentNextGenPage({
      pre-existing limitation `handleQuickDial` already has for numbers with
      no contact record at all, not something new. */
   const handleRedial = (entry: ContactHistoryEntry) => {
+    // Per explicit request — see `handleStartCall`'s own comment: launching
+    // an interaction closes whichever app panel is currently open.
+    setPanelOpen(false);
     const id = entry.customerId ?? `redial:${entry.id}`;
     // Read before `setInteractions` below — see `handleStartCall`'s own
     // `isNewInteraction` comment for why.
@@ -2667,7 +2763,7 @@ export function AgentNextGenPage({
       );
     });
     switchActiveInteraction(id);
-    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
+    if (isNewInteraction) setSidePanelOpen(false);
   };
 
   // Record header's ad-hoc "+" Add Channel button (`AddChannelAdHocButton`,
@@ -2788,6 +2884,9 @@ export function AgentNextGenPage({
    *  Either way, the agent decides what to do next AFTER seeing the
    *  reopened card, not before. */
   const handleReopenContactHistoryEntry = (entry: ContactHistoryEntry) => {
+    // Per explicit request — see `handleStartCall`'s own comment: launching
+    // an interaction closes whichever app panel is currently open.
+    setPanelOpen(false);
     const id = entry.customerId ?? `history:${entry.id}`;
     const existingInteraction = interactions.find((i) => i.id === id);
     // Restore the exact record `agent-next-gen-case-database.ts` saved for
@@ -2816,7 +2915,7 @@ export function AgentNextGenPage({
       if (storedRecord) {
         setInteractions((prev) => [...prev, storedRecord]);
         switchActiveInteraction(storedRecord.id);
-        setSidePanelOpen(lastSidePanelOpenChoice.current);
+        setSidePanelOpen(false);
         return;
       }
     }
@@ -2937,7 +3036,7 @@ export function AgentNextGenPage({
       });
     });
     switchActiveInteraction(id);
-    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
+    if (isNewInteraction) setSidePanelOpen(false);
   };
 
   /* "Unassign & Dismiss" — `InteractionNavItem` itself decides which of
@@ -3722,7 +3821,7 @@ export function AgentNextGenPage({
     });
     switchActiveInteraction(id);
     if (isNewInteraction) {
-      setSidePanelOpen(lastSidePanelOpenChoice.current);
+      setSidePanelOpen(false);
       // Per explicit request ("when a new interaction comes in - if the
       // left nav is closed, open it"), scoped to genuinely INBOUND arrivals
       // only — a notification represents work that landed on its own, not
@@ -3753,6 +3852,9 @@ export function AgentNextGenPage({
   // `customerId` in the first place, so this reliably finds the same
   // record every row was built from without a second, parallel id scheme.
   const handleOpenInteractionRow = (record: InteractionHistoryRecord) => {
+    // Per explicit request — see `handleStartCall`'s own comment: launching
+    // an interaction closes whichever app panel is currently open.
+    setPanelOpen(false);
     const customer = CREATE_NEW_CUSTOMERS.find((c) => c.customerId === record.caseId) ?? CREATE_NEW_CUSTOMERS[0];
     const id = customer.id;
     // Read before `setInteractions` below — see `handleStartCall`'s own
@@ -3819,7 +3921,7 @@ export function AgentNextGenPage({
       );
     });
     switchActiveInteraction(id);
-    if (isNewInteraction) setSidePanelOpen(lastSidePanelOpenChoice.current);
+    if (isNewInteraction) setSidePanelOpen(false);
   };
 
   // Notifications' real content — same `useAgentNotificationsContent`
@@ -3997,6 +4099,16 @@ export function AgentNextGenPage({
       onRowClick: () => {},
       searchQuery: customerSearchQuery,
       onSearchChange: setCustomerSearchQuery,
+      // `searchSubmitted`/`onSearchSubmittedChange` only ever matter to
+      // `SimpleCustomerSearchBody` (see that field's own doc comment,
+      // agent-next-gen-search-panel.tsx) — Agent Workspace 2.0 doesn't opt
+      // into `simpleCustomerSearch` (it's unreachable here regardless,
+      // per this page's own Search app-header icon being hidden — see
+      // BEHAVIOR.md §139), so these are inert stubs, required only because
+      // they're non-optional on the shared `SearchPanelCustomersProps` type
+      // Premium/Advanced's own bags also satisfy.
+      searchSubmitted: false,
+      onSearchSubmittedChange: () => {},
       sortKey: customerSortKey,
       sortDir: customerSortDir,
       onSort: handleCustomerSort,
@@ -4007,6 +4119,14 @@ export function AgentNextGenPage({
       onNextRow: () => handleCustomerRowNav(1),
       hasPreviousRow: selectedCustomerIndex > 0,
       hasNextRow: selectedCustomerIndex !== -1 && selectedCustomerIndex < customerSortedRows.length - 1,
+      // Required field, added when `panelTabs` was threaded through
+      // explicitly instead of hard-coded inside the hook (see that field's
+      // own doc comment, agent-next-gen-search-panel.tsx) — this page's own
+      // Search app is fully hidden from the UI (BEHAVIOR.md §139), so this
+      // whole `customers` bag is dead/unreachable code at runtime, but
+      // still has to type-check; matches this tier's own reduced tab set
+      // used elsewhere in this file.
+      panelTabs: AGENT_WORKSPACE_CUSTOMER_PANEL_TABS,
     },
   });
   const contentByPanelKey: Record<PanelKey, EmbeddablePanelContent> = {
@@ -4032,11 +4152,16 @@ export function AgentNextGenPage({
   // `panelOpen`) so this doesn't stay "true" for a panel that's actually
   // closed.
   const isCombinedPanelMode = isNavNarrow && panelOpen && panelVariant === "docked" && !!activePanelContent;
+  // `showAllContacts` alone isn't enough once it stops being cleared on
+  // interaction start (see that state's own doc comment) — `!activeInteraction`
+  // keeps this label matching the ternary branch actually rendered below.
   const mainRegionTabLabel = showSettings
     ? "Settings"
-    : activeInteraction
-      ? `${activeInteraction.customerName ?? "Customer"} (${activeInteraction.customerId})`
-      : "Home";
+    : showAllContacts && !activeInteraction
+      ? "All Contacts"
+      : activeInteraction
+        ? `${activeInteraction.customerName ?? "Customer"} (${activeInteraction.customerId})`
+        : "Home";
 
   // Clicking a button: re-clicking the CURRENTLY showing one closes the
   // shared container outright. Otherwise, if it's closed, open it docked
@@ -4058,6 +4183,18 @@ export function AgentNextGenPage({
     // clicking a header icon while narrow would silently open the panel
     // behind whatever the main tab currently shows, with no visible change.
     if (isNavNarrow) setNarrowActiveRegion("panel");
+  };
+
+  // Per explicit follow-up request ("detach the contacts table from the
+  // search panel and have it exist on its own") — wired to
+  // `ContactHistoryCard`'s own `onOpenAllContacts` prop below. The original
+  // version of this handler opened the shared right-docked Search panel's
+  // own "Contacts" tab, maximized to full screen (see BEHAVIOR.md §134);
+  // this follow-up replaces that entirely with the new `showAllContacts`
+  // top-level view (declared next to `showSettings` above) — no panel
+  // involved at all anymore.
+  const handleOpenAllContacts = () => {
+    setShowAllContacts(true);
   };
 
   // "Selected" treatment for whichever AppHeader icon button currently owns
@@ -4123,7 +4260,18 @@ export function AgentNextGenPage({
   // per a follow-up explicit request, "Add WEM to the top right app area")
   // — it's now pinned (see `pinnedKeys` above) AND listed here, a fully
   // reachable, discoverable app like Notifications/Agent Chat/etc.
-  const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["customers", "accounts", "tickets"];
+  //
+  // "search" added per explicit follow-up request ("hide the search app",
+  // clarified as "Fully hidden" — same treatment as Customers/Accounts/
+  // Tickets, not the WEM-style unpin-only). Its own `pinnedKeys.search` is
+  // also now `false` above, so this is now completely unreachable from the
+  // AppHeader — the `activePanelKey === "search"` render branches
+  // elsewhere in this file (main content area / interior panel) become
+  // dead code that never fires, left in place rather than deleted since
+  // they're harmless and the underlying `useSearchPanelContent` hook this
+  // page's own `searchContent` still calls stays valid for a future
+  // request to re-surface it.
+  const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["customers", "accounts", "tickets", "search"];
   const appsMenuItems: MenuEntry[] = panelOrder.filter((key: PanelKey) => !HIDDEN_FROM_APPS_MENU.includes(key)).map((key) => {
     const { label, icon: KeyIcon } = PANEL_KEY_METADATA[key];
     return {
@@ -4407,6 +4555,18 @@ export function AgentNextGenPage({
               </>
             }
             onClose={() => setPanelOpen(false)}
+            // Per explicit request ("update the panel close buttons to be
+            // panel icons instead of 'x' icons for all app panels (top
+            // right panels)") — matches `PanelRightClose`'s own established
+            // use as the "closing a docked panel" glyph elsewhere in this
+            // app (`CustomerRowInfoPanel`/`CustomerInformationSidePanel`,
+            // agent-next-gen-customer-info-panel.tsx), rather than
+            // `ContainerHeader`'s own generic default `X`. Deliberately NOT
+            // applied to `CustomerFullScreenTabContent`'s own hand-rolled
+            // close button (that one stays a plain `X`, per its own explicit
+            // "keep them as close icons when they are open as tabs" carve-
+            // out) — this panel and that tab read as different affordances.
+            closeIcon={<PanelRightClose className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />}
           />
           {activePanelContent.headerContent && (
             // `activePanelKey === "search"` skips this wrapper ENTIRELY
@@ -4554,6 +4714,9 @@ export function AgentNextGenPage({
           setPanelFullScreen(false);
           setPanelOpen(false);
         }}
+        // Same panel-icon swap as the docked variant's own `ContainerHeader`
+        // above — see that call site's own doc comment.
+        closeIcon={<PanelRightClose className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />}
       />
       {activePanelContent.headerContent && (
         // See the docked variant's own matching wrapper (above) for why
@@ -4805,8 +4968,18 @@ export function AgentNextGenPage({
         <LeftNav
           items={buildNavItems(
             Boolean(activeInteraction),
+            // Per explicit follow-up request, Home no longer resets
+            // `showAllContacts`/`selectedAllContactsRecord` — see that
+            // state's own doc comment for why "Home" now always resumes
+            // whatever was showing there before the agent navigated away
+            // (plain dashboard or All Contacts), instead of forcing back to
+            // the plain dashboard every time.
             () => { switchActiveInteraction(null); setShowSettings(false); },
             showSettings,
+            // Same follow-up — opening Settings no longer discards All
+            // Contacts' own state either; it just takes visual priority
+            // while showing (this ternary branch is checked first), and
+            // All Contacts reappears exactly as left once Settings closes.
             () => { setShowSettings(true); switchActiveInteraction(null); }
           )}
           open={navOpen}
@@ -5318,6 +5491,157 @@ export function AgentNextGenPage({
                   {showPageHeader && <PageHeader title="Settings" />}
                   <div className="flex-1 overflow-y-auto" />
                 </div>
+              ) : showAllContacts && !activeInteraction ? (
+                // ── All Contacts — per explicit follow-up request ("detach
+                // the contacts table from the search panel and have it
+                // exist on its own"), a standalone, full-container view of
+                // `InteractionsListView` (the agent's own interaction
+                // history — same component the shared Search panel's
+                // "Contacts" tab already renders, see BEHAVIOR.md §133/
+                // §134 for that original panel-based entry point, still
+                // reachable separately via the header's own Search icon).
+                // `&& !activeInteraction` — per a further follow-up ("keep
+                // home page (all contacts) at the last state before
+                // navigating away"), `showAllContacts` is no longer cleared
+                // when an interaction starts, so this guard is what actually
+                // lets the active-interaction branch above take priority
+                // instead of this one (see `showAllContacts`'s own doc
+                // comment for the full rationale).
+                // Mounted directly with NO extra padding/scroll wrapper
+                // around it — `InteractionsListView`'s own root
+                // (`flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden`)
+                // already manages its own toolbar/table/footer layout and
+                // internal scrolling, same as it does inside the Search
+                // panel's body; wrapping it in another `overflow-y-auto`
+                // div here would just fight that. `PageHeader`'s own
+                // `breadcrumb` prop (not a hand-rolled `Breadcrumb` — see
+                // that component's own "composition over reimplementation"
+                // doc comment, page-header.tsx) supplies "Dashboard / All
+                // Contacts": "Dashboard" is the parent crumb, wired back to
+                // `setShowAllContacts(false)`; `title="All Contacts"` is
+                // the current page. Takes priority over Settings/an active
+                // interaction the same way those two already do over each
+                // other — see `showAllContacts`'s own doc comment above for
+                // how the four views stay mutually exclusive. `key=
+                // "all-contacts"` forces a fresh mount on every switch into
+                // this view, same reasoning as the other branches' own keys.
+                <div key="all-contacts" className="flex flex-1 flex-col min-w-0 overflow-hidden animate-in fade-in-0 duration-200">
+                  {showPageHeader && (
+                    <PageHeader
+                      title="All Contacts"
+                      breadcrumb={{
+                        label: "Dashboard",
+                        onClick: () => {
+                          setShowAllContacts(false);
+                          setSelectedAllContactsRecord(null);
+                        },
+                      }}
+                    />
+                  )}
+                  {/* Per explicit follow-up request ("below the dashboard /
+                      all contacts page header at tabs for Contacts
+                      (Active), Messages and Threads") — see
+                      `allContactsTab`'s own doc comment above for why only
+                      "Contacts" has real content so far. */}
+                  <TabList className="px-4" overflowMenu>
+                    {ALL_CONTACTS_TABS.map((label) => (
+                      <Tab
+                        key={label}
+                        active={allContactsTab === label}
+                        onClick={() => setAllContactsTab(label)}
+                      >
+                        {label}
+                      </Tab>
+                    ))}
+                  </TabList>
+                  {allContactsTab !== "Contacts" ? (
+                    // Placeholder — see `allContactsTab`'s own doc comment.
+                    <div className="flex-1 overflow-y-auto" />
+                  ) : (
+                  /* Body row: table + this view's OWN right-docked
+                      `InteriorPanel` — a second, independent instance from
+                      the dashboard's own (further below), since this whole
+                      view is now a standalone container with nothing else
+                      to share that docked slot with. Per explicit follow-up
+                      request ("when one of the rows is clicked, open an
+                      interior panel like the ones in My Contact History"),
+                      a row click here no longer jumps straight into a live
+                      assignment (`handleOpenInteractionRow`, still what
+                      this panel's own footer button calls) — it opens this
+                      summary first, same "Duration"/notes box + synthesized
+                      Conversation section `ContactHistoryEntryDetail`
+                      already renders for a My Contact History row (see
+                      `selectedContactHistoryEntry`'s own doc comment further
+                      up, and `buildContactHistoryEntryFromInteractionRecord`,
+                      agent-next-gen-interactions-table.tsx, for how a table
+                      row is adapted into that same shape). */
+                  <div className="relative flex flex-1 min-h-0 overflow-hidden">
+                    <InteractionsListView
+                      onAddToast={addToast}
+                      // Per explicit follow-up request ("when the contact
+                      // row is selected show it as active and allow it to
+                      // close the panel on toggle") — clicking the row
+                      // that's ALREADY selected now closes the panel
+                      // instead of just reopening the same one; clicking
+                      // any other row still swaps to it as before.
+                      // `activeRecordId` (below) is what makes that row
+                      // render as active in the table itself — see its own
+                      // doc comment (agent-next-gen-interactions-table.tsx).
+                      onOpenInteraction={(record) =>
+                        setSelectedAllContactsRecord((prev) => (prev?.id === record.id ? null : record))
+                      }
+                      activeRecordId={selectedAllContactsRecord?.id ?? null}
+                    />
+                    {showInteriorPanel && (
+                      <InteriorPanel
+                        side="right"
+                        open={Boolean(selectedAllContactsRecord)}
+                        headerTitle={selectedAllContactsRecord?.customerName}
+                        headerSubhead={selectedAllContactsRecord?.skill}
+                        onClose={() => setSelectedAllContactsRecord(null)}
+                        // Same mutually-exclusive Redial/Re-open convention
+                        // `selectedContactHistoryEntry`'s own footer already
+                        // uses (voice-only gets "Redial") — both just call
+                        // `handleOpenInteractionRow`, the one handler this
+                        // table's rows have always used to actually open a
+                        // live assignment, then close this summary panel.
+                        footer={
+                          selectedAllContactsRecord ? (
+                            selectedAllContactsRecord.type === "voice" ? (
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  handleOpenInteractionRow(selectedAllContactsRecord);
+                                  setSelectedAllContactsRecord(null);
+                                }}
+                              >
+                                <PhoneOutgoing className="h-3.5 w-3.5" strokeWidth={1.5} />
+                                Redial
+                              </Button>
+                            ) : (
+                              <Button
+                                onClick={() => {
+                                  handleOpenInteractionRow(selectedAllContactsRecord);
+                                  setSelectedAllContactsRecord(null);
+                                }}
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.5} />
+                                Takeover Assignment
+                              </Button>
+                            )
+                          ) : undefined
+                        }
+                      >
+                        {selectedAllContactsRecord && (
+                          <ContactHistoryEntryDetail
+                            entry={buildContactHistoryEntryFromInteractionRecord(selectedAllContactsRecord)}
+                          />
+                        )}
+                      </InteriorPanel>
+                    )}
+                  </div>
+                  )}
+                </div>
               ) : activeInteraction ? (
                 // ── Active interaction's detail page — replaces the Desk
                 // dashboard the moment a new assignment is started/quick-
@@ -5631,7 +5955,7 @@ export function AgentNextGenPage({
                               every other button in this header cluster, and
                               the same shape the plain `getHeaderAction` "+"
                               trigger Premium/Advanced use, already has. */}
-                          {showAddChannelActions && activeChannel && (
+                          {SHOW_ADD_CHANNEL_HEADER_BUTTON && showAddChannelActions && activeChannel && (
                             <AddChannelAdHocButton
                               onLaunch={handleAddAdHocChannel}
                               className="h-8 w-8 px-0 bg-lyra-bg-primary text-lyra-fg-on-primary hover:bg-lyra-state-hover-primary active:bg-lyra-state-pressed-primary"
@@ -5717,6 +6041,9 @@ export function AgentNextGenPage({
                                 recordDraft={activeCustomerRecordDraft}
                                 overviewEditing={activeCustomerOverviewEditing}
                                 onOverviewEditingChange={setActiveCustomerOverviewEditing}
+                                onStartInteraction={(contact, channel, phone, skillId) =>
+                                  handleStartCall({ contact, channel, phone, skillId })
+                                }
                               />
                             }
                           >
@@ -5799,7 +6126,19 @@ export function AgentNextGenPage({
                         bug independent of how the width is measured, so this
                         is needed here regardless of the `@container`-vs-
                         `ResizeObserver` approach. */}
-                    {showChannelTabRow && (
+                    {/* Per explicit follow-up request ("if only one channel
+                        is open do not display tabs - only show tabs when
+                        more than one channel is open") — reverses §40's own
+                        change (`showChannelTabRow` widened to `!!activeInteraction`
+                        so a single-channel interaction still showed its own
+                        one-tab row). That widening is now narrowed back down
+                        just at this render site, ANDing in the same
+                        `activeInteraction.threads.length >= 2` check the
+                        record-header subtitle ternary already uses on its
+                        own (below) — `showChannelTabRow` itself is left
+                        untouched since nothing else reading it needs to
+                        change (see that const's own doc comment). */}
+                    {showChannelTabRow && activeInteraction.threads.length >= 2 && (
                     <div className="flex min-w-0 border-b border-lyra-border-subtle bg-lyra-bg-surface-base px-3">
                       {/* Now just the channel `TabList` on its own — the
                           Customer Information toggle icon/divider that used
@@ -6502,10 +6841,14 @@ export function AgentNextGenPage({
                           bordered={false}
                           titleSize="2xl"
                           actions={
-                            // Personal Queue chip — unchanged content/
-                            // color-tiers/click handler from the prior
-                            // fixed-header version's own `actions` (see
-                            // that revision's doc comment, still in git
+                            // Personal Queue chip (now labeled "My
+                            // Assignment Queue" per later explicit request —
+                            // only the visible text changed, everything
+                            // else below is still the "unchanged content/
+                            // color-tiers/click handler" this comment
+                            // originally described) — carried over from the
+                            // prior fixed-header version's own `actions`
+                            // (see that revision's doc comment, still in git
                             // history, for the full rationale). Only the
                             // Connect Agent Leg block beneath it (in the
                             // old `flex-col items-end gap-1` wrapper) was
@@ -6525,7 +6868,7 @@ export function AgentNextGenPage({
                                     : "bg-lyra-status-success-subtle text-lyra-status-success-strong hover:bg-lyra-status-success-subtle hover:opacity-80"
                                 )}
                               >
-                                Personal Queue: {interactions.length > 0 ? interactions.length : "Empty"}
+                                My Assignment Queue: {interactions.length > 0 ? interactions.length : "Empty"}
                                 {hasBreachedSlaAssignment && (
                                   <CircleAlert className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
                                 )}
@@ -6621,6 +6964,7 @@ export function AgentNextGenPage({
                         // doc comment (agent-next-gen-contact-history.tsx).
                         // Premium/Advanced don't pass this.
                         hideCustomerNames
+                        onOpenAllContacts={handleOpenAllContacts}
                       />
                     </div>
 
@@ -6714,7 +7058,7 @@ export function AgentNextGenPage({
                             }}
                           >
                             <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.5} />
-                            Re-open
+                            Takeover Assignment
                           </Button>
                         )
                       ) : undefined
@@ -7019,6 +7363,9 @@ export function AgentNextGenPage({
                   // panel even if the agent had it closed; a no-op if it
                   // was already open.
                   onCopilotFirstAvailable={() => setSidePanelOpen(true)}
+                  onStartInteraction={(contact, channel, phone, skillId) =>
+                    handleStartCall({ contact, channel, phone, skillId })
+                  }
                 />
                 </div>
               )}

@@ -73,7 +73,10 @@ import {
   INTERACTION_OWNERS,
 } from "@/components/agent-next-gen-interaction-dashboard";
 import { OUTBOUND_SKILLS } from "@/components/agent-next-gen-outbound-data";
-import { SESSION_STATUS_TO_CONTACT_HISTORY_VARIANT } from "@/components/agent-next-gen-contact-history";
+import {
+  SESSION_STATUS_TO_CONTACT_HISTORY_VARIANT,
+  type ContactHistoryEntry,
+} from "@/components/agent-next-gen-contact-history";
 import { nextCustomerSortDirection, CURRENT_AGENT_NAME } from "@/components/agent-next-gen-shared-utils";
 import { cn } from "@/lib/utils";
 import {
@@ -227,6 +230,73 @@ function buildInteractionHistory(count: number): InteractionHistoryRecord[] {
       tags: [INTERACTION_TAGS_POOL[i % INTERACTION_TAGS_POOL.length], ...(i % 3 === 0 ? [INTERACTION_TAGS_POOL[(i + 2) % INTERACTION_TAGS_POOL.length]] : [])],
     };
   });
+}
+
+/** Relative "Nm ago"/"Nh ago"/"Nd ago" string for a row's real
+ *  `createDateValue` — the same style of string every hand-authored
+ *  `ContactHistoryEntry.timeAgo` in this app already uses (e.g. "34m ago",
+ *  "2h ago"), computed live here since `InteractionHistoryRecord` has no
+ *  such field of its own (just the real `Date`). Used only by
+ *  `buildContactHistoryEntryFromInteractionRecord` below. */
+function formatInteractionRecordTimeAgo(date: Date): string {
+  const diffMs = Date.now() - date.getTime();
+  const minutes = Math.max(0, Math.floor(diffMs / 60000));
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+/**
+ * Adapts a row from this table into `ContactHistoryEntry`'s own shape
+ * (agent-next-gen-contact-history.tsx) — per explicit follow-up request
+ * ("in the dashboard / contacts table - when one of the rows is clicked,
+ * open an interior panel like the ones in My Contact History"), this lets
+ * a click on this table's row reuse that file's existing
+ * `ContactHistoryEntryDetail` summary component (Duration/Chat Summary box
+ * + synthesized Conversation/Transcript/Body section) unchanged, rather
+ * than building a second, parallel detail view for a data shape that's
+ * already 90% the same information under different field names —
+ * `SESSION_STATUS_TO_CONTACT_HISTORY_VARIANT` already covers every status
+ * this table's own `InteractionHistoryStatus` can produce (both pull from
+ * the same Open/Pending/Escalated/Resolved/Closed vocabulary), and
+ * `record.type` (email/chat/voice) is already a strict subset of
+ * `ChannelType`.
+ *
+ * Field mapping: `statusLabel`/`caseId`/`skillName` map straight across
+ * (`record.status`/`caseId`/`skill`); `description` uses `record.context`
+ * (the same short one-line case summary `ContactHistoryEntry.description`
+ * is), `duration` uses `record.resolutionTime` ("—" while still open, same
+ * placeholder `ContactHistoryEntryDetail` already renders as plain text
+ * either way), and `timeAgo` is computed fresh from the row's real
+ * `createDateValue` via `formatInteractionRecordTimeAgo` above (this
+ * table's own rows carry a real `Date`, unlike `ContactHistoryEntry`'s
+ * hand-authored `timeAgo` strings). `redial` is true only for `voice` rows,
+ * matching every other `ContactHistoryEntry` consumer's own "Redial is
+ * voice-only" convention. `messages`/`email`/`phone`/`whatsappHandle` are
+ * left undefined — `ContactHistoryEntryDetail` already falls back to its
+ * own synthesized `buildContactHistoryMessages`/`buildContactHistoryEmailBody`
+ * for every entry with no real transcript behind it, the same fallback
+ * every hand-authored Contact History row already relies on.
+ */
+export function buildContactHistoryEntryFromInteractionRecord(record: InteractionHistoryRecord): ContactHistoryEntry {
+  return {
+    id: record.id,
+    name: record.customerName,
+    statusLabel: record.status,
+    statusVariant: SESSION_STATUS_TO_CONTACT_HISTORY_VARIANT[record.status] ?? "neutral",
+    redial: record.type === "voice",
+    description: record.context,
+    caseId: record.caseId,
+    skillName: record.skill,
+    channelType: record.type,
+    channelLabel: record.channel,
+    timeAgo: formatInteractionRecordTimeAgo(record.createDateValue),
+    duration: record.resolutionTime,
+    customerId: record.caseId,
+  };
 }
 
 // Seed data only — `InteractionsListView` copies this into its own `records`
@@ -605,9 +675,22 @@ export interface InteractionsListViewProps {
    *  without a crash — a row click just silently no-ops in that case, same
    *  as `onAddToast` above. */
   onOpenInteraction?: (record: InteractionHistoryRecord) => void;
+  /** Per explicit follow-up request ("when the contact row is selected show
+   *  it as active and allow it to close the panel on toggle") — the id of
+   *  whichever record the CALLER currently has a summary panel open for
+   *  (`AgentNextGenPage.tsx`'s own `selectedAllContactsRecord`, All
+   *  Contacts view — see BEHAVIOR.md §136), so that row can be shown as
+   *  active here even though the panel itself lives outside this
+   *  component. Deliberately a separate id rather than reusing
+   *  `selectedIds` (the bulk-actions checkbox selection, above) — the two
+   *  are unrelated concepts that can be true independently (a row can be
+   *  checkbox-selected for a bulk action while a DIFFERENT row's panel is
+   *  open) and shouldn't visually collide. Optional/`null`-safe so this
+   *  component still renders standalone with no row ever marked active. */
+  activeRecordId?: string | null;
 }
 
-export function InteractionsListView({ onAddToast, onOpenInteraction }: InteractionsListViewProps = {}) {
+export function InteractionsListView({ onAddToast, onOpenInteraction, activeRecordId = null }: InteractionsListViewProps = {}) {
   // Own copy of the seed data — mutated in place by the bulk-actions
   // toolbar's three "apply to every selected row" handlers below (Assign to
   // Me/Assign to Others/Change Status). `INITIAL_INTERACTION_HISTORY_RECORDS`
@@ -963,7 +1046,13 @@ export function InteractionsListView({ onAddToast, onOpenInteraction }: Interact
               <TableRow
                 key={record.id}
                 className="group cursor-pointer"
-                data-state={selectedIds.has(record.id) ? "selected" : undefined}
+                // Either the bulk-actions checkbox selection OR this row
+                // being the one whose summary panel is currently open (see
+                // `activeRecordId`'s own doc comment above) shows the same
+                // `data-state="selected"` highlight `TableRow` already
+                // renders for checkbox selection — no new visual style
+                // needed, just a second condition feeding the existing one.
+                data-state={selectedIds.has(record.id) || activeRecordId === record.id ? "selected" : undefined}
                 onClick={() => onOpenInteraction?.(record)}
               >
                 <TableCell className="w-[40px] shrink-0" onClick={(e: React.MouseEvent) => e.stopPropagation()}>

@@ -972,6 +972,7 @@ export function ContactHistoryCard({
   selectedEntryId,
   historyByRange,
   hideCustomerNames,
+  onOpenAllContacts,
 }: {
   /** Fired by clicking anywhere on a row — opens this entry's summary in
    *  `AgentNextGenPage`'s shared right-docked `InteriorPanel` slot (main
@@ -1004,6 +1005,18 @@ export function ContactHistoryCard({
    * request ("keep as-is in advanced and premium").
    */
   hideCustomerNames?: boolean;
+  /** Per explicit request ("add a button to My Contact History that says
+   *  'All Contacts' and when clicked take over the entire home container
+   *  with the table in the contacts panel") — fired by the new "All
+   *  Contacts" button in this card's own header (below). Each of the 3
+   *  page files wires this to the same open-then-maximize sequence its
+   *  own shared-panel "Search" header button + "Full Screen" action
+   *  already provide (`handlePanelButtonClick("search")` +
+   *  `setPanelFullScreen(true)`), combined into one click — see each
+   *  page's own `handleOpenAllContacts` for the real implementation.
+   *  Omit to render the card with no such button at all (no consumer
+   *  currently does this — all 3 tiers pass it). */
+  onOpenAllContacts?: () => void;
 }) {
   // Default "Last 48 Hours" per explicit request (was "Today") — see
   // `ContactHistoryDateFilterChip`'s own `value` state above for why this
@@ -1064,8 +1077,44 @@ export function ContactHistoryCard({
   return (
     <DashboardCard
       variant="neutral-subtle"
+      // Establishes the CSS container-query boundary `headerActionsWrap`
+      // below relies on (`.lyra-container-header-query-boundary`,
+      // lyra-tokens.css) — per explicit follow-up request ("I want the
+      // query to be not on the widget itself but the parent container"),
+      // after the shared threshold bump to 768px (raised for THIS card)
+      // leaked into Performance/Productivity's own narrower `DateFilterChip`
+      // collapse, since they used to share the exact same boundary
+      // automatically via `actionsWrap` alone. Now opt-in per card, applied
+      // here on the card's own root rather than inside `ContainerHeader`
+      // itself — see that class's own doc comment for the full story.
+      className="lyra-container-header-query-boundary"
       headerTitle="My Contact History"
       headerIcon={<Icon icon={History} size="md" background="info" shape="rounded" decorative />}
+      // "All Contacts" — per explicit follow-up request (a reference
+      // screenshot showing it as a small outline pill sitting immediately
+      // after the title, not out with search/date-filter on the right) —
+      // moved from `headerActions` into `headerTitleBadge`, the slot
+      // `ContainerHeader` renders inline right after the title text itself
+      // (see that component's own doc comment) rather than a one-off
+      // wrapper here. Omitted entirely when the prop isn't passed, same as
+      // every other optional action in this header.
+      headerTitleBadge={
+        onOpenAllContacts && (
+          // `size="md"` (32px) per follow-up request ("make the all
+          // contacts button the same height as the search and date filter
+          // chips") — matches `SearchInput`'s own `size="sm"` (32px,
+          // confusingly a different name for the same height) and
+          // `ContactHistoryDateFilterChip`'s default `filterChipVariants`
+          // size (also 32px), all three of which sit in this same header
+          // row. `variant="outline"` — briefly tried `variant="default"`
+          // (primary-colored) per the same request, reverted one turn
+          // later ("make it an outline button - it's too prominent") back
+          // to the original outline treatment, keeping only the height fix.
+          <Button variant="outline" size="md" onClick={onOpenAllContacts}>
+            All Contacts
+          </Button>
+        )
+      }
       headerActionsWrap
       // Two real `SearchInput`s, both bound to the same `searchQuery` state
       // — one lives in `headerActions` (visible ≥480px, inline beside the
@@ -1296,11 +1345,29 @@ export function ContactHistoryEntryDetail({ entry }: { entry: ContactHistoryEntr
   // any dismissed row whose primary channel just never had real messages —
   // e.g. voice).
   const messages = entry.messages ?? buildContactHistoryMessages(entry);
+  const ChannelIcon = CONTACT_HISTORY_CHANNEL_ICON[entry.channelType];
   return (
     <div className="flex flex-col gap-3 p-4">
-      <span className="lyra-body-sm text-lyra-fg-secondary">
-        {[entry.statusLabel, displayIdentity, entry.timeAgo].filter(Boolean).join(" · ")}
-      </span>
+      {/* Per explicit follow-up request ("add the channel chip to the
+          right of the Resolved | Name | Time row in the contact history
+          panels") — the exact same channel-type `Tag` pill the list row
+          above already renders (`CONTACT_HISTORY_CHANNEL_TAG_VARIANT`/
+          `CONTACT_HISTORY_CHANNEL_ICON`, this file's own top-of-file
+          constants — see that row's own doc comment), just placed here
+          on this summary line instead of stacked in its own trailing
+          column, since this line has no row layout of its own to stack
+          against. */}
+      <div className="flex items-center justify-between gap-2">
+        <span className="lyra-body-sm text-lyra-fg-secondary">
+          {[entry.statusLabel, displayIdentity, entry.timeAgo].filter(Boolean).join(" · ")}
+        </span>
+        <Tag
+          label={entry.channelLabel}
+          variant={CONTACT_HISTORY_CHANNEL_TAG_VARIANT[entry.channelType]}
+          shape="pill"
+          icon={<ChannelIcon strokeWidth={1.5} />}
+        />
+      </div>
       <div className="rounded-lyra-md border border-lyra-border-subtle bg-lyra-bg-control-subtle overflow-hidden flex flex-col gap-3 p-4">
         <div className="flex flex-col gap-1 min-w-0">
           <Label label="Duration" />
