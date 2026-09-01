@@ -42,17 +42,9 @@ import {
   type ToastItem,
   SearchInput,
   ChatMessage,
+  InteriorPanel,
 } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_CUSTOMERS, type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
-// EXPERIMENTAL: `InteriorPanel` sourced from a local, agent-next-gen-v2-only
-// fork instead of `@nicecxone/lyra-ui` — per explicit request to trial a
-// 1440px absolute-overlay breakpoint (was 1024px) and remove the automatic
-// full-screen breakpoint entirely, without changing the shared lyra-ui
-// component (and therefore agent-next-gen-v1/anything else consuming it)
-// until/unless the trial is kept. See that file's own top-of-file doc
-// comment for the full reasoning; revert this import to
-// `@nicecxone/lyra-ui` to go back to the real component.
-import { InteriorPanel } from "@/components/agent-next-gen-interior-panel-1440-test";
 import { type Thread } from "@/components/agent-next-gen-interaction-dashboard";
 import {
   splitCustomerName,
@@ -3986,6 +3978,8 @@ export function CustomerRowInfoPanel({
   tabs,
   onAddToast,
   onOpenFullScreenTab,
+  hideFullScreenToggle,
+  hidePrevNext,
 }: {
   /** The clicked customer row, or `null` when the panel is closed. Kept as
    *  the single source of both "is it open" (`open={row !== null}`) and
@@ -4035,6 +4029,39 @@ export function CustomerRowInfoPanel({
    * request's own wording) rather than changing this panel's default
    * behavior for every tier. */
   onOpenFullScreenTab?: (row: CustomerListRecord) => void;
+  /**
+   * Per explicit request ("remove the pop out icon to make it a tab") —
+   * suppresses `InteriorPanel`'s own built-in full-screen toggle
+   * entirely, on top of `onOpenFullScreenTab`'s existing suppression (see
+   * that prop's own doc comment): where `onOpenFullScreenTab` swaps the
+   * built-in toggle for a custom "Open Tab" button, this instead renders
+   * NEITHER — no expand/pop-out affordance of any kind, just a plain
+   * docked panel (prev/next/Add Channel/kebab/close). Built for Agent
+   * Workspace Advanced's own Search panel Customers sub-tab (see that
+   * call site, agent-next-gen-search-panel.tsx) — that tier has no
+   * customer full-screen tabs to open (`onOpenFullScreenTab` is Premium-
+   * only) and no in-place full-screen mode wanted either, so this row's
+   * detail panel should just stay a fixed, right-docked panel. Default
+   * `false` — every other existing consumer keeps its current
+   * `allowFullScreen={!onOpenFullScreenTab}` behavior unchanged.
+   */
+  hideFullScreenToggle?: boolean;
+  /**
+   * Per explicit request ("hide the next/prev in the customer info cards
+   * for advanced and premium in the customer table view") — hides the
+   * Previous/Next customer chevron buttons in the header actions row
+   * below. Originally scoped to just the desk-tab Customers table's own
+   * `CustomerRowInfoPanel` call sites in `AgentWorkspace2WithDeskPage.tsx`
+   * (Premium) and `AgentWorkspaceAdvancedPage.tsx` (Advanced); per an
+   * immediate follow-up ("they are still there in advanced"), also passed
+   * from the Search panel's own Customers sub-tab call site (Advanced
+   * only, agent-next-gen-search-panel.tsx) — so in practice every
+   * `CustomerRowInfoPanel` instance in Advanced now hides prev/next, and
+   * Premium's one desk-tab instance does too (Premium's Search panel has
+   * no Customers tab at all). Default `false` — every other existing
+   * consumer keeps showing prev/next unchanged.
+   */
+  hidePrevNext?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState(() => CUSTOMER_PANEL_TABS.indexOf("Overview"));
   // Hard filter, not conditional like `CustomerInformationSidePanel`'s own
@@ -4129,6 +4156,39 @@ export function CustomerRowInfoPanel({
       side="right"
       open={row !== null}
       onClose={onClose}
+      // Per explicit request ("for the customer table interior customer
+      // information panels use the close panel icon instead of close
+      // icons (keep them as close icons when they are open as tabs in
+      // premium)") — swaps this panel's close button from lucide-react's
+      // plain `X` (`InteriorPanel`'s/`ContainerHeader`'s own default) to
+      // `PanelRightClose`, matching the "closing a docked panel" glyph
+      // already used elsewhere in this file (the Customer Information
+      // side-panel's own pin/close button, ~line 3748) rather than the
+      // more generic "dismiss/cancel" reading of a plain X. Scoped to
+      // `CustomerRowInfoPanel` only — `CustomerFullScreenTabContent`
+      // (Premium's "open as a desk tab" variant) renders its own
+      // hand-rolled close button with a plain `X` unconditionally (not
+      // routed through `onClose`/`closeIcon` at all), so it's untouched
+      // and keeps reading as "close this tab," per the request's own
+      // explicit carve-out.
+      closeIcon={<PanelRightClose className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />}
+      // Per explicit request ("make the customer info panel z-index
+      // higher than the z-index of the launch channel buttons in the
+      // rows of the customer tables for both premium and advanced") —
+      // `InteriorPanel`'s own built-in outer wrapper is `z-[5]` by
+      // default (interior-panel.tsx), which sat BELOW the Customers
+      // table row's own hover-reveal launch-channel buttons (Call/Email/
+      // WhatsApp — `agent-next-gen-customers-table.tsx`'s `z-10`
+      // leading-channel-stack overlay), so that overlay visibly bled on
+      // top of this panel once docked open (see the attached screenshot).
+      // `className` here is merged via `cn`/`tailwind-merge`, which
+      // resolves same-property Tailwind class conflicts by keeping the
+      // last one — `z-20` cleanly overrides the built-in `z-[5]` without
+      // needing to touch `InteriorPanel` itself, and comfortably clears
+      // the row overlay's `z-10` in every tier this panel renders in
+      // (both desk-tab Customers tables, Premium and Advanced, plus
+      // Advanced's Search panel Customers sub-tab instance).
+      className="z-20"
       // Lets the agent manually expand to full screen via `InteriorPanel`'s
       // own built-in toggle button (rendered next to the close button in
       // its header, self-contained `isFullScreen` state — see interior-
@@ -4143,7 +4203,13 @@ export function CustomerRowInfoPanel({
       // below takes over instead, since `InteriorPanel`'s own toggle has no
       // way to be told "call this instead of touching your own internal
       // state."
-      allowFullScreen={!onOpenFullScreenTab}
+      //
+      // Per a further explicit follow-up (see `hideFullScreenToggle`'s own
+      // doc comment), that suppression now also covers callers who want NO
+      // full-screen affordance at all rather than a swapped-in tab button —
+      // `hideFullScreenToggle` short-circuits this to `false` regardless of
+      // `onOpenFullScreenTab`.
+      allowFullScreen={!onOpenFullScreenTab && !hideFullScreenToggle}
       headerTitle={customerName ?? "Customer"}
       headerSubhead={recordId}
       // Sequential prev/next through the same filtered+sorted order the
@@ -4218,12 +4284,16 @@ export function CustomerRowInfoPanel({
               explicit request to size these down a notch from the rest of
               the cluster — kept as-is, that sizing request is independent
               of the outline→ghost variant change. */}
-          <Button variant="ghost" size="icon-md" title="Previous customer" disabled={!hasPrevious} onClick={onPrevious}>
-            <ChevronLeft className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-          </Button>
-          <Button variant="ghost" size="icon-md" title="Next customer" disabled={!hasNext} onClick={onNext}>
-            <ChevronRight className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-          </Button>
+          {!hidePrevNext && (
+            <>
+              <Button variant="ghost" size="icon-md" title="Previous customer" disabled={!hasPrevious} onClick={onPrevious}>
+                <ChevronLeft className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+              </Button>
+              <Button variant="ghost" size="icon-md" title="Next customer" disabled={!hasNext} onClick={onNext}>
+                <ChevronRight className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+              </Button>
+            </>
+          )}
           {/* Stand-in for `InteriorPanel`'s own built-in fullScreenToggle
               (suppressed above via `allowFullScreen={!onOpenFullScreenTab}`)
               — same size/tooltip-placement/position (right after prev/next,

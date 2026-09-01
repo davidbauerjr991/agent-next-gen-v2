@@ -184,6 +184,22 @@ const CURRENT_AGENT_NAME = "John Smith";
 
 const [CURRENT_AGENT_FIRST_NAME, CURRENT_AGENT_LAST_NAME] = CURRENT_AGENT_NAME.split(" ");
 
+/* Home dashboard header's "Agent ID: {agentId}" subhead (`greeting=false`
+   treatment) — per explicit request to bring lyra-ui's "Agent Home
+   Dashboard" Storybook story's `greeting=false` header (title "Agent {name}",
+   subhead "Agent ID: {agentId}" + Connect Agent Leg link/Connecting.../
+   Connection Lag Time, see that story's own `AgentDashboardHeader`/
+   `AgentDashboard` in agent-dashboard.tsx) into this app's real dashboard
+   header. Same literal value that story's own `DEMO_AGENT_ID` constant
+   uses, since it's the same "John Smith" agent. */
+const CURRENT_AGENT_ID = "johnsmith329202";
+
+/* Home dashboard header's "Connection Lag Time: {lagTime}" subhead value
+   once the agent leg is connected — a fixed demo figure, not a live timer
+   (there's no real network-latency measurement to show), same literal
+   "00:32" lyra-ui's own "Agent Home Dashboard" story uses. */
+const CURRENT_AGENT_CONNECTION_LAG_TIME = "00:32";
+
 /* Dashboard page-header subtitle — "August 20, 2026 · 2:41 PM", read fresh
    on every render. History, in order, across several explicit follow-ups:
    originally "Wednesday, July 29, 2026 · 9:41 AM" (date + time); the
@@ -593,6 +609,8 @@ export {
   CURRENT_AGENT_NAME,
   CURRENT_AGENT_FIRST_NAME,
   CURRENT_AGENT_LAST_NAME,
+  CURRENT_AGENT_ID,
+  CURRENT_AGENT_CONNECTION_LAG_TIME,
   formatHeaderDate,
   formatHeaderGreeting,
   makeCaseId,

@@ -1064,7 +1064,7 @@ export function ContactHistoryCard({
   return (
     <DashboardCard
       variant="neutral-subtle"
-      headerTitle="Contact History"
+      headerTitle="My Contact History"
       headerIcon={<Icon icon={History} size="md" background="info" shape="rounded" decorative />}
       headerActionsWrap
       // Two real `SearchInput`s, both bound to the same `searchQuery` state

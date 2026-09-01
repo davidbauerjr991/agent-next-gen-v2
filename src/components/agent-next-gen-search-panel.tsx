@@ -197,6 +197,22 @@ export function useSearchPanelContent({
             // `UseSearchPanelContentOptions`.
             tabs={AGENT_WORKSPACE_CUSTOMER_PANEL_TABS}
             onAddToast={onAddToast}
+            // Per explicit request ("remove the pop out icon to make it a
+            // tab") — this Search-panel Customers sub-tab instance is
+            // Advanced-only (see this branch's own doc comment above) and
+            // has no desk-tab full-screen mechanism to pop into
+            // (`onOpenFullScreenTab` stays unset, Premium-only), so rather
+            // than swap in a custom "Open Tab" button this just removes the
+            // expand affordance outright — see `hideFullScreenToggle`'s own
+            // doc comment (agent-next-gen-customer-info-panel.tsx).
+            hideFullScreenToggle
+            // Per an explicit follow-up ("they are still there in
+            // advanced") — the desk-tab Customers table's own prev/next
+            // hide (see `hidePrevNext`'s own doc comment) didn't cover
+            // THIS panel instance (the Search panel's own Customers sub-
+            // tab, Advanced-only) since it's a separate call site. Hidden
+            // here too now.
+            hidePrevNext
           />
         </div>
       ) : (

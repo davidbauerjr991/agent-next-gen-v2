@@ -12,12 +12,10 @@
 // agent-next-gen-shared-utils.ts or a new shared component) rather than by
 // accident — they are NOT kept in sync automatically.
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
-import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { cn } from "@/lib/utils";
 import {
   AppHeader,
-  AppName,
-  AppMenu,
+  AppNameMenu,
   CXoneLogo,
   Modal,
   useAgentNotificationsContent,
@@ -69,18 +67,10 @@ import {
   type EmbeddablePanelContent,
   type MenuEntry,
   CHANNEL_TYPE_META,
+  InteriorPanel,
 } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_CUSTOMERS, type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
-// EXPERIMENTAL: `InteriorPanel` sourced from a local, agent-next-gen-v2-only
-// fork instead of `@nicecxone/lyra-ui` — per explicit request to trial a
-// 1440px absolute-overlay breakpoint (was 1024px) and remove the automatic
-// full-screen breakpoint entirely, without changing the shared lyra-ui
-// component (and therefore agent-next-gen-v1/anything else consuming it)
-// until/unless the trial is kept. See that file's own top-of-file doc
-// comment for the full reasoning; revert this import to
-// `@nicecxone/lyra-ui` to go back to the real component.
-import { InteriorPanel } from "@/components/agent-next-gen-interior-panel-1440-test";
-import { useScheduleContent } from "@/components/SchedulePanel";
+import { useScheduleContent } from "@nicecxone/lyra-ui";
 import {
   initialsFor,
   generateCaseId,
@@ -91,8 +81,7 @@ import {
   getAwaitingSeverity,
   CURRENT_AGENT_FIRST_NAME,
   CURRENT_AGENT_LAST_NAME,
-  formatHeaderDate,
-  formatHeaderGreeting,
+  CURRENT_AGENT_ID,
   withoutChannelStatus,
   nextCustomerSortDirection,
   synthesizeChannelAddress,
@@ -1547,6 +1536,24 @@ export function AgentWorkspace2WithDeskPage({
   // read-once-at-mount seeds (e.g. `showWelcomeModal`'s own sibling state
   // just below) and keeps the read out of the render body proper.
   const [initialAgentLegStatus] = useState(() => readAgentLegStatus());
+  // Tri-state mirror of `AgentProfile`'s own real `agentLegStatus` state
+  // machine (agent-profile.tsx), seeded from the same persisted settled
+  // value above. Same pattern as 2.0's `AgentNextGenPage.tsx` — see that
+  // file's own doc comment for the full rationale: `handleConnectAgentLeg`
+  // below sets `"connecting"` the instant the agent clicks the link, and
+  // `fireAgentLegStatusToast` below sets the real settled value once
+  // `AgentProfile`'s own `~2s` connecting→connected transition (or an
+  // instant disconnect) actually fires `onAgentLegStatusChange` — never
+  // set directly to `"connected"`/`"disconnected"` from anywhere else. Per
+  // explicit request ("remove the connect agent leg from the right
+  // side"), this state's only reader — the dashboard header's "Connect
+  // Agent Leg" link/"Connecting..."/"Connection Lag Time: {lagTime}"
+  // subhead — was removed (see §129's Premium follow-up), so the read
+  // binding is dropped here (only the setter is still needed); the state
+  // itself stays, still tracked in lockstep with `AgentProfile`.
+  const [, setAgentLegStatus] = useState<"disconnected" | "connecting" | "connected">(
+    initialAgentLegStatus
+  );
   // Whether the dedicated `AgentLegDisconnectedToast` (lyra-ui) is currently
   // showing — same "presence controls mounting" idiom `useToast`'s own
   // `toasts` array already uses for every other toast, just a plain
@@ -1592,6 +1599,7 @@ export function AgentWorkspace2WithDeskPage({
   // function's — `AgentLegDisconnectedToast` already calls both in the
   // right order on a "Connect" click (see its own doc comment).
   const handleConnectAgentLeg = () => {
+    setAgentLegStatus("connecting");
     setConnectAgentLegSignal((n) => n + 1);
   };
   // Last agent-leg status that arrived while the welcome modal was still
@@ -1614,6 +1622,12 @@ export function AgentWorkspace2WithDeskPage({
     // pick up from (see agent-next-gen-agent-leg-state.ts's own doc
     // comment).
     saveAgentLegStatus(agentLegConnectionStatus);
+    // Updated unconditionally, same as `saveAgentLegStatus` right above —
+    // this is the dashboard header's own tri-state mirror of the real
+    // settled status (see `agentLegStatus`'s own doc comment), not the
+    // toast announcing it, so it must NOT wait on `showWelcomeModal` the
+    // way the toast itself (below) does.
+    setAgentLegStatus(agentLegConnectionStatus);
     if (showWelcomeModal) {
       pendingAgentLegToastRef.current = agentLegConnectionStatus;
       return;
@@ -4954,7 +4968,7 @@ export function AgentWorkspace2WithDeskPage({
       setNotifications((prev) => prev.map((i) => i.id === n.id ? { ...i, read: true } : i));
     },
   });
-  // Schedule — basic Day/Week calendar shell (SchedulePanel.tsx, new this
+  // Schedule — basic Day/Week calendar shell (lyra-ui schedule-panel, new this
   // session, app-only — not added to lyra-ui). Called unconditionally here
   // (a real hook, own local view/anchorDate state), same as any other
   // panel-content builder in this block.
@@ -5485,7 +5499,20 @@ export function AgentWorkspace2WithDeskPage({
         </>
       )}
     >
-      {activePanelContent.body}
+      {/* Per explicit request ("when the user navigates between apps,
+          please have them fade in when transitioning"): `key={activePanelKey}`
+          forces a fresh mount on every app switch (Home/Search/Agent Chat/
+          Schedule/etc.), which is what lets `animate-in fade-in-0` actually
+          replay instead of only firing once ever — same "force a remount to
+          replay animate-in" pattern this file's own desk-tab switch and
+          active-interaction switch already use elsewhere in this file.
+          Applied identically at every render site of `activePanelContent.
+          body` (this docked/float `Draggable`, the fullscreen overlay, and
+          the combined-mode panel below) so the fade is consistent
+          regardless of which layout is currently active. */}
+      <div key={activePanelKey} className="flex flex-col flex-1 min-h-0 animate-in fade-in-0 duration-200">
+        {activePanelContent.body}
+      </div>
     </Draggable>
   ) : null;
 
@@ -5607,7 +5634,13 @@ export function AgentWorkspace2WithDeskPage({
           </div>
         ))
       )}
-      <div className="flex flex-col flex-1 min-h-0">{activePanelContent.body}</div>
+      {/* Per explicit request ("... fade in when transitioning" — see the
+          docked variant's own matching wrapper above for the full doc
+          comment): `key={activePanelKey}` forces a remount on every app
+          switch so `animate-in fade-in-0` replays each time. */}
+      <div key={activePanelKey} className="flex flex-col flex-1 min-h-0 animate-in fade-in-0 duration-200">
+        {activePanelContent.body}
+      </div>
     </div>
   ) : null;
 
@@ -5624,31 +5657,15 @@ export function AgentWorkspace2WithDeskPage({
           // is crowding it, so icons only hide once there's a real
           // overlap risk instead of a fixed viewport-width guess.
           <div ref={appNameMeasureRef} className="flex items-center">
-            <PopoverPrimitive.Root open={appMenuOpen} onOpenChange={setAppMenuOpen}>
-              <PopoverPrimitive.Trigger asChild>
-                <AppName
-                  icon={<img src={appIcon} alt="Agent Workspace 2.0 Premium" className="h-6 w-6" />}
-                  name="Agent Workspace 2.0 Premium"
-                  compact={isCompactHeader}
-                  aria-expanded={appMenuOpen}
-                />
-              </PopoverPrimitive.Trigger>
-              <PopoverPrimitive.Portal>
-                <PopoverPrimitive.Content
-                  side="bottom"
-                  align="start"
-                  sideOffset={6}
-                  onOpenAutoFocus={(e: Event) => e.preventDefault()}
-                  className="z-[9999] animate-in fade-in-0 slide-in-from-top-2 duration-150 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-1 data-[state=closed]:duration-100"
-                >
-                  <AppMenu
-                    groups={appMenuGroups}
-                    footer={<CXoneLogo />}
-                    header={isCompactHeader ? "Agent Workspace 2.0 Premium" : undefined}
-                  />
-                </PopoverPrimitive.Content>
-              </PopoverPrimitive.Portal>
-            </PopoverPrimitive.Root>
+            <AppNameMenu
+              icon={<img src={appIcon} alt="Agent Workspace 2.0 Premium" className="h-6 w-6" />}
+              name="Agent Workspace 2.0 Premium"
+              compact={isCompactHeader}
+              groups={appMenuGroups}
+              menuFooter={<CXoneLogo />}
+              open={appMenuOpen}
+              onOpenChange={setAppMenuOpen}
+            />
           </div>
         }
         actions={
@@ -6342,7 +6359,7 @@ export function AgentWorkspace2WithDeskPage({
                       // re-click of the already-active item (empty string)
                       // — this switch should always have exactly one side
                       // active, so an empty next value is ignored rather
-                      // than passed through (same guard SchedulePanel.tsx's
+                      // than passed through (same guard lyra-ui schedule-panel's
                       // own Day/Week `ToggleGroup` already uses).
                       onValueChange={(next) => {
                         if (next === "main" || next === "panel") setNarrowActiveRegion(next);
@@ -7498,20 +7515,24 @@ export function AgentWorkspace2WithDeskPage({
                 </div>
               ) : (
                 <div key="dashboard" className="flex flex-1 flex-col min-w-0 overflow-hidden animate-in fade-in-0 duration-200">
-                  {/* Per explicit follow-up request, the greeting
-                      `PageHeader` that used to sit here (above the tab
-                      row) no longer does — it moved DOWN into the
-                      dashboard body itself, below the tabs
-                      (`activeDeskTab === "home"` branch, above
-                      `DashboardQueue`; see its own doc comment there),
-                      so it scrolls with the rest of the dashboard's
-                      content instead of pinning above the tab row. Only
-                      the `TabList` (desk tabs + any open customer
-                      full-screen tabs) still renders in this header slot
-                      — no longer wrapped in a `<>...</>` fragment with
-                      `PageHeader` now that it's the sole child here. */}
                   {showPageHeader && (
-                      <TabList
+                    // Per explicit request ("go back to the version of the
+                    // home page that does NOT have a home page header and
+                    // update the text to say Hello {Agent first Name} -
+                    // keep the user name and remove the connect agent leg
+                    // from the right side"), mirrored here from 2.0
+                    // (AgentNextGenPage.tsx §129, which explains the full
+                    // rationale) — the `PageHeader` that used to render
+                    // here, above the `TabList`, is gone; only the
+                    // `TabList` itself stays pinned in this fixed,
+                    // non-scrolling slot (unlike 2.0, this page's dashboard
+                    // still has a real desk-tab `TabList` — see §100's own
+                    // doc comment for why 2.0's doesn't). The identity
+                    // header — reworded and relocated the same way — now
+                    // lives inside the scrollable dashboard body instead
+                    // (see that render branch's own doc comment, just
+                    // above its "Queue widgets" section).
+                    <TabList
                         overflowMenu
                         reorderable
                         // Filtered rather than a bare cast: `reorderable`
@@ -7718,6 +7739,11 @@ export function AgentWorkspace2WithDeskPage({
                   tabs={CUSTOMER_PANEL_TABS}
                   onAddToast={addToast}
                   onOpenFullScreenTab={handleOpenCustomerFullScreenTab}
+                  // Per explicit request ("hide the next/prev in the
+                  // customer info cards for advanced and premium in the
+                  // customer table view") — see `hidePrevNext`'s own doc
+                  // comment (agent-next-gen-customer-info-panel.tsx).
+                  hidePrevNext
                 />
               </div>
               {/* Customer full-screen tabs (`openCustomerTabs`, see that
@@ -7789,114 +7815,34 @@ export function AgentWorkspace2WithDeskPage({
                 <div key={activeDeskTab} className="flex flex-1 flex-col min-w-0 overflow-y-auto px-6 py-6 animate-in fade-in-0 duration-200">
                   <div className="w-full max-w-[1200px] mx-auto lyra-container-grid-wrap">
                     {showPageHeader && (
-                      // Greeting header — per explicit follow-up request,
-                      // moved down into the dashboard body, below the tab
-                      // row (was previously a separate, non-scrolling
-                      // header slot ABOVE the tabs — see that slot's own
-                      // doc comment, above). Title is the same time-of-day
-                      // greeting the dashboard body used to render by hand
-                      // (`lyra-heading-2xl` "Good {period}, {name}").
+                      // Dashboard header — per explicit request ("go back
+                      // to the version of the home page that does NOT
+                      // have a home page header"), moved back OUT of the
+                      // fixed, non-scrolling top slot it shared with the
+                      // desk-tab `TabList` (see that slot's own doc
+                      // comment, above) and into the scrollable dashboard
+                      // body instead — mirrors the identical change made
+                      // to 2.0 (`AgentNextGenPage.tsx` §129, which has the
+                      // full rationale, including the historical `-mx-6
+                      // mb-6`/`bordered={false}`/`titleSize="2xl"`
+                      // wrapper this reuses). The `TabList` itself stays
+                      // pinned above, unaffected — only the identity
+                      // header moved.
                       //
-                      // `actions` holds a `Badge` reading the live
-                      // `resolvedTodayCount` (see its own doc comment,
-                      // above) — starts at 0 every session and increments
-                      // live off `handleInteractionStatusChange`'s own
-                      // real Resolved-transition writes. Per explicit
-                      // follow-up ("make sure the assignments resolved
-                      // matches the count in the top right chip"), this
-                      // same `resolvedTodayCount` is now also passed to
-                      // `PerformanceSummaryCard` below (its own
-                      // `liveResolvedTodayCount` prop) so that card's
-                      // "today" figure reads identically to this badge
-                      // instead of a fixed mock value — see that card's
-                      // own doc comment.
-                      //
-                      // `-mx-6` cancels out `PageHeader`'s own baked-in
-                      // `px-6` (page-header.tsx) so its title text lines up
-                      // flush with the cards below (`DashboardQueue` etc.,
-                      // which have no side padding of their own and rely on
-                      // this body div's own `px-6`) instead of sitting
-                      // visibly indented past them.
+                      // Title switched from "Agent {first} {last}" to a
+                      // plain "Hello {first name}" greeting. Subtitle
+                      // ("User Name: {id}") is unchanged. The tri-state
+                      // Connect Agent Leg/Connecting.../Connection Lag
+                      // Time block that used to sit under the Personal
+                      // Queue chip in `actions` is removed entirely —
+                      // `actions` now holds only the chip.
                       <div className="-mx-6 mb-6">
                         <PageHeader
-                          title={formatHeaderGreeting(CURRENT_AGENT_FIRST_NAME)}
-                          subtitle={formatHeaderDate()}
-                          // `bordered={false}` per earlier explicit
-                          // request — same opt-out lyra-ui's own "Record
-                          // Header (Compact, Borderless)" Storybook story
-                          // demonstrates, applied here to drop the
-                          // header's `border-b` (no `compact`, this header
-                          // keeps its normal padding).
+                          title={`Hello ${CURRENT_AGENT_FIRST_NAME}`}
+                          subtitle={`User Name: ${CURRENT_AGENT_ID}`}
                           bordered={false}
-                          // `titleSize="2xl"` per explicit request — bumps
-                          // the title from `PageHeader`'s own default
-                          // `.lyra-heading-lg` up to `.lyra-heading-2xl`
-                          // (see that prop's own doc comment, page-header.tsx).
                           titleSize="2xl"
                           actions={
-                            // Per explicit request ("add a chip to the top
-                            // right (where the Assignments Completed today
-                            // used to be) that says '{N} Active Assignments'
-                            // and when clicked open the left rail") — this
-                            // is the exact spot the `SHOW_RESOLVED_TODAY_CHIP`-
-                            // gated Badge above used to occupy (still hidden,
-                            // see that flag's own doc comment,
-                            // agent-next-gen-shared-utils.ts). Unlike that
-                            // static badge, this one is a real `Button`
-                            // (Rule zero — no hand-rolled `<button>`),
-                            // styled to read as a chip via the same
-                            // `bg-lyra-status-info-subtle`/
-                            // `text-lyra-status-info-strong` pairing other
-                            // info callouts in this file already use as
-                            // plain classNames (not just inline style).
-                            // `interactions.length` is the exact same count
-                            // `AssignmentsSectionCaption` below renders as
-                            // "({count})" for the LeftNav's own caption —
-                            // one live number, two places it shows up.
-                            // `setNavOpen(true)` expands the LeftNav rail
-                            // (its 52px/256px collapsed/expanded states —
-                            // see `navOpen`'s own declaration) exactly like
-                            // clicking its own collapse/expand toggle would.
-                            //
-                            // Per direct follow-up: label renamed again to
-                            // "Personal Queue: {N}" (was "{N} Personal
-                            // Queue Assignments"), showing "Empty" in place
-                            // of "0" once the queue has nothing in it —
-                            // same live `interactions.length` count either
-                            // way, just never printing a bare "0" on
-                            // screen. The trailing `ChevronRight`
-                            // clickability affordance is unchanged.
-                            //
-                            // Tooltip copy renamed to "Toggle Assignment
-                            // Panel" and the click behavior changed from
-                            // always-open to a real toggle —
-                            // `setNavOpen((v) => !v)`, the exact same
-                            // toggle function the LeftNav's own collapse/
-                            // expand button (`onToggle={() =>
-                            // setNavOpen((v) => !v)}` at that button's own
-                            // call site) already uses, so this chip is now
-                            // a second trigger for that identical action
-                            // rather than a one-way "always expand."
-                            // Per direct follow-up: the chip's color now
-                            // reflects the queue's own worst-case state
-                            // instead of a fixed "info" blue — success
-                            // (green) once the queue is genuinely empty,
-                            // warning (amber) once it holds any assignment
-                            // at all, escalating to critical (red) the
-                            // moment ANY of those assignments has actually
-                            // breached SLA (not just nearing it) — same
-                            // success/warning/critical three-tier language
-                            // `getAwaitingSeverity`/the record-header
-                            // channel tab's own escalation already use,
-                            // just rolled up across the WHOLE queue instead
-                            // of one channel. `hasBreachedSlaAssignment`
-                            // (declared alongside `clockTick` above) is the
-                            // one live signal driving both the red tier AND
-                            // the trailing `CircleAlert` "!" mark — the same
-                            // icon `ChannelTab` (lyra-ui, channel-row.tsx)
-                            // already reserves for a genuinely breached (not
-                            // just late) channel, kept consistent here
-                            // rather than inventing a second "!" glyph.
                             <Tooltip content="Toggle Assignment Panel" placement="bottom" asLabel>
                               <Button
                                 variant="ghost"
@@ -8236,7 +8182,14 @@ export function AgentWorkspace2WithDeskPage({
                     </div>
                   ))
                 )}
-                {activePanelContent.body}
+                {/* Per explicit request ("... fade in when transitioning" —
+                    see the docked variant's own matching wrapper above for
+                    the full doc comment): `key={activePanelKey}` forces a
+                    remount on every app switch so `animate-in fade-in-0`
+                    replays each time. */}
+                <div key={activePanelKey} className="flex flex-col flex-1 min-h-0 animate-in fade-in-0 duration-200">
+                  {activePanelContent.body}
+                </div>
               </div>
             )}
 

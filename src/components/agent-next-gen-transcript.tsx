@@ -1,7 +1,9 @@
-import * as AccordionPrimitive from "@radix-ui/react-accordion";
 import React, { useState, useRef, useLayoutEffect, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import {
+  AccordionHeadless,
+  AccordionHeadlessItem,
+  AccordionHeadlessContent,
   ChatMessage,
   ActionIconButton,
   TagPicker,
@@ -827,13 +829,13 @@ export function TranscriptSessionDetails({ session }: { session: Contact }) {
    since here the solid edge is at the *top* of the fade band, not the
    bottom.
 
-   Session Details' open/close is animated via @radix-ui/react-accordion
-   directly (AccordionPrimitive.Root/Item/Content) rather than lyra-ui's
-   own Accordion component — that component always renders its own trigger
+   Session Details' open/close is animated via lyra-ui's headless
+   accordion building blocks (AccordionHeadless/-Item/-Content, see
+   accordion.tsx) rather than the styled Accordion component — that component always renders its own trigger
    row (a full-width button with its own chevron) plus a border-b divider
    after every item, neither of which fits here: the real trigger is the
    "# CTX-..." pill button below, and this feature was explicitly built
-   with no dividers. Reusing the bare Radix primitives keeps the actual
+   with no dividers. Reusing the bare building blocks keeps the actual
    animation mechanism identical to Accordion's though — same
    data-[state=open]:animate-accordion-down data-[state=closed]:animate-
    accordion-up classes, same --radix-accordion-content-height CSS
@@ -1182,7 +1184,7 @@ export function TranscriptSessionSeparator({
   const [outcomeResolutionMenuOpen, setOutcomeResolutionMenuOpen] = useState(false);
   const [outcomeResolutionMenuView, setOutcomeResolutionMenuView] = useState<"menu" | "confirm">("menu");
   return (
-    <AccordionPrimitive.Root
+    <AccordionHeadless
       type="single"
       collapsible
       value={open ? session.id : ""}
@@ -1212,7 +1214,7 @@ export function TranscriptSessionSeparator({
           the session information when it is open," it needed to sit below
           BOTH the collapsed row AND `Content` when expanded, i.e. at the
           bottom of the whole Item, not the row alone). */}
-      <AccordionPrimitive.Item value={session.id} className="border-b border-lyra-border-subtle">
+      <AccordionHeadlessItem value={session.id} className="border-b border-lyra-border-subtle">
         <div className="flex flex-wrap items-center justify-between gap-3 py-2">
           {/* Flat, left-aligned case info — no wrapping pill border/
               background and no flanking divider lines (per earlier design
@@ -1748,17 +1750,17 @@ export function TranscriptSessionSeparator({
           </div>
           )}
         </div>
-        <AccordionPrimitive.Content className="overflow-hidden data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up">
+        <AccordionHeadlessContent>
           <div className="pb-4">
             <TranscriptSessionDetails session={session} />
           </div>
-        </AccordionPrimitive.Content>
-      </AccordionPrimitive.Item>
+        </AccordionHeadlessContent>
+      </AccordionHeadlessItem>
       <div
         className="pointer-events-none absolute inset-x-0 -bottom-8 h-8 bg-gradient-to-b from-lyra-bg-surface-base to-transparent"
         aria-hidden="true"
       />
-    </AccordionPrimitive.Root>
+    </AccordionHeadless>
   );
 }
 
@@ -2668,7 +2670,7 @@ export function InteractionTranscript({
                     accordion-down`/`data-[state=closed]:animate-accordion-up`
                     mechanism `TranscriptSessionSeparator`'s own Session
                     Details panel already uses, a wholly separate/independent
-                    `AccordionPrimitive` instance from that one (this session's
+                    `AccordionHeadless` instance from that one (this session's
                     "Session Details" open/closed state and its "message
                     content collapsed" state are unrelated flags — see
                     `TranscriptSessionSeparator`'s own `collapsed` prop doc
@@ -2682,14 +2684,14 @@ export function InteractionTranscript({
                     working exactly as already documented there (a fully
                     collapsed session legitimately has nothing left to stick
                     through, which is the correct behavior here). */}
-                <AccordionPrimitive.Root
+                <AccordionHeadless
                   type="single"
                   collapsible
                   value={collapsedSessionIds.has(session.id) ? "" : session.id}
                   onValueChange={() => {}}
                 >
-                <AccordionPrimitive.Item value={session.id} className="border-none">
-                <AccordionPrimitive.Content className="overflow-hidden data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up">
+                <AccordionHeadlessItem value={session.id} className="border-none">
+                <AccordionHeadlessContent>
                 <div
                   // `max-w-[1024px]` — per explicit request, narrowed down
                   // from the previous 1200px (see this wrapper's own
@@ -2813,9 +2815,9 @@ export function InteractionTranscript({
                   );
                 })()}
                 </div>
-                </AccordionPrimitive.Content>
-                </AccordionPrimitive.Item>
-                </AccordionPrimitive.Root>
+                </AccordionHeadlessContent>
+                </AccordionHeadlessItem>
+                </AccordionHeadless>
               </div>
             );
           })}
