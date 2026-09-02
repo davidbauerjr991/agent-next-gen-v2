@@ -177,6 +177,7 @@ import {
   Bell,
   Pin,
   PanelLeftClose,
+  PanelRightClose,
   History,
   Maximize2,
   Minimize2,
@@ -5748,6 +5749,12 @@ export function AgentNextGenPage({
                         headerTitle={selectedAllContactsRecord?.customerName}
                         headerSubhead={selectedAllContactsRecord?.skill}
                         onClose={() => setSelectedAllContactsRecord(null)}
+                        // `PanelRightClose` — matches the "closing a docked
+                        // right-side panel" glyph used elsewhere (see
+                        // `agent-next-gen-customer-info-panel.tsx`'s own
+                        // `InteriorPanel` closeIcon) — instead of
+                        // `ContainerHeader`'s generic default `X`.
+                        closeIcon={<PanelRightClose className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />}
                         // Same mutually-exclusive Redial/Re-open convention
                         // `selectedContactHistoryEntry`'s own footer already
                         // uses (voice-only gets "Redial") — both just call
@@ -7172,6 +7179,10 @@ export function AgentNextGenPage({
                       setSelectedQueueId(null);
                       setSelectedContactHistoryEntry(null);
                     }}
+                    // `PanelRightClose` — same "closing a docked right-side
+                    // panel" glyph as this panel's sibling instance above,
+                    // instead of `ContainerHeader`'s generic default `X`.
+                    closeIcon={<PanelRightClose className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />}
                     // Redial/Re-open — per explicit request, these now live
                     // here (the summary panel) instead of directly on the
                     // Contact History row; either one reopens the contact as

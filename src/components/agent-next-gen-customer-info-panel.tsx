@@ -1249,6 +1249,10 @@ export function CustomerHistorySessionDetailPanel({
       side="right"
       open={entry !== null}
       onClose={onClose}
+      // `PanelRightClose` — same "closing a docked right-side panel" glyph
+      // this file's other `InteriorPanel` instance already uses (below),
+      // instead of `ContainerHeader`'s generic default `X`.
+      closeIcon={<PanelRightClose className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />}
       // `z-[3]` — overrides `InteriorPanel`'s own default `z-[5]` (via
       // `cn()`'s `tailwind-merge` dedup, same "consumer className overrides
       // the internal default" mechanism `CustomerInformationSidePanel`'s own
