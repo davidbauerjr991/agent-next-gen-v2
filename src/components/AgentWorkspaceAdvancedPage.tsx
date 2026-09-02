@@ -6858,6 +6858,29 @@ export function AgentWorkspaceAdvancedPage({
                           // not — see the `tabs` prop at this page's own
                           // `CustomerInformationSidePanel` call site).
                           onViewCustomerInfo={() => focusCustomerPanelTab("Overview")}
+                          // Turns the Contact Overview's "already been
+                          // working with Agent X" name/id into a Call/Chat
+                          // popover link — see AgentNextGenPage.tsx's
+                          // identical wiring for the full reasoning
+                          // (`previousAgent` has no real backing directory
+                          // entry, so Chat reuses the Agent Chat panel and
+                          // Voice surfaces a toast instead of a real call).
+                          onLaunchPreviousAgentInteraction={(channel) => {
+                            if (channel === "chat") {
+                              handlePanelButtonClick("conversations")();
+                              return;
+                            }
+                            const agent = buildContactOverviewInfo(
+                              activeInteraction.id,
+                              activeInteractionIsRealCustomer
+                            ).previousAgent;
+                            addToast({
+                              variant: "success",
+                              title: "Calling",
+                              message: agent ? `Calling ${agent.name} (${agent.agentId})…` : "Calling…",
+                              duration: 4000,
+                            });
+                          }}
                           // Per explicit request/follow-up clarification —
                           // see `activeChannelIsNewOutboundThread`'s own
                           // doc comment above for the full reasoning.

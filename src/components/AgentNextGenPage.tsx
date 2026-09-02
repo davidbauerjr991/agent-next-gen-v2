@@ -6849,6 +6849,38 @@ export function AgentNextGenPage({
                           // `ContactOverview` already does for any omitted
                           // callback).
                           onViewCustomerInfo={() => focusCustomerPanelTab("Overview")}
+                          // Turns the Contact Overview's "already been
+                          // working with Agent X" name/id into a link that
+                          // opens a Call/Chat popover (per explicit
+                          // request) — `previousAgent` has no real backing
+                          // directory entry (it's a small hardcoded pool in
+                          // `buildContactOverviewInfo`, agent-next-gen-
+                          // shared-utils.ts, not the same fixture
+                          // `OUTBOUND_AGENTS` uses), so this can't wire
+                          // into the real per-agent voice/chat flow that
+                          // fixture backs. Chat reuses the exact "opens the
+                          // existing Agent Chat panel" behavior a real
+                          // agent contact's own quick-launch chat already
+                          // gets (`handleStartCall`'s own special case,
+                          // above); Voice — with no real number to dial —
+                          // surfaces a toast instead of pretending to place
+                          // a call nothing backs.
+                          onLaunchPreviousAgentInteraction={(channel) => {
+                            if (channel === "chat") {
+                              handlePanelButtonClick("conversations")();
+                              return;
+                            }
+                            const agent = buildContactOverviewInfo(
+                              activeInteraction.id,
+                              activeInteractionIsRealCustomer
+                            ).previousAgent;
+                            addToast({
+                              variant: "success",
+                              title: "Calling",
+                              message: agent ? `Calling ${agent.name} (${agent.agentId})…` : "Calling…",
+                              duration: 4000,
+                            });
+                          }}
                           // Per explicit request/follow-up clarification —
                           // see `activeChannelIsNewOutboundThread`'s own
                           // doc comment above for the full reasoning.

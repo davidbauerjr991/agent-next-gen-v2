@@ -1811,6 +1811,7 @@ export function InteractionTranscript({
   contactOverview,
   onViewCustomerInfo,
   onViewInteractionHistory,
+  onLaunchPreviousAgentInteraction,
   reopenedContacts,
   liveMessages,
   currentStatus,
@@ -1890,6 +1891,14 @@ export function InteractionTranscript({
    */
   onViewCustomerInfo?: () => void;
   onViewInteractionHistory?: () => void;
+  /**
+   * Forwarded straight through to the rendered `ContactOverview`'s own
+   * `onLaunchPreviousAgentInteraction` prop (see its own doc comment,
+   * contact-overview.tsx) — turns that block's "already been working with
+   * Agent X" name/id into a clickable link that opens a Call/Chat popover.
+   * `undefined` hides the link (same as `ContactOverview` itself does).
+   */
+  onLaunchPreviousAgentInteraction?: (channel: "voice" | "chat") => void;
   /**
    * One entry per time this channel was reopened (via "Add Channel") while
    * closed — `Interaction`'s own `Thread.reopenedContacts`,
@@ -2836,6 +2845,7 @@ export function InteractionTranscript({
                     journeySummary={contactOverview.journeySummary}
                     onViewCustomerInfo={onViewCustomerInfo}
                     onViewInteractionHistory={onViewInteractionHistory}
+                    onLaunchPreviousAgentInteraction={onLaunchPreviousAgentInteraction}
                   />
                 )}
                 {messages.length > 0 && (
