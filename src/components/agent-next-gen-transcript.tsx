@@ -1809,6 +1809,8 @@ export function InteractionTranscript({
   skillLabel,
   isFreshLaunch,
   contactOverview,
+  onViewCustomerInfo,
+  onViewInteractionHistory,
   reopenedContacts,
   liveMessages,
   currentStatus,
@@ -1876,6 +1878,18 @@ export function InteractionTranscript({
    * summarize).
    */
   contactOverview?: ContactOverviewInfo;
+  /**
+   * Forwarded straight through to the rendered `ContactOverview`'s own
+   * `onViewCustomerInfo`/`onViewInteractionHistory` props (see either
+   * one's own doc comment, contact-overview.tsx) — the caller (each page
+   * file) opens its docked Customer Information panel and jumps it to the
+   * Overview/Contacts tab respectively. `undefined` for either one hides
+   * that specific link (same as `ContactOverview` itself does), which
+   * naturally happens whenever `contactOverview` itself is unset too since
+   * neither link means anything without a panel to jump.
+   */
+  onViewCustomerInfo?: () => void;
+  onViewInteractionHistory?: () => void;
   /**
    * One entry per time this channel was reopened (via "Add Channel") while
    * closed — `Interaction`'s own `Thread.reopenedContacts`,
@@ -2820,6 +2834,8 @@ export function InteractionTranscript({
                     previousAgent={contactOverview.previousAgent}
                     snapshot={contactOverview.snapshot}
                     journeySummary={contactOverview.journeySummary}
+                    onViewCustomerInfo={onViewCustomerInfo}
+                    onViewInteractionHistory={onViewInteractionHistory}
                   />
                 )}
                 {messages.length > 0 && (

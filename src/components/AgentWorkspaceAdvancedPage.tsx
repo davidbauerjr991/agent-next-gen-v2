@@ -167,6 +167,7 @@ import {
   CustomerInformationSidePanel,
   CustomerRowInfoPanel,
   AGENT_WORKSPACE_CUSTOMER_PANEL_TABS,
+  type CustomerPanelTabLabel,
   buildCustomerInfoFields,
   useCustomerRecordDraft,
   findPossibleCustomerMatches,
@@ -2104,6 +2105,20 @@ export function AgentWorkspaceAdvancedPage({
   // defaults — it stays OPEN though, just no longer docked. See that
   // guard's own doc comment.
   const [sidePanelOpen,     setSidePanelOpen]     = useState(true);
+  // Drives `CustomerInformationSidePanel`'s own `focusTabOverride` prop —
+  // see that prop's doc comment (agent-next-gen-customer-info-panel.tsx).
+  // Fed by the Contact Overview's own "View customer info" link
+  // (`focusCustomerPanelTab` below) via `InteractionTranscript`'s
+  // `onViewCustomerInfo`.
+  const [customerPanelFocusTab, setCustomerPanelFocusTab] = useState<
+    { tab: CustomerPanelTabLabel; version: number } | undefined
+  >(undefined);
+  const customerPanelFocusTabVersionRef = useRef(0);
+  const focusCustomerPanelTab = (tab: CustomerPanelTabLabel) => {
+    customerPanelFocusTabVersionRef.current += 1;
+    setCustomerPanelFocusTab({ tab, version: customerPanelFocusTabVersionRef.current });
+    setSidePanelOpen(true);
+  };
   // No setter — always pinned. `onPinToggle` is deliberately left unset on
   // the real `SidePanel` below (see its own doc comment), so there's no
   // path that ever actually unpins this; kept as `useState` rather than a
@@ -6828,6 +6843,16 @@ export function AgentWorkspaceAdvancedPage({
                                 }
                               : undefined
                           }
+                          // "View customer info" jumps this page's docked
+                          // Customer Information panel to its Overview tab
+                          // — see AgentNextGenPage.tsx's identical wiring
+                          // for the full reasoning, including why there's
+                          // no `onViewInteractionHistory` here (this page's
+                          // panel tabs never include "Contacts" either,
+                          // whether the interaction is a real customer or
+                          // not — see the `tabs` prop at this page's own
+                          // `CustomerInformationSidePanel` call site).
+                          onViewCustomerInfo={() => focusCustomerPanelTab("Overview")}
                           // Per explicit request/follow-up clarification —
                           // see `activeChannelIsNewOutboundThread`'s own
                           // doc comment above for the full reasoning.
@@ -7647,6 +7672,7 @@ export function AgentWorkspaceAdvancedPage({
                   onStartInteraction={(contact, channel, phone, skillId) =>
                     handleStartCall({ contact, channel, phone, skillId })
                   }
+                  focusTabOverride={customerPanelFocusTab}
                   // Per explicit request: an unknown-contact interaction
                   // (`!activeInteractionIsRealCustomer` — same signal
                   // `tabs` above already keys off) gets the customer-

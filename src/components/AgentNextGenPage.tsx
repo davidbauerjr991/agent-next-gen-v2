@@ -150,6 +150,7 @@ import {
   CustomerInformationSidePanel,
   CustomerRowInfoPanel,
   AGENT_WORKSPACE_CUSTOMER_PANEL_TABS,
+  type CustomerPanelTabLabel,
   buildCustomerInfoFields,
   useCustomerRecordDraft,
   buildCopilotSummary,
@@ -1987,6 +1988,27 @@ export function AgentNextGenPage({
   // defaults — it stays OPEN though, just no longer docked. See that
   // guard's own doc comment.
   const [sidePanelOpen,     setSidePanelOpen]     = useState(true);
+  // Drives `CustomerInformationSidePanel`'s own `focusTabOverride` prop —
+  // see that prop's doc comment (agent-next-gen-customer-info-panel.tsx).
+  // Fed by the Contact Overview's own "View customer info"/"View
+  // interaction history" links (`focusCustomerPanelTab` below) via
+  // `InteractionTranscript`'s `onViewCustomerInfo`/`onViewInteractionHistory`.
+  const [customerPanelFocusTab, setCustomerPanelFocusTab] = useState<
+    { tab: CustomerPanelTabLabel; version: number } | undefined
+  >(undefined);
+  const customerPanelFocusTabVersionRef = useRef(0);
+  /** Opens the docked Customer Information panel (if closed) and jumps it
+   *  to `tab` — the shared handler behind both Contact Overview links.
+   *  `tab` should already be one of this page's own
+   *  `AGENT_WORKSPACE_CUSTOMER_PANEL_TABS` — a caller passing anything else
+   *  would just have no visible effect (see `focusTabOverride`'s own doc
+   *  comment for why: this panel's tab row here never shows a tab outside
+   *  its own configured `tabs` list). */
+  const focusCustomerPanelTab = (tab: CustomerPanelTabLabel) => {
+    customerPanelFocusTabVersionRef.current += 1;
+    setCustomerPanelFocusTab({ tab, version: customerPanelFocusTabVersionRef.current });
+    setSidePanelOpen(true);
+  };
   // No setter — always pinned. `onPinToggle` is deliberately left unset on
   // the real `SidePanel` below (see its own doc comment), so there's no
   // path that ever actually unpins this; kept as `useState` rather than a
@@ -6804,6 +6826,18 @@ export function AgentNextGenPage({
                                 }
                               : undefined
                           }
+                          // "View customer info" jumps this page's docked
+                          // Customer Information panel to its Overview tab.
+                          // No `onViewInteractionHistory` here — this page's
+                          // panel is configured with
+                          // `AGENT_WORKSPACE_CUSTOMER_PANEL_TABS`, which
+                          // doesn't include "Contacts" at all (see that
+                          // constant's own doc comment), so there's no
+                          // interaction-history tab to jump to; omitting the
+                          // prop hides that link entirely (same as
+                          // `ContactOverview` already does for any omitted
+                          // callback).
+                          onViewCustomerInfo={() => focusCustomerPanelTab("Overview")}
                           // Per explicit request/follow-up clarification —
                           // see `activeChannelIsNewOutboundThread`'s own
                           // doc comment above for the full reasoning.
@@ -7620,6 +7654,7 @@ export function AgentNextGenPage({
                   onStartInteraction={(contact, channel, phone, skillId) =>
                     handleStartCall({ contact, channel, phone, skillId })
                   }
+                  focusTabOverride={customerPanelFocusTab}
                 />
                 </div>
               )}
