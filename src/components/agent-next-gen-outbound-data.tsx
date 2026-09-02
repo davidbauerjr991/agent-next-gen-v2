@@ -337,6 +337,14 @@ export const OUTBOUND_GROUPS: CreateNewOutboundConfig["groups"] = [
   // contact" once nothing's favorited yet, no "No favorites yet —"
   // prefix (that phrasing read like an error/apology for something
   // missing, when the real point is just "type to search").
+  // Per a later explicit request, Dial Pad is now the FIRST row in this
+  // list (it used to sit last, reachable only via its own separate ghost
+  // button below the list — see that entry's own doc comment for how
+  // that changed) — moved here in `OUTBOUND_GROUPS` itself, not
+  // special-cased in create-new.tsx, since that component already
+  // renders every entry in whatever order `outbound.groups` defines,
+  // Dial Pad included now that it's just another row.
+  { id: "dialpad", label: "Dial Pad", kind: "dialpad", icon: dialpadCategoryIcon() },
   // Per a later explicit request (the "Choose group" `Select` was
   // replaced with an always-visible list of rows, lyra-ui's create-new.tsx
   // — see that list's own doc comment), this entry's label is "Favorites"
@@ -355,9 +363,7 @@ export const OUTBOUND_GROUPS: CreateNewOutboundConfig["groups"] = [
   // of what's authored on the element itself. "Favorites" (above)
   // intentionally has no icon — it wasn't part of the requested set, and
   // the plain "Favorites" row reads fine unadorned as the default/catch-all
-  // option. "Dial Pad" (below) DOES have its own icon (`dialpadCategoryIcon`)
-  // despite never reaching this same list — see that group's own doc
-  // comment. Reordered per the reference mockup: Skills now comes before
+  // option. Reordered per the reference mockup: Skills now comes before
   // "My Team" (previously "Teams," see that entry's own doc comment),
   // which used to sit right after Agents.
   { id: "agents", label: "Agents", contacts: OUTBOUND_AGENTS, icon: agentCategoryIcon() },
@@ -386,26 +392,13 @@ export const OUTBOUND_GROUPS: CreateNewOutboundConfig["groups"] = [
   // by simply removing its id from that array, same as any other
   // hide/restore case that mechanism already supports.
   { id: "customers", label: "Customers", contacts: OUTBOUND_CUSTOMERS, icon: customerCategoryIcon() },
-  // Reachable via a small ghost button below the group list instead of a
-  // row in it. lyra-ui's own create-new.tsx filters `kind === "dialpad"`
-  // out of the list specifically (not this array), so this group still
-  // flows through to `outbound.groups` for that ghost button (and
-  // `activeGroup`/`onQuickDial`/`handleQuickDial` below) to find, it just
-  // never appears as a row. `icon` set (`dialpadCategoryIcon`) so the
-  // ghost button renders the same grid glyph the reference mockup showed,
-  // reusing the group's own icon like every other group already does
-  // rather than hardcoding one in create-new.tsx.
-  { id: "dialpad", label: "Dial Pad", kind: "dialpad", icon: dialpadCategoryIcon() },
 ];
 
 // Group ids hidden from the "New Outbound" group list without being
 // removed from `OUTBOUND_GROUPS` above — see that constant's own doc
 // comment for why. Add/remove ids here to hide/restore a group; the
 // group's own definition never needs to change. "customers" is hidden
-// here per explicit request ("keep dial pad but not customers") — Dial
-// Pad is excluded from the list a different way (lyra-ui's create-new.tsx,
-// keyed off `kind` rather than this array), since it's still reachable via
-// its own ghost button and shouldn't count as "hidden."
+// here per explicit request ("keep dial pad but not customers").
 export const HIDDEN_OUTBOUND_GROUP_IDS: string[] = ["customers"];
 
 export const OUTBOUND_CONFIG: CreateNewOutboundConfig = {
