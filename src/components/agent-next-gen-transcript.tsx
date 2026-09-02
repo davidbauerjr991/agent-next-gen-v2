@@ -2563,7 +2563,31 @@ export function InteractionTranscript({
             nearest scrolling ancestor (the `overflow-y-auto` div above),
             not against this width constraint. */}
         <div className="w-full">
-          {sessionsToRender.map((session) => {
+          {/* Per explicit request ("let's not have multiple threads in a
+              chat anymore - simply hide the ones in the existing
+              assignments"): only the CURRENT session (`lastSessionId`)
+              ever renders here now — every historical session (a past
+              `TRANSCRIPT_SESSIONS`/`_VOICE`/`_EMAIL` entry, or an earlier
+              `reopenedContacts` entry) is filtered out of the scrollable
+              transcript entirely, not just collapsed (the previous
+              behavior — see `collapsedSessionIds`' own doc comment above,
+              now dead code left in place rather than ripped out: reopening
+              a channel still needs its own fresh `Contact` object with a
+              new id for `currentStatus`/`onCurrentStatusChange` to attach
+              to, and Contact History/session-count bookkeeping elsewhere
+              still reads the full un-filtered `sessionsToRender`/
+              `liveMessagesBySessionId`, so removing the underlying
+              multi-session data model itself would be a much bigger,
+              riskier change than what was actually asked for here — a
+              purely visual hide). A single still-visible session with no
+              other one to distinguish it from reads a little oddly with a
+              full "N Messages | #contactId · date" separator bar of its
+              own still on screen, but that bar is also this session's only
+              home for its status pill/Consult/Transfer/Outcome/Unassign
+              cluster, so it stays. */}
+          {sessionsToRender
+            .filter((session) => session.id === lastSessionId)
+            .map((session) => {
             // Falls back to `[]` for the synthetic "just launched" session
             // (not seeded into `sessionMessages` at mount, since it isn't
             // part of the fixed `TRANSCRIPT_SESSIONS` array that seeds that
