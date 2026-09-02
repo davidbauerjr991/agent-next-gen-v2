@@ -6833,13 +6833,18 @@ export function AgentWorkspaceAdvancedPage({
                           // gated on the same real-customer check for the
                           // same "no fabricated history for a genuinely new
                           // contact" reasoning.
+                          // Per explicit follow-up request ("remove contact
+                          // overview from all contacts without customer
+                          // association") — see AgentNextGenPage.tsx's
+                          // identical gate for the full reasoning: the whole
+                          // block, not just the fabricated `previousAgent`/
+                          // `snapshot` fields, is now gated on
+                          // `activeInteractionIsRealCustomer`.
                           contactOverview={
-                            activeChannel?.startedFresh
+                            activeChannel?.startedFresh && activeInteractionIsRealCustomer
                               ? {
                                   ...buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer),
-                                  journeySummary: activeInteractionIsRealCustomer
-                                    ? buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary
-                                    : undefined,
+                                  journeySummary: buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary,
                                 }
                               : undefined
                           }

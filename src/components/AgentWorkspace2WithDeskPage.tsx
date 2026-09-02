@@ -7930,27 +7930,30 @@ export function AgentWorkspace2WithDeskPage({
                           // deterministic recap the former Copilot tab used
                           // to show (`buildCopilotSummary`, agent-next-gen-
                           // customer-info-panel.tsx) before Copilot itself
-                          // was hidden. Gated on `activeInteractionIsRealCustomer
-                          // || activeInteraction.id === MARCUS_WEBB_ID` —
-                          // ONE OR of those, deliberately different from
-                          // `buildContactOverviewInfo`'s own second argument
-                          // just below: Marcus's own `buildCopilotSummary`
-                          // entry is hand-authored specifically for HIS
-                          // scripted scenario (a real, intentional recap),
-                          // unlike the generic hashed `previousAgent`/
-                          // `snapshot` pool that's inappropriate for a
-                          // contact deliberately "separate from the
-                          // customer database" — so his Journey Summary
-                          // still shows even though his prior-agent history
-                          // correctly doesn't.
+                          // was hidden.
+                          //
+                          // Per a later explicit follow-up request ("remove
+                          // contact overview from all contacts without
+                          // customer association"), the WHOLE block below —
+                          // not just the fabricated `previousAgent`/
+                          // `snapshot` fields — is now gated purely on
+                          // `activeInteractionIsRealCustomer`. This removes
+                          // the Marcus Webb carve-out this doc comment used
+                          // to describe (his own hand-authored
+                          // `buildCopilotSummary` Journey Summary used to
+                          // show anyway, deliberately, even though his
+                          // scenario is "separate from the customer
+                          // database" — see MARCUS_WEBB_ID's own doc
+                          // comment, agent-next-gen-marcus-webb-scenario.ts)
+                          // — he has no backing customer record either, so
+                          // the newer, broader instruction wins and his
+                          // Contact Overview (Journey Summary included) no
+                          // longer shows.
                           contactOverview={
-                            (activeChannel?.startedFresh || activeInteraction.id === MARCUS_WEBB_ID)
+                            activeChannel?.startedFresh && activeInteractionIsRealCustomer
                               ? {
                                   ...buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer),
-                                  journeySummary:
-                                    activeInteractionIsRealCustomer || activeInteraction.id === MARCUS_WEBB_ID
-                                      ? buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary
-                                      : undefined,
+                                  journeySummary: buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary,
                                 }
                               : undefined
                           }

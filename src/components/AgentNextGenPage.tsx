@@ -6816,13 +6816,24 @@ export function AgentNextGenPage({
                           // home, so it stays gated on the same real-
                           // customer check for the same "no fabricated
                           // history for a genuinely new contact" reasoning.
+                          // Per explicit follow-up request ("remove contact
+                          // overview from all contacts without customer
+                          // association"): the whole block — not just the
+                          // fabricated `previousAgent`/`snapshot` fields —
+                          // is now gated on `activeInteractionIsRealCustomer`
+                          // too. An ad-hoc/typed/quickdial/redial contact
+                          // with no backing record has nothing genuine to
+                          // show here (not even the plain "this is your
+                          // first contact" sentence, or an empty "Contact
+                          // Snapshot" row with nothing under it but the new
+                          // links) — omitting `contactOverview` entirely
+                          // hides the block, same as `ContactOverview` does
+                          // for any other genuinely-nothing-to-show contact.
                           contactOverview={
-                            activeChannel?.startedFresh
+                            activeChannel?.startedFresh && activeInteractionIsRealCustomer
                               ? {
                                   ...buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer),
-                                  journeySummary: activeInteractionIsRealCustomer
-                                    ? buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary
-                                    : undefined,
+                                  journeySummary: buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary,
                                 }
                               : undefined
                           }
