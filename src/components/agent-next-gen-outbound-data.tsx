@@ -337,22 +337,48 @@ export const OUTBOUND_GROUPS: CreateNewOutboundConfig["groups"] = [
   // contact" once nothing's favorited yet, no "No favorites yet —"
   // prefix (that phrasing read like an error/apology for something
   // missing, when the real point is just "type to search").
-  { id: "all", label: "All", kind: "favorites", emptyMessage: "Search above to find a contact" },
+  // Per a later explicit request (the "Choose group" `Select` was
+  // replaced with an always-visible list of rows, lyra-ui's create-new.tsx
+  // — see that list's own doc comment), this entry's label is "Favorites"
+  // again, matching the reference mockup's own top row exactly — with a
+  // real list of rows to read top-to-bottom, a plain "All" no longer makes
+  // sense as a label sitting alongside "Agents"/"Skills"/etc. `id`/`kind`/
+  // `defaultGroupId` (below) are unchanged, so this is still the DEFAULT/
+  // starting filter, just relabeled.
+  { id: "all", label: "Favorites", kind: "favorites", emptyMessage: "Search above to find a contact" },
   // Per explicit request: each group below gets a leading icon in the
-  // "Choose group" dropdown (`CreateNewOutboundGroup.icon`, lyra-ui's
-  // create-new.tsx), matched to what that group represents — a headset for
-  // Agents (support), a people-group for Teams, a share/network glyph for
-  // Skills, and a single person for Customers. `h-4 w-4` here is purely
-  // defensive/self-documenting — `Select`'s own icon slot already forces
-  // every option icon to that size (select.tsx) regardless of what's
-  // authored on the element itself. "All" (above) intentionally has no
-  // icon — it wasn't part of the requested set, and the plain "All" row
-  // reads fine unadorned as the default/catch-all option. "Dial Pad"
-  // (below) DOES have its own icon (`dialpadCategoryIcon`) despite never
-  // reaching this same dropdown — see that group's own doc comment.
+  // group list (`CreateNewOutboundGroup.icon`, lyra-ui's create-new.tsx),
+  // matched to what that group represents — a headset for Agents
+  // (support), a share/network glyph for Skills, a people-group for My
+  // Team. `h-4 w-4` here is purely defensive/self-documenting — that list's
+  // own icon slot already forces every option icon to that size regardless
+  // of what's authored on the element itself. "Favorites" (above)
+  // intentionally has no icon — it wasn't part of the requested set, and
+  // the plain "Favorites" row reads fine unadorned as the default/catch-all
+  // option. "Dial Pad" (below) DOES have its own icon (`dialpadCategoryIcon`)
+  // despite never reaching this same list — see that group's own doc
+  // comment. Reordered per the reference mockup: Skills now comes before
+  // "My Team" (previously "Teams," see that entry's own doc comment),
+  // which used to sit right after Agents.
   { id: "agents", label: "Agents", contacts: OUTBOUND_AGENTS, icon: agentCategoryIcon() },
-  { id: "teams", label: "Teams", contacts: OUTBOUND_TEAMS, icon: teamCategoryIcon() },
   { id: "skills", label: "Skills", contacts: OUTBOUND_SKILLS, icon: skillCategoryIcon() },
+  // Relabeled "Teams" → "My Team" per the reference mockup — `id`
+  // deliberately left as `"teams"` (not renamed to match) since the Teams
+  // group picker/member-roster wiring elsewhere in this app
+  // (AgentNextGenPage.tsx et al.) already keys off this exact id; renaming
+  // it here would silently break that wiring for a label-only request.
+  { id: "teams", label: "My Team", contacts: OUTBOUND_TEAMS, icon: teamCategoryIcon() },
+  // Three brand-new categories from the reference mockup with no real
+  // contact data or action behind them yet (per explicit follow-up
+  // clarification: "empty placeholder groups") — `kind: "empty"` is the
+  // exact mechanism `create-new.tsx` already has for this (see that
+  // `kind`'s own doc comment): the row is fully clickable/real, it just
+  // always shows `emptyMessage` instead of a contact list, no favoriting
+  // concept. Swap in real `contacts`/`icon` later the same way any other
+  // group here already works, once this app has real data to back them.
+  { id: "partner-network", label: "Partner Network", kind: "empty", emptyMessage: "No partner network contacts yet" },
+  { id: "vendor-directory", label: "Vendor Directory", kind: "empty", emptyMessage: "No vendor directory contacts yet" },
+  { id: "regional-offices", label: "Regional Offices", kind: "empty", emptyMessage: "No regional offices contacts yet" },
   { id: "customers", label: "Customers", contacts: OUTBOUND_CUSTOMERS, icon: customerCategoryIcon() },
   // No longer hidden via `HIDDEN_OUTBOUND_GROUP_IDS` (see that constant's
   // updated doc comment below) — per explicit follow-up request, this
