@@ -821,17 +821,17 @@ export const NOTIFICATION_CHANNEL: Record<string, ChannelType> = {
 };
 
 export const INITIAL_NOTIFICATIONS: AgentNotification[] = [
-  { id: "1", type: "new-case",       title: newCaseNotificationTitle(NOTIFICATION_CHANNEL["1"]), subtitle: "Noah Patel",   timestamp: "13m ago", read: false },
+  { id: "1", type: "new-case",       title: newCaseNotificationTitle(NOTIFICATION_CHANNEL["1"]), subtitle: "Noah Patel",   timestamp: "13m ago", read: true },
   // "new-agent-chat", not "new-chat" — a request from a colleague, not a
   // customer, so it gets its own type (distinct icon/color,
   // agent-notifications.tsx) and title, per explicit request that it read
   // as a different category from "Olivia Reed"'s customer chat below, not
   // just different label text on the same look.
-  { id: "2", type: "new-agent-chat", title: "New Agent Chat",                                            subtitle: "Sarah Miller",  timestamp: "18m ago", read: false },
+  { id: "2", type: "new-agent-chat", title: "New Agent Chat",                                            subtitle: "Sarah Miller",  timestamp: "18m ago", read: true },
   // "Escalation - {channel}" — same per-channel suffix pattern as
   // "new-case"'s own title, per explicit request, rather than a bare
   // "Escalation" that doesn't say what actually landed.
-  { id: "3", type: "escalation",     title: `Escalation - ${channelNoun(NOTIFICATION_CHANNEL["3"])}`,     subtitle: "Lauren Kim",    timestamp: "24m ago", read: false },
+  { id: "3", type: "escalation",     title: `Escalation - ${channelNoun(NOTIFICATION_CHANNEL["3"])}`,     subtitle: "Lauren Kim",    timestamp: "24m ago", read: true },
   { id: "4", type: "new-case",       title: newCaseNotificationTitle(NOTIFICATION_CHANNEL["4"]),          subtitle: "Ethan Zhang",   timestamp: "37m ago", read: true  },
   { id: "5", type: "new-chat",       title: "New Chat",                                                   subtitle: "Olivia Reed",   timestamp: "51m ago", read: true  },
   { id: "6", type: "missed-call",    title: "Missed Call",                                                 subtitle: "David Brown",   timestamp: "1h ago",  read: true  },
