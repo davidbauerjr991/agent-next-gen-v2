@@ -1000,6 +1000,33 @@ export function AgentNextGenPage({
     setChannelsAllExpanded((v) => !v);
     setChannelsExpandedOverrideVersion((v) => v + 1);
   };
+  // Each card's own current channel-list expanded/collapsed state, reported
+  // via `InteractionNavItem`'s `onChannelsExpandedChange` (its own doc
+  // comment explains why — the card owns that state internally, this is
+  // just a read-only mirror of it). Keyed by `interaction.id`, NOT reset or
+  // pruned when a card unmounts — a stale entry for a since-dismissed
+  // interaction is harmless (the "every card agrees" check below only ever
+  // looks up ids that are still in `interactions`).
+  const [channelsExpandedById, setChannelsExpandedById] = useState<Record<string, boolean>>({});
+  // Per explicit request: if the agent manually toggles individual cards'
+  // chevrons by hand until every one happens to already agree with one
+  // direction, `AssignmentsExpandCollapseAllButton`'s own `allExpanded`
+  // should catch up to match — e.g. hand-expanding the one remaining
+  // collapsed card should flip the button to "Collapse all" on its own,
+  // without waiting for another bulk click. Deliberately does NOT bump
+  // `channelsExpandedOverrideVersion` — this only updates the button's own
+  // label/icon to reflect reality, it never re-applies an override onto
+  // cards that already got there by hand.
+  useEffect(() => {
+    if (interactions.length === 0) return;
+    const states = interactions.map((i) => channelsExpandedById[i.id]);
+    if (states.some((s) => s === undefined)) return;
+    if (states.every((s) => s === true) && !channelsAllExpanded) {
+      setChannelsAllExpanded(true);
+    } else if (states.every((s) => s === false) && channelsAllExpanded) {
+      setChannelsAllExpanded(false);
+    }
+  }, [channelsExpandedById, interactions, channelsAllExpanded]);
   const [activeInteractionId, setActiveInteractionId] = useState<string | null>(
     () => initialInteraction?.id ?? null
   );
@@ -5531,6 +5558,16 @@ export function AgentNextGenPage({
                       expanded: channelsAllExpanded,
                       version: channelsExpandedOverrideVersion,
                     }}
+                    // Mirrors this card's own expanded state up into
+                    // `channelsExpandedById` — see that state's own doc
+                    // comment for why (catching up
+                    // `AssignmentsExpandCollapseAllButton`'s own label once
+                    // every card happens to agree by hand).
+                    onChannelsExpandedChange={(expanded) =>
+                      setChannelsExpandedById((prev) =>
+                        prev[interaction.id] === expanded ? prev : { ...prev, [interaction.id]: expanded }
+                      )
+                    }
                     // Kept in sync with the ChannelToggle bar in this
                     // interaction's record-header PageHeader — see
                     // Interaction.currentChannelId's own doc comment.
