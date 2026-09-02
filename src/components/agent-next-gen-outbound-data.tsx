@@ -184,6 +184,11 @@ export const OUTBOUND_AGENTS: NonNullable<CreateNewOutboundConfig["groups"][numb
   // group heading between them (see `CreateNewContact.categoryIcon`'s own
   // doc comment, create-new.tsx).
   categoryIcon: initialsAvatar(initialsFor(a.name), a.avatarClassName),
+  // Per explicit follow-up request: the plain (uncircled) headset glyph
+  // that used to fill `categoryIcon` before it became an initials avatar
+  // now sits inline next to the name instead — see `CreateNewContact.
+  // typeIcon`'s own doc comment, create-new.tsx.
+  typeIcon: agentCategoryIcon(),
   // Per explicit request: calling/chatting an agent skips the "Select
   // Phone"/"Outbound Skill" detail screen entirely and launches
   // immediately — an agent has no real per-contact address to choose
@@ -220,8 +225,10 @@ export const OUTBOUND_CUSTOMERS: NonNullable<CreateNewOutboundConfig["groups"][n
     const { firstName, lastName } = splitCustomerName(c.name);
     return `${firstName.toLowerCase()}.${lastName.toLowerCase()}@example.com`;
   })(),
-  // See `OUTBOUND_AGENTS`'s own identical `categoryIcon` comment above.
+  // See `OUTBOUND_AGENTS`'s own identical `categoryIcon`/`typeIcon` comments
+  // above.
   categoryIcon: initialsAvatar(initialsFor(c.name), c.avatarClassName),
+  typeIcon: customerCategoryIcon(),
 }));
 
 /** One `CreateNewOutboundContact` for a single hand-authored `CONTACT_HISTORY`
@@ -254,8 +261,10 @@ function contactHistoryOutboundContact(entry: ContactHistoryEntry, id: string): 
     },
     email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@example.com`,
     // Every `ContactHistoryEntry` represents a past CUSTOMER contact — see
-    // `OUTBOUND_AGENTS`'s own identical `categoryIcon` comment above.
+    // `OUTBOUND_AGENTS`'s own identical `categoryIcon`/`typeIcon` comments
+    // above.
     categoryIcon: initialsAvatar(initialsFor(entry.name), avatarClassName),
+    typeIcon: customerCategoryIcon(),
   };
 }
 
@@ -318,8 +327,8 @@ export const CONTACT_HISTORY_OUTBOUND_CONTACTS: NonNullable<CreateNewOutboundCon
 
 export const OUTBOUND_TEAMS: NonNullable<CreateNewOutboundConfig["groups"][number]["contacts"]> = [
   // See `OUTBOUND_AGENTS`'s own identical `categoryIcon` comment above.
-  { id: "t1", name: "Billing Support",    initials: "BS", subtitle: "TEAM-04", avatarClassName: "bg-lyra-accent-purple-soft text-lyra-accent-purple-strong", channels: ["voice", "email"], categoryIcon: initialsAvatar("BS", "bg-lyra-accent-purple-soft text-lyra-accent-purple-strong") },
-  { id: "t2", name: "Tier 2 Escalations", initials: "T2", subtitle: "TEAM-07", avatarClassName: "bg-lyra-accent-red-soft text-lyra-accent-red-strong",       channels: ["voice", "email"], categoryIcon: initialsAvatar("T2", "bg-lyra-accent-red-soft text-lyra-accent-red-strong") },
+  { id: "t1", name: "Billing Support",    initials: "BS", subtitle: "TEAM-04", avatarClassName: "bg-lyra-accent-purple-soft text-lyra-accent-purple-strong", channels: ["voice", "email"], categoryIcon: initialsAvatar("BS", "bg-lyra-accent-purple-soft text-lyra-accent-purple-strong"), typeIcon: teamCategoryIcon() },
+  { id: "t2", name: "Tier 2 Escalations", initials: "T2", subtitle: "TEAM-07", avatarClassName: "bg-lyra-accent-red-soft text-lyra-accent-red-strong",       channels: ["voice", "email"], categoryIcon: initialsAvatar("T2", "bg-lyra-accent-red-soft text-lyra-accent-red-strong"), typeIcon: teamCategoryIcon() },
 ];
 
 // Deterministic (no Math.random) per-team agent roster for the Teams
@@ -343,8 +352,8 @@ export const OUTBOUND_SKILLS: NonNullable<CreateNewOutboundConfig["groups"][numb
   // See `OUTBOUND_AGENTS`'s own identical `categoryIcon`/`quickLaunch`
   // comments above — a skill queue has no real per-contact address to
   // choose either, so it gets the same immediate-launch treatment.
-  { id: "s1", name: "Spanish Language",  initials: "ES", subtitle: "SKL-12", avatarClassName: "bg-lyra-accent-green-soft text-lyra-accent-green-strong", channels: ["voice", "email"], status: "available", queueCount: 4, waitTimeSeconds: 200, categoryIcon: initialsAvatar("ES", "bg-lyra-accent-green-soft text-lyra-accent-green-strong"), quickLaunch: true },
-  { id: "s2", name: "Technical Support", initials: "TS", subtitle: "SKL-03", avatarClassName: "bg-lyra-accent-blue-soft text-lyra-accent-blue-strong",   channels: ["voice", "email"], status: "busy",      queueCount: 7, waitTimeSeconds: 95, categoryIcon: initialsAvatar("TS", "bg-lyra-accent-blue-soft text-lyra-accent-blue-strong"), quickLaunch: true },
+  { id: "s1", name: "Spanish Language",  initials: "ES", subtitle: "SKL-12", avatarClassName: "bg-lyra-accent-green-soft text-lyra-accent-green-strong", channels: ["voice", "email"], status: "available", queueCount: 4, waitTimeSeconds: 200, categoryIcon: initialsAvatar("ES", "bg-lyra-accent-green-soft text-lyra-accent-green-strong"), typeIcon: skillCategoryIcon(), quickLaunch: true },
+  { id: "s2", name: "Technical Support", initials: "TS", subtitle: "SKL-03", avatarClassName: "bg-lyra-accent-blue-soft text-lyra-accent-blue-strong",   channels: ["voice", "email"], status: "busy",      queueCount: 7, waitTimeSeconds: 95, categoryIcon: initialsAvatar("TS", "bg-lyra-accent-blue-soft text-lyra-accent-blue-strong"), typeIcon: skillCategoryIcon(), quickLaunch: true },
 ];
 
 // Every group the "New Outbound" flow could show — kept as its own named
