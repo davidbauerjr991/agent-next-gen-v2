@@ -2197,6 +2197,28 @@ export function InteractionTranscript({
     });
   };
 
+  // Per explicit bug fix: a contact with more than one session (multiple
+  // past, Closed threads plus the current one) used to load with EVERY
+  // session's message content expanded — `collapsedSessionIds` started out
+  // empty, so nothing was collapsed until an agent manually clicked one
+  // shut. Every session but `lastSessionId` always reads "Closed"
+  // (`getSessionStatus`, above), so on a genuinely fresh contact load
+  // (`contactId` — this prop identifies the specific channel/thread being
+  // viewed, not just the customer) every one of THOSE gets collapsed by
+  // default here, leaving only the current session's own messages visible
+  // — an agent can still re-expand any of them individually via
+  // `toggleSessionCollapsed` same as before, this only changes the
+  // starting state. Deliberately NOT included in the dependency array:
+  // `sessionsToRender`/`lastSessionId` themselves — this should fire once
+  // per contact load, not re-collapse a session the agent just re-expanded
+  // simply because a live message arrived and re-triggered a re-render.
+  useEffect(() => {
+    setCollapsedSessionIds(
+      new Set(sessionsToRender.filter((session) => session.id !== lastSessionId).map((session) => session.id))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contactId]);
+
   // The CURRENT session's status is `currentStatus`, a prop from
   // `Interaction` (see its own doc comment for why) — every OTHER
   // (historical) session in this Thread always reads "Closed", full stop,
