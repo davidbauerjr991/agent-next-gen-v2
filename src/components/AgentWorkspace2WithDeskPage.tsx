@@ -7923,6 +7923,20 @@ export function AgentWorkspace2WithDeskPage({
                           // way (see `InteractionTranscript`'s own doc
                           // comment), so his opening message is unaffected.
                           isFreshLaunch={!!activeChannel?.startedFresh || activeInteraction.id === MARCUS_WEBB_ID}
+                          // Per explicit follow-up bug report ("Marcus
+                          // webb's contact overview should be below his
+                          // first message"): `isFreshLaunch` above reads
+                          // `true` for him purely for the empty "Session
+                          // Details" separator it also drives — but his
+                          // opening message is already seeded into
+                          // `liveMessages` the moment his interaction is
+                          // created (`buildMarcusWebbInteraction`), not
+                          // genuinely absent the way a real fresh launch's
+                          // is. Overriding to `"bottom"` here (see
+                          // `contactOverviewPosition`'s own doc comment)
+                          // puts his Contact Overview after that opening
+                          // message instead of before it.
+                          contactOverviewPosition={activeInteraction.id === MARCUS_WEBB_ID ? "bottom" : undefined}
                           // Per explicit request: mirrors `isFreshLaunch`'s
                           // own gating just above (including the
                           // MARCUS_WEBB_ID demo case) — see

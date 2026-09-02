@@ -1809,6 +1809,7 @@ export function InteractionTranscript({
   skillLabel,
   isFreshLaunch,
   contactOverview,
+  contactOverviewPosition,
   onViewCustomerInfo,
   onViewInteractionHistory,
   onLaunchPreviousAgentInteraction,
@@ -1879,6 +1880,22 @@ export function InteractionTranscript({
    * summarize).
    */
   contactOverview?: ContactOverviewInfo;
+  /**
+   * Overrides which of the two `ContactOverview` render spots is used —
+   * see either spot's own doc comment below for what each means. Only
+   * needed when a caller's own `isFreshLaunch` value doesn't actually
+   * match which spot its `ContactOverview` should use: the Marcus Webb
+   * scripted scenario (AgentWorkspace2WithDeskPage.tsx) sets
+   * `isFreshLaunch` for its OTHER effect (the empty "Session Details"
+   * separator a genuinely brand-new text conversation gets) even though
+   * his first message arrives instantly/scripted rather than empty — per
+   * explicit bug report, his Contact Overview still needs to land AFTER
+   * that first message, i.e. the "bottom" spot, not the "top" one
+   * `isFreshLaunch` would otherwise pick for him. Omit to fall back to
+   * the default `isFreshLaunch ? "top" : "bottom"` every other caller
+   * already gets.
+   */
+  contactOverviewPosition?: "top" | "bottom";
   /**
    * Forwarded straight through to the rendered `ContactOverview`'s own
    * `onViewCustomerInfo`/`onViewInteractionHistory` props (see either
@@ -2175,10 +2192,17 @@ export function InteractionTranscript({
     liveMessagesBySessionId[baseLiveMessageSessionId] = liveMessages;
   }
 
+  // Which of the two `ContactOverview` spots below actually renders it —
+  // see `contactOverviewPosition`'s own doc comment for why this isn't
+  // simply `isFreshLaunch` itself for every caller.
+  const contactOverviewAtBottom = contactOverviewPosition
+    ? contactOverviewPosition === "bottom"
+    : !isFreshLaunch;
+
   // Per explicit follow-up bug report ("you put it above the latest
   // interaction bubbles - it should be at the bottom"): for the transfer/
-  // existing-conversation `ContactOverview` spot (`!isFreshLaunch`, below),
-  // this session's own `liveMessagesBySessionId` entry can ALREADY contain
+  // existing-conversation `ContactOverview` spot (`contactOverviewAtBottom`,
+  // below), this session's own `liveMessagesBySessionId` entry can ALREADY contain
   // pre-existing conversation content when the transcript first renders
   // (a Contact History resume seeds its whole prior conversation through
   // `liveMessages`, not the fixed `messages` array) — rendering
@@ -2864,21 +2888,25 @@ export function InteractionTranscript({
                     doc comment above; a reopened/historical session under
                     this same channel already has real messages of its own,
                     not a fresh-launch moment to summarize.
-                    `isFreshLaunch` additionally gates WHICH of the two spots
-                    below actually renders it (per explicit request): a
-                    genuinely brand-new, empty conversation shows it up here,
-                    first thing the agent reads before anything else exists
-                    to read. A channel that was picked up already carrying a
-                    conversation — a transfer, or any other "existing
-                    conversation" case `!isFreshLaunch` covers (this app has
-                    no separate transferred flag; a transferred-in channel
-                    looks identical to a resumed one, some pre-existing
-                    messages already sitting on it) — shows it at the OTHER
-                    spot instead, just above the live-messages block below,
-                    so the agent reads the existing history first and this
-                    summary lands right where their own new messages are
-                    about to continue from. */}
-                {contactOverview && session.id === lastSessionId && isFreshLaunch && (
+                    `contactOverviewAtBottom` additionally gates WHICH of the
+                    two spots below actually renders it (per explicit
+                    request): a genuinely brand-new, empty conversation
+                    shows it up here, first thing the agent reads before
+                    anything else exists to read. A channel that was picked
+                    up already carrying a conversation — a transfer, or any
+                    other "existing conversation" case the bottom spot
+                    covers (this app has no separate transferred flag; a
+                    transferred-in channel looks identical to a resumed
+                    one, some pre-existing messages already sitting on it —
+                    see `contactOverviewPosition`'s own doc comment for the
+                    one scripted exception, Marcus Webb, that still needs
+                    the bottom spot despite `isFreshLaunch` reading `true`
+                    for him) — shows it at the OTHER spot instead, just
+                    above the live-messages block below, so the agent reads
+                    the existing history first and this summary lands right
+                    where their own new messages are about to continue
+                    from. */}
+                {contactOverview && session.id === lastSessionId && !contactOverviewAtBottom && (
                   <ContactOverview
                     customerName={displayName}
                     previousAgent={contactOverview.previousAgent}
@@ -2964,7 +2992,7 @@ export function InteractionTranscript({
                     its sibling occurrence above this session's `messages`
                     block for the full "which of the two spots" reasoning.
                     This one covers a transfer/existing-conversation pickup
-                    (`!isFreshLaunch`): it renders AFTER this session's own
+                    (`contactOverviewAtBottom`): it renders AFTER this session's own
                     existing message history — the `messages.map(...)`/
                     Voice-Email-placeholder blocks above AND the "already
                     existed" slice of live messages just below (see
@@ -2976,7 +3004,7 @@ export function InteractionTranscript({
                 {(() => {
                   const sessionLiveMessages = liveMessagesBySessionId[session.id] ?? [];
                   const isNonFreshOverviewSession =
-                    !!contactOverview && session.id === lastSessionId && !isFreshLaunch;
+                    !!contactOverview && session.id === lastSessionId && contactOverviewAtBottom;
                   const existingLiveMessages = isNonFreshOverviewSession
                     ? sessionLiveMessages.slice(0, contactOverviewLiveMessageBoundaryRef.current)
                     : sessionLiveMessages;
