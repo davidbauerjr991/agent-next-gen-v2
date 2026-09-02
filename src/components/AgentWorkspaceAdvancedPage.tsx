@@ -212,6 +212,8 @@ import {
   ChevronRight,
   CircleAlert,
   Inbox,
+  Check,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -6022,21 +6024,31 @@ export function AgentWorkspaceAdvancedPage({
                       // exact `AgentPresenceBadge` corner treatment the
                       // Outbound picker's own contact rows already use
                       // (create-new.tsx) — a `size="sm"` circle `Badge`
-                      // with `px-0`/`border-lyra-bg-surface-base`, holding
-                      // a plain white dot as content. Three states now,
-                      // not two: `hasOpenChatThread` (a genuine live
-                      // presence signal) still means "online" (green); a
-                      // closed interaction is a definite, real "offline"
-                      // (gray) regardless of channel; everything else — an
-                      // open interaction with no live presence signal at
-                      // all (voice/SMS/email/WhatsApp; see the OLD pill's
-                      // own doc comment on why those can't honestly claim
-                      // "Online") — reads as "idle" (amber) instead of
-                      // showing no indicator at all. Only for a real
-                      // customer, not an agent call (`!activeInteractionIsAgentCall`)
-                      // — presence is a customer concept here; an agent's
-                      // own status already has its own dedicated surface
-                      // elsewhere (the status menu).
+                      // with `px-0`/`border-lyra-bg-surface-base`.
+                      //
+                      // Per a further explicit follow-up request ("customer
+                      // statuses should only be visible in chats"), this
+                      // now only renders at all when `hasOpenChatThread` is
+                      // true — the ORIGINAL "idle" (amber, for voice/SMS/
+                      // email/WhatsApp with no live signal) branch is gone
+                      // entirely rather than just recolored, since a
+                      // non-chat interaction shouldn't show ANY presence
+                      // indicator, matching the OLD pill's own original
+                      // reasoning that those channels have no way to
+                      // honestly know whether the customer is still there.
+                      // Once a chat thread IS open, it's just two states:
+                      // "online" (green) normally, "offline" (gray) once
+                      // the interaction is closed — and per a further
+                      // follow-up request ("it should be a green check
+                      // like other available statuses"), each renders a
+                      // real Check/X glyph as the Badge's content rather
+                      // than a plain dot, matching `AgentPresenceBadge`'s
+                      // own `available`/`offline` treatment exactly. Only
+                      // for a real customer, not an agent call
+                      // (`!activeInteractionIsAgentCall`) — presence is a
+                      // customer concept here; an agent's own status
+                      // already has its own dedicated surface elsewhere
+                      // (the status menu).
                       icon={
                         <span className="relative inline-flex">
                           <Icon
@@ -6045,15 +6057,19 @@ export function AgentWorkspaceAdvancedPage({
                             shape="circle"
                             size="md"
                           />
-                          {!activeInteractionIsAgentCall && (
+                          {!activeInteractionIsAgentCall && hasOpenChatThread && (
                             <Badge
                               shape="circle"
-                              variant={activeInteraction.closed ? "neutral" : hasOpenChatThread ? "success" : "warning"}
+                              variant={activeInteraction.closed ? "neutral" : "success"}
                               size="sm"
-                              aria-label={activeInteraction.closed ? "Offline" : hasOpenChatThread ? "Online" : "Idle"}
+                              aria-label={activeInteraction.closed ? "Offline" : "Online"}
                               className="absolute bottom-[-2px] right-[-2px] px-0 border border-lyra-bg-surface-base"
                             >
-                              <span className="block h-2 w-2 rounded-full bg-white" aria-hidden="true" />
+                              {activeInteraction.closed ? (
+                                <X className="h-2 w-2" strokeWidth={3} aria-hidden="true" />
+                              ) : (
+                                <Check className="h-2 w-2" strokeWidth={3} aria-hidden="true" />
+                              )}
                             </Badge>
                           )}
                         </span>
