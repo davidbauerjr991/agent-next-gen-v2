@@ -6749,15 +6749,33 @@ export function AgentNextGenPage({
                           isFreshLaunch={!!activeChannel?.startedFresh}
                           // Per explicit request: a brand-new contact
                           // launched onto this channel gets a collapsible
-                          // "Contact Overview" (agent-next-gen-transcript.tsx's
-                          // `ContactOverview`) summarizing what the agent
-                          // needs to know before typing — seeded off the
-                          // Interaction's own id (`buildContactOverviewInfo`,
-                          // agent-next-gen-shared-utils.ts) so the same
-                          // customer reads back the same prior-agent/
-                          // snapshot info on every fresh launch instead of
-                          // reshuffling on every render.
-                          contactOverview={activeChannel?.startedFresh ? buildContactOverviewInfo(activeInteraction.id) : undefined}
+                          // "Contact Overview" (lyra-ui's `ContactOverview`)
+                          // summarizing what the agent needs to know before
+                          // typing — seeded off the Interaction's own id
+                          // (`buildContactOverviewInfo`, agent-next-gen-
+                          // shared-utils.ts) so the same customer reads back
+                          // the same prior-agent/snapshot info on every
+                          // fresh launch instead of reshuffling on every
+                          // render. Per explicit follow-up bug fix: only a
+                          // genuinely real contact (backed by a
+                          // `CREATE_NEW_CUSTOMERS` directory record) ever
+                          // gets a fabricated "already been working with
+                          // Agent X" — an outbound/inbound with no backing
+                          // record (a typed address via lyra-ui's `adhoc:`
+                          // "Continue with" flow, a `quickdial:`-dialed
+                          // number, a `redial:` with no real `customerId` —
+                          // see `handleQuickDial`/`handleRedial`'s own doc
+                          // comments) is a genuinely brand-new contact, not
+                          // a returning one, so it must read as a plain
+                          // first contact instead.
+                          contactOverview={
+                            activeChannel?.startedFresh
+                              ? buildContactOverviewInfo(
+                                  activeInteraction.id,
+                                  CREATE_NEW_CUSTOMERS.some((c) => c.id === activeInteraction.id)
+                                )
+                              : undefined
+                          }
                           // Per explicit request/follow-up clarification —
                           // see `activeChannelIsNewOutboundThread`'s own
                           // doc comment above for the full reasoning.

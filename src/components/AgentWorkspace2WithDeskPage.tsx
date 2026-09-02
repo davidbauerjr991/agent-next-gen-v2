@@ -7893,10 +7893,21 @@ export function AgentWorkspace2WithDeskPage({
                           // own gating just above (including the
                           // MARCUS_WEBB_ID demo case) — see
                           // AgentNextGenPage.tsx's identical wiring for the
-                          // full reasoning.
+                          // full reasoning. Per explicit follow-up bug fix:
+                          // gated a second time on `activeInteractionIsRealCustomer`
+                          // (above) so a contact with no backing
+                          // `CREATE_NEW_CUSTOMERS`/`createdCustomerRecords`
+                          // entry — including Marcus Webb himself, whose
+                          // whole scenario is deliberately "separate from
+                          // the customer database" (see MARCUS_WEBB_ID's own
+                          // doc comment, agent-next-gen-marcus-webb-
+                          // scenario.ts) — never gets a fabricated "already
+                          // been working with Agent X"; a genuinely
+                          // brand-new contact reads as a plain first contact
+                          // instead.
                           contactOverview={
-                            activeChannel?.startedFresh || activeInteraction.id === MARCUS_WEBB_ID
-                              ? buildContactOverviewInfo(activeInteraction.id)
+                            (activeChannel?.startedFresh || activeInteraction.id === MARCUS_WEBB_ID)
+                              ? buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer)
                               : undefined
                           }
                           // Per explicit request/follow-up clarification —

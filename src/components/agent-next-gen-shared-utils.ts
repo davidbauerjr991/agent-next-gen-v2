@@ -613,14 +613,30 @@ const CONTACT_OVERVIEW_SNAPSHOTS: string[][] = [
 /** Deterministic (hashed via `hashSeed`, no `Math.random`) mock "what to
  *  know before you start typing" info for a freshly-launched contact —
  *  feeds `ContactOverview`'s own `previousAgent`/`snapshot` props
- *  (agent-next-gen-transcript.tsx's `ContactOverviewInfo`, not imported
- *  here by name per this file's own dependency-direction rule — the
- *  returned shape just happens to match it structurally). Callers seed
- *  this with something stable per contact (e.g. the Interaction's own id)
- *  so the same customer always reads back the same "previously worked
- *  with"/snapshot on every fresh launch, rather than reshuffling on every
- *  render. */
-function buildContactOverviewInfo(seed: string): { previousAgent: { name: string; agentId: string }; snapshot: string[] } {
+ *  (lyra-ui's `ContactOverviewInfo`, not imported here by name per this
+ *  file's own dependency-direction rule — the returned shape just happens
+ *  to match it structurally). Callers seed this with something stable per
+ *  contact (e.g. the Interaction's own id) so the same customer always
+ *  reads back the same "previously worked with"/snapshot on every fresh
+ *  launch, rather than reshuffling on every render.
+ *
+ *  `isKnownCustomer` — per explicit request/bug fix: an outbound/inbound
+ *  contact with no backing `CREATE_NEW_CUSTOMERS` directory record (a
+ *  typed address via lyra-ui's `adhoc:` "Continue with" flow, a
+ *  `quickdial:`-dialed number, a `redial:` with no real `customerId`, a
+ *  hand-authored Contact History-only entry — see each call site's own
+ *  "is this a real customer" check, e.g. `activeInteractionIsRealCustomer`)
+ *  has, by definition, no genuine prior-agent/snapshot history to surface
+ *  — both fields come back `undefined` rather than a hashed-but-fictional
+ *  "already been working with Agent X" that would misrepresent a
+ *  genuinely brand-new contact as a returning one. Callers should only
+ *  skip passing this at all (defaulting `true`) when they've already
+ *  established the contact is real by some other means. */
+function buildContactOverviewInfo(
+  seed: string,
+  isKnownCustomer: boolean = true
+): { previousAgent?: { name: string; agentId: string }; snapshot?: string[] } {
+  if (!isKnownCustomer) return {};
   const hash = hashSeed(seed);
   return {
     previousAgent: CONTACT_OVERVIEW_PREVIOUS_AGENTS[hash % CONTACT_OVERVIEW_PREVIOUS_AGENTS.length],

@@ -6798,8 +6798,19 @@ export function AgentWorkspaceAdvancedPage({
                           isFreshLaunch={!!activeChannel?.startedFresh}
                           // Per explicit request: mirrors `isFreshLaunch`'s
                           // own gating just above — see AgentNextGenPage.tsx's
-                          // identical wiring for the full reasoning.
-                          contactOverview={activeChannel?.startedFresh ? buildContactOverviewInfo(activeInteraction.id) : undefined}
+                          // identical wiring for the full reasoning. Per
+                          // explicit follow-up bug fix: also passes
+                          // `activeInteractionIsRealCustomer` (above) so a
+                          // contact with no backing `CREATE_NEW_CUSTOMERS`/
+                          // `createdCustomerRecords` entry never gets a
+                          // fabricated "already been working with Agent X"
+                          // — a genuinely brand-new contact reads as a
+                          // plain first contact instead.
+                          contactOverview={
+                            activeChannel?.startedFresh
+                              ? buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer)
+                              : undefined
+                          }
                           // Per explicit request/follow-up clarification —
                           // see `activeChannelIsNewOutboundThread`'s own
                           // doc comment above for the full reasoning.
