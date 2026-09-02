@@ -86,6 +86,7 @@ import {
   nextCustomerSortDirection,
   synthesizeChannelAddress,
   SHOW_ADD_CHANNEL_HEADER_BUTTON,
+  buildContactOverviewInfo,
   type Page,
 } from "@/components/agent-next-gen-shared-utils";
 import {
@@ -6795,6 +6796,10 @@ export function AgentWorkspaceAdvancedPage({
                           // comment for why this reads the ACTIVE channel's
                           // own flag, not `activeInteraction.startedFresh`.
                           isFreshLaunch={!!activeChannel?.startedFresh}
+                          // Per explicit request: mirrors `isFreshLaunch`'s
+                          // own gating just above — see AgentNextGenPage.tsx's
+                          // identical wiring for the full reasoning.
+                          contactOverview={activeChannel?.startedFresh ? buildContactOverviewInfo(activeInteraction.id) : undefined}
                           // Per explicit request/follow-up clarification —
                           // see `activeChannelIsNewOutboundThread`'s own
                           // doc comment above for the full reasoning.

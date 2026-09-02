@@ -88,6 +88,7 @@ import {
   nextCustomerSortDirection,
   synthesizeChannelAddress,
   SHOW_ADD_CHANNEL_HEADER_BUTTON,
+  buildContactOverviewInfo,
   type Page,
 } from "@/components/agent-next-gen-shared-utils";
 import {
@@ -7888,6 +7889,16 @@ export function AgentWorkspace2WithDeskPage({
                           // way (see `InteractionTranscript`'s own doc
                           // comment), so his opening message is unaffected.
                           isFreshLaunch={!!activeChannel?.startedFresh || activeInteraction.id === MARCUS_WEBB_ID}
+                          // Per explicit request: mirrors `isFreshLaunch`'s
+                          // own gating just above (including the
+                          // MARCUS_WEBB_ID demo case) — see
+                          // AgentNextGenPage.tsx's identical wiring for the
+                          // full reasoning.
+                          contactOverview={
+                            activeChannel?.startedFresh || activeInteraction.id === MARCUS_WEBB_ID
+                              ? buildContactOverviewInfo(activeInteraction.id)
+                              : undefined
+                          }
                           // Per explicit request/follow-up clarification —
                           // see `activeChannelIsNewOutboundThread`'s own
                           // doc comment above for the full reasoning.

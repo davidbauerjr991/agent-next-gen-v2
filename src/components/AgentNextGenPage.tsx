@@ -75,6 +75,7 @@ import {
   nextCustomerSortDirection,
   synthesizeChannelAddress,
   SHOW_ADD_CHANNEL_HEADER_BUTTON,
+  buildContactOverviewInfo,
   type Page,
 } from "@/components/agent-next-gen-shared-utils";
 import {
@@ -6746,6 +6747,17 @@ export function AgentNextGenPage({
                           // added onto that same card is still genuinely
                           // fresh and needs its own reading).
                           isFreshLaunch={!!activeChannel?.startedFresh}
+                          // Per explicit request: a brand-new contact
+                          // launched onto this channel gets a collapsible
+                          // "Contact Overview" (agent-next-gen-transcript.tsx's
+                          // `ContactOverview`) summarizing what the agent
+                          // needs to know before typing — seeded off the
+                          // Interaction's own id (`buildContactOverviewInfo`,
+                          // agent-next-gen-shared-utils.ts) so the same
+                          // customer reads back the same prior-agent/
+                          // snapshot info on every fresh launch instead of
+                          // reshuffling on every render.
+                          contactOverview={activeChannel?.startedFresh ? buildContactOverviewInfo(activeInteraction.id) : undefined}
                           // Per explicit request/follow-up clarification —
                           // see `activeChannelIsNewOutboundThread`'s own
                           // doc comment above for the full reasoning.

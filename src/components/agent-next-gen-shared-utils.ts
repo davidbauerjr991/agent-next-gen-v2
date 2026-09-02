@@ -578,6 +578,56 @@ function phoneDisplayFromValue(value: PhoneValue): string {
   return groups.length ? `+1 ${groups.join(" ")}` : "";
 }
 
+/** Small, self-contained pools `buildContactOverviewInfo` below picks from —
+ *  kept local to this file (not `CREATE_NEW_AGENTS`/a real customer-history
+ *  dataset) per this file's own "no dependency on any other piece of mock
+ *  data" rule at the top — deterministic hashing needs something to index
+ *  into either way, and a small fixed pool here is simpler than threading a
+ *  real agent roster through a "dependency-free" utils file. */
+const CONTACT_OVERVIEW_PREVIOUS_AGENTS: { name: string; agentId: string }[] = [
+  { name: "Agent Williams", agentId: "AGT-11233" },
+  { name: "Agent Chen", agentId: "AGT-10847" },
+  { name: "Agent Rivera", agentId: "AGT-11590" },
+  { name: "Agent Patel", agentId: "AGT-10412" },
+  { name: "Agent Novak", agentId: "AGT-11078" },
+];
+const CONTACT_OVERVIEW_SNAPSHOTS: string[][] = [
+  [
+    "Asked about upgrading to the Pro tier for additional storage. Walked through the upgrade flow and confirmed the new billing amount.",
+    "Previously disputed a charge that was resolved in the customer's favor; handle related questions with extra care.",
+  ],
+  [
+    "Reported intermittent login issues on mobile; traced to an outdated app version and resolved after updating.",
+    "Requested a callback about a billing question that was never completed — may still be expecting a follow-up.",
+  ],
+  [
+    "Inquired about canceling a subscription; retained after being offered a discounted plan.",
+    "Long-tenured customer — prioritize a smooth, low-friction experience.",
+  ],
+  [
+    "Had trouble setting up two-factor authentication; walked through it successfully.",
+    "No prior escalations on file.",
+  ],
+];
+
+/** Deterministic (hashed via `hashSeed`, no `Math.random`) mock "what to
+ *  know before you start typing" info for a freshly-launched contact —
+ *  feeds `ContactOverview`'s own `previousAgent`/`snapshot` props
+ *  (agent-next-gen-transcript.tsx's `ContactOverviewInfo`, not imported
+ *  here by name per this file's own dependency-direction rule — the
+ *  returned shape just happens to match it structurally). Callers seed
+ *  this with something stable per contact (e.g. the Interaction's own id)
+ *  so the same customer always reads back the same "previously worked
+ *  with"/snapshot on every fresh launch, rather than reshuffling on every
+ *  render. */
+function buildContactOverviewInfo(seed: string): { previousAgent: { name: string; agentId: string }; snapshot: string[] } {
+  const hash = hashSeed(seed);
+  return {
+    previousAgent: CONTACT_OVERVIEW_PREVIOUS_AGENTS[hash % CONTACT_OVERVIEW_PREVIOUS_AGENTS.length],
+    snapshot: CONTACT_OVERVIEW_SNAPSHOTS[hash % CONTACT_OVERVIEW_SNAPSHOTS.length],
+  };
+}
+
 /** Which of the three top-level views `AgentNextGenPage` is currently
  *  showing — the Desk dashboard, an active interaction's record, or
  *  Settings. */
@@ -635,6 +685,7 @@ export {
   nextInteractionSortDirection,
   quickReplyFieldDisplayValue,
   hashSeed,
+  buildContactOverviewInfo,
   synthesizePhone,
   splitCustomerName,
   synthesizeChannelAddress,
