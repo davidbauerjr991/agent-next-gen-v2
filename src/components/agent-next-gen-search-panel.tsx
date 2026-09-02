@@ -45,6 +45,7 @@ import {
 } from "@/components/agent-next-gen-interactions-table";
 import {
   CustomersListView,
+  CustomerChannelCell,
   type CustomerListRecord,
   type CustomerColKey,
 } from "@/components/agent-next-gen-customers-table";
@@ -231,9 +232,37 @@ function SimpleCustomerSearchBody({ customers }: { customers: SearchPanelCustome
             {customers.sortedRows.map((row) => (
               <ListItem
                 key={row.contactNumber}
+                // `group` — needed so `CustomerChannelCell`'s own per-icon
+                // `group-hover`/`group-focus-within` fade (agent-next-gen-
+                // customers-table.tsx) has a hover/focus context to key off,
+                // exactly the same convention that component's own doc
+                // comment describes for its `CustomersListView` `TableRow`
+                // usage. No `relative` needed here (unlike the table's
+                // separate `leadingChannelStack` overlay variant,
+                // `CustomerChannelStack`) — these icons render as normal
+                // trailing flex content, not an absolutely-positioned
+                // overlay painted over other text.
+                className="group"
                 title={`${row.firstName} ${row.lastName}`}
                 subtitle={row.contactNumber}
-                trailing={<ChevronRight className="h-4 w-4 text-lyra-fg-secondary" strokeWidth={1.5} aria-hidden="true" />}
+                trailing={
+                  // Per explicit request ("display the channel icon buttons
+                  // on hover of customers in the search and allow the agent
+                  // to launch an interaction from those buttons the same way
+                  // they normally would") — reuses `CustomerChannelCell`
+                  // as-is: the exact same hover-reveal channel-icon row (and
+                  // `CustomerChannelPopoverButton`/`onStartInteraction` launch
+                  // flow) the Customers table's own "Channels" column
+                  // already renders, rather than a new one-off treatment.
+                  // Each icon's own `onClick` already `stopPropagation`s
+                  // (see that component's own doc comment), so clicking a
+                  // channel icon launches straight into that channel's
+                  // picker without also firing this row's `onClick` below.
+                  <div className="flex items-center gap-1">
+                    <CustomerChannelCell row={row} onStartInteraction={customers.onStartInteraction} />
+                    <ChevronRight className="h-4 w-4 text-lyra-fg-secondary" strokeWidth={1.5} aria-hidden="true" />
+                  </div>
+                }
                 onClick={() => customers.onRowClick(row)}
               />
             ))}

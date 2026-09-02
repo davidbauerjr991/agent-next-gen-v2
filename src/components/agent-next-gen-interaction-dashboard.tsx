@@ -707,6 +707,7 @@ export function AssignmentsSectionCaption({
   onSortChange,
   allExpanded,
   onToggleAllExpanded,
+  compact = false,
 }: {
   expanded?: boolean;
   count: number;
@@ -715,6 +716,26 @@ export function AssignmentsSectionCaption({
   /** See `AssignmentsExpandCollapseAllButton`'s own doc comment above. */
   allExpanded: boolean;
   onToggleAllExpanded: () => void;
+  /**
+   * Tightens this caption's own vertical padding — the heading row's
+   * `py-2` (8px top, 8px bottom) becomes `pt-0 pb-1` (0px top, 4px
+   * bottom), and the wrapper's own trailing `pb-2` (8px, the gap after
+   * `Separator`) becomes `pb-1` (4px) — per explicit request/devtools
+   * screenshot ("update the padding-top:0 and bottom:4px" on this
+   * caption). Off by default so every OTHER caller of this exported
+   * function keeps its original spacing unaffected — there's only one
+   * caller today (this file's own 3-page `stickyCaption` call sites, all
+   * passing `compact`), but this stays opt-in rather than the new
+   * default in case that changes. NOTE: an earlier attempt at this same
+   * fix landed on a lyra-ui-side *port* of this component
+   * (`assignments-section-caption.tsx`) instead of here — that port is
+   * only ever rendered by lyra-ui's own Storybook stories, never by this
+   * app (all 3 tiers import `AssignmentsSectionCaption` from THIS file,
+   * not from `@nicecxone/lyra-ui` — confirmed via the actual `import`
+   * statement, not assumption), so that earlier fix silently did nothing
+   * here. This copy is the one that actually renders in the app.
+   */
+  compact?: boolean;
 }) {
   const showSort = count > 1;
   if (!expanded) {
@@ -749,8 +770,20 @@ export function AssignmentsSectionCaption({
     // instead of leaving it flush edge-to-edge like every other separator
     // in this rail. The heading row is the only thing that should actually
     // shift right.
-    <div className="flex flex-col pb-2">
-      <div className="flex items-center justify-between gap-2 pl-2 py-2">
+    // `min-h-[36px]` on the heading row (below) — per explicit request, so
+    // this row's own height stays fixed regardless of `showSort`: with 2+
+    // assignments the row's real content (the "Assignments (N)" text plus
+    // the expand/collapse-all + sort buttons) is taller than plain text
+    // alone, but with 0 or 1 assignment `showSort` is `false` and the row
+    // shrinks to just the text's own line-height — previously causing a
+    // visible height jump right at this caption (and the `Separator`
+    // beneath it) whenever the last assignment was dismissed down to zero.
+    // 36px matches the buttons' own rendered height (icon buttons at
+    // `size="sm"`/32px, plus this row's vertical padding), so the
+    // buttons-present case is unaffected; only the buttons-absent case
+    // (0 or 1 assignment) is now padded out to match instead of shrinking.
+    <div className={cn("flex flex-col", compact ? "pb-1" : "pb-2")}>
+      <div className={cn("flex items-center justify-between gap-2 pl-2 min-h-[36px]", compact ? "pt-0 pb-1" : "py-2")}>
         <div className="flex items-baseline gap-1">
           <span className="lyra-body-md-emphasis text-lyra-fg-default">Assignments</span>
           <span className="lyra-body-md text-lyra-fg-secondary">({count})</span>

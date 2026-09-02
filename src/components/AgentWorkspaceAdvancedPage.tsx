@@ -32,6 +32,7 @@ import {
   useColumnReorder,
   Input,
   LeftNav,
+  NavRail,
   CreateNew,
   useOutboundAddButton,
   InteractionNavItem,
@@ -66,6 +67,7 @@ import {
   type MenuEntry,
   CHANNEL_TYPE_META,
   InteriorPanel,
+  EmptyState,
 } from "@nicecxone/lyra-ui";
 import { CREATE_NEW_CUSTOMERS, type CreateNewCustomerRecord } from "@nicecxone/lyra-ui/customers-data";
 import { useScheduleContent } from "@nicecxone/lyra-ui";
@@ -198,7 +200,6 @@ import {
   History,
   Maximize2,
   Minimize2,
-  PanelRightClose,
   IdCard,
   PhoneOutgoing,
   RotateCcw,
@@ -206,6 +207,7 @@ import {
   Headphones,
   ChevronRight,
   CircleAlert,
+  Inbox,
   type LucideIcon,
 } from "lucide-react";
 
@@ -1752,15 +1754,14 @@ export function AgentWorkspaceAdvancedPage({
   const [panelMounted,   setPanelMounted]   = useState(false);
   const [panelState,     setPanelState]     = useState<PanelState>("closed");
   const [activePanelKey, setActivePanelKey] = useState<PanelKey | null>(null);
-  // Defaults to "docked" per an earlier request — the AppHeader icon
-  // buttons should each open the full layout-pushing docked panel
-  // immediately on first click, rather than a transient floating popover.
-  // The actual dock-on-open happens explicitly in `handlePanelButtonClick`
-  // below (only when transitioning fully closed -> open) — "float" is
-  // still reachable afterward (dragging the panel off the edge, or just
-  // switching which button is active while already open leaves whatever
-  // variant it was already in alone).
-  const [panelVariant,    setPanelVariant]    = useState<DraggableVariant>("docked");
+  // Defaults to "float" per explicit follow-up request — see 2.0's own
+  // copy of this comment (AgentNextGenPage.tsx) for the full writeup on
+  // reverting the earlier "docked" default and why no separate
+  // remembered-preference flag is needed for "if docked then closed,
+  // keep it docked on next open" — `panelVariant` itself already
+  // persists across a close/reopen, `handlePanelButtonClick` just no
+  // longer overwrites it.
+  const [panelVariant,    setPanelVariant]    = useState<DraggableVariant>("float");
   const [panelWidth,      setPanelWidth]      = useState(SHARED_PANEL_DEFAULT_WIDTH);
   const [panelHeight,     setPanelHeight]     = useState(860);
   const [panelIsResizing, setPanelIsResizing] = useState(false);
@@ -2521,13 +2522,6 @@ export function AgentWorkspaceAdvancedPage({
       handlePanelButtonClick("conversations")();
       return;
     }
-    // Per explicit request: launching an interaction closes whichever app
-    // panel (Search/Notifications/Schedule/WEM/etc.) is currently open —
-    // the agent's attention moves to the interaction itself, not left
-    // split with an unrelated panel still docked open. Placed after the
-    // agent+chat early-return above, since that branch isn't really
-    // "launching an interaction" (it explicitly opens a panel instead).
-    setPanelOpen(false);
     const skillLabel = OUTBOUND_CONFIG.skillOptions.find((o) => o.value === selection.skillId)?.label;
     // `phoneOptions` only has a value→label mapping for phone numbers (raw
     // digits → formatted display string) — email/WhatsApp addresses are
@@ -2778,9 +2772,6 @@ export function AgentWorkspaceAdvancedPage({
   }, []);
 
   const handleQuickDial = (phoneNumber: string) => {
-    // Per explicit request — see `handleStartCall`'s own comment: launching
-    // an interaction closes whichever app panel is currently open.
-    setPanelOpen(false);
     // No contact record for a quick-dialed number — key the card off the
     // number itself so redialing the same number restarts its card rather
     // than stacking up duplicates.
@@ -2856,9 +2847,6 @@ export function AgentWorkspaceAdvancedPage({
      pre-existing limitation `handleQuickDial` already has for numbers with
      no contact record at all, not something new. */
   const handleRedial = (entry: ContactHistoryEntry) => {
-    // Per explicit request — see `handleStartCall`'s own comment: launching
-    // an interaction closes whichever app panel is currently open.
-    setPanelOpen(false);
     const id = entry.customerId ?? `redial:${entry.id}`;
     // Read before `setInteractions` below — see `handleStartCall`'s own
     // `isNewInteraction` comment for why.
@@ -3021,9 +3009,6 @@ export function AgentWorkspaceAdvancedPage({
    *  Either way, the agent decides what to do next AFTER seeing the
    *  reopened card, not before. */
   const handleReopenContactHistoryEntry = (entry: ContactHistoryEntry) => {
-    // Per explicit request — see `handleStartCall`'s own comment: launching
-    // an interaction closes whichever app panel is currently open.
-    setPanelOpen(false);
     const id = entry.customerId ?? `history:${entry.id}`;
     const existingInteraction = interactions.find((i) => i.id === id);
     // Restore the exact record `agent-next-gen-case-database.ts` saved for
@@ -3944,9 +3929,6 @@ export function AgentWorkspaceAdvancedPage({
   // `customerId` in the first place, so this reliably finds the same
   // record every row was built from without a second, parallel id scheme.
   const handleOpenInteractionRow = (record: InteractionHistoryRecord) => {
-    // Per explicit request — see `handleStartCall`'s own comment: launching
-    // an interaction closes whichever app panel is currently open.
-    setPanelOpen(false);
     const customer = CREATE_NEW_CUSTOMERS.find((c) => c.customerId === record.caseId) ?? CREATE_NEW_CUSTOMERS[0];
     const id = customer.id;
     // Read before `setInteractions` below — see `handleStartCall`'s own
@@ -4246,18 +4228,18 @@ export function AgentWorkspaceAdvancedPage({
         : "Home";
 
   // Clicking a button: re-clicking the CURRENTLY showing one closes the
-  // shared container outright. Otherwise, if it's closed, open it docked
-  // (see `panelVariant`'s own doc comment above); if it's already open
-  // showing a DIFFERENT key, only `activePanelKey` changes — the container
-  // itself never resizes, repositions, or re-animates open+close, only its
-  // title/body content does.
+  // shared container outright. Otherwise, if it's closed, open it in
+  // whatever `panelVariant` already is (see that state's own doc comment
+  // above); if it's already open showing a DIFFERENT key, only
+  // `activePanelKey` changes — the container itself never resizes,
+  // repositions, or re-animates open+close, only its title/body content
+  // does.
   const handlePanelButtonClick = (key: PanelKey) => () => {
     if (panelOpen && activePanelKey === key) {
       setPanelOpen(false);
       return;
     }
     if (!panelOpen) {
-      setPanelVariant("docked");
       setPanelOpen(true);
     }
     setActivePanelKey(key);
@@ -4627,11 +4609,9 @@ export function AgentWorkspaceAdvancedPage({
               </>
             }
             onClose={() => setPanelOpen(false)}
-            // Per explicit request ("update the panel close buttons to be
-            // panel icons instead of 'x' icons for all app panels (top
-            // right panels)") — see AgentNextGenPage.tsx's own matching call
-            // site for the full doc comment; mirrored here verbatim.
-            closeIcon={<PanelRightClose className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />}
+            // Reverted back to `ContainerHeader`'s own generic default `X`
+            // — see AgentNextGenPage.tsx's own matching call site for the
+            // full doc comment; mirrored here verbatim.
           />
           {activePanelContent.headerContent && (
             // `activePanelKey === "search"` skips this wrapper ENTIRELY
@@ -4779,9 +4759,8 @@ export function AgentWorkspaceAdvancedPage({
           setPanelFullScreen(false);
           setPanelOpen(false);
         }}
-        // Same panel-icon swap as the docked variant's own `ContainerHeader`
-        // above — see that call site's own doc comment.
-        closeIcon={<PanelRightClose className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />}
+        // Same revert-to-default-`X` as the docked variant's own
+        // `ContainerHeader` above — see that call site's own doc comment.
       />
       {activePanelContent.headerContent && (
         // See the docked variant's own matching wrapper (above) for why
@@ -5031,38 +5010,106 @@ export function AgentWorkspaceAdvancedPage({
       <div ref={bodyContainerRef} className="flex flex-1 min-h-0 overflow-hidden">
 
         <LeftNav
-          items={buildNavItems(
-            Boolean(activeInteraction),
-            // Per explicit follow-up request, Home no longer resets
-            // `showAllContacts`/`selectedAllContactsRecord` — see that
-            // state's own doc comment for why "Home" now always resumes
-            // whatever was showing there before the agent navigated away
-            // (plain dashboard or All Contacts), instead of forcing back to
-            // the plain dashboard every time.
-            () => { switchActiveInteraction(null); setShowSettings(false); },
-            showSettings,
-            // Same follow-up — opening Settings no longer discards All
-            // Contacts' own state either; it just takes visual priority
-            // while showing (this ternary branch is checked first), and
-            // All Contacts reappears exactly as left once Settings closes.
-            () => { setShowSettings(true); switchActiveInteraction(null); }
-          )}
+          // Home and Settings used to be one `buildNavItems(...)` array
+          // passed straight through as `items`, rendered together as a
+          // single rail. Per explicit request ("match the left nav in
+          // premium and advanced to 2.0") this now mirrors 2.0's own
+          // restructuring exactly — `homeNavItem` goes into `items` (below,
+          // with `itemsFirst`), `settingsNavItem` into `footer` (further
+          // down) — still built from the one shared `buildNavItems` helper
+          // to avoid duplicating its icon/active-state/handler logic here.
+          // See `AgentNextGenPage.tsx`'s own copy of this exact block for
+          // the full history/reasoning; kept identical here on purpose.
+          items={(() => {
+            const [homeNavItem] = buildNavItems(
+              Boolean(activeInteraction),
+              // Per explicit follow-up request, Home no longer resets
+              // `showAllContacts`/`selectedAllContactsRecord` — see that
+              // state's own doc comment for why "Home" now always resumes
+              // whatever was showing there before the agent navigated away
+              // (plain dashboard or All Contacts), instead of forcing back
+              // to the plain dashboard every time.
+              () => { switchActiveInteraction(null); setShowSettings(false); },
+              showSettings,
+              // Same follow-up — opening Settings no longer discards All
+              // Contacts' own state either; it just takes visual priority
+              // while showing (this ternary branch is checked first), and
+              // All Contacts reappears exactly as left once Settings closes.
+              () => { setShowSettings(true); switchActiveInteraction(null); }
+            );
+            return [homeNavItem];
+          })()}
           open={navOpen}
           onToggle={() => setNavOpen((v) => !v)}
           overlay={isNavNarrow}
-          // Default (non-`itemsFirst`) order, per explicit follow-up
-          // request: the "Assignments (N active)" caption + interaction
-          // cards render FIRST (scrolling in the space below "New
-          // Outbound"), and the Home/Settings rail renders LAST, `sticky
-          // bottom-0` within that same scroll region — pinned to the
-          // bottom of the nav whenever the card list is short enough to
-          // leave slack, and sticking there as the list scrolls once it's
-          // long enough to actually overflow, so cards scroll underneath/
-          // behind the rail rather than the rail scrolling away with them.
-          // (This app used to opt into `itemsFirst` — rail above the
-          // caption/cards instead — per an earlier explicit request; that
-          // request was superseded by this one.)
-          //
+          // `itemsFirst` — Home (now the sole entry in `items`) renders
+          // ABOVE `header` (the "Assignments" caption + empty-state/cards),
+          // `sticky top-0` within the shared scroll region, directly under
+          // `pinnedHeader` ("New Outbound"). Settings goes to `footer`
+          // instead (see below), genuinely pinned to the true bottom of
+          // the rail rather than sharing this sticky-top spot with Home.
+          itemsFirst
+          // Lets `header` (the caption/cards region) grow to fill
+          // whatever height Home+"New Outbound" don't use, so the
+          // "Your assignment queue is empty" message can be vertically
+          // centered in that leftover space instead of sitting flush
+          // under the caption — see the centering wrapper around
+          // `EmptyState` below, and `headerFillsHeight`'s own doc comment
+          // in left-nav.tsx.
+          headerFillsHeight
+          // "Assignments (N)" caption — per explicit follow-up request
+          // ("fix the assignments header under the home button so it
+          // doesn't scroll"), mirrored from 2.0 (`AgentNextGenPage.tsx` —
+          // see that file's own comment on this same prop for the fuller
+          // writeup): rendered via `stickyCaption` now, the same sticky-top
+          // box as `items` (Home), so it stays pinned with Home instead of
+          // scrolling away with the cards under it.
+          stickyCaption={
+            <AssignmentsSectionCaption
+              expanded={navOpen}
+              count={interactions.length}
+              sort={assignmentSort}
+              onSortChange={setAssignmentSort}
+              allExpanded={channelsAllExpanded}
+              onToggleAllExpanded={handleToggleAllChannelsExpanded}
+              // See `AssignmentsSectionCaption`'s own doc comment on
+              // `compact` — see 2.0's own copy for the full reasoning.
+              compact
+            />
+          }
+          // Settings — genuinely pinned to the TRUE bottom of the nav (not
+          // just `sticky bottom-0`, which only holds once the card list
+          // actually overflows; short lists used to leave it sitting right
+          // after the cards with empty space below). `footer` renders as a
+          // sibling AFTER the whole scrollable region entirely — always at
+          // the aside's real bottom edge regardless of how much content is
+          // above it — so no flex/`mt-auto` trick is needed here. `NavRail`
+          // (exported from left-nav.tsx) renders the single Settings
+          // `NavItem` with the exact same TreeMenu/icon-only styling
+          // `items` itself uses.
+          footer={
+            // `expanded={navOpen}` passed explicitly, NOT left to
+            // `injectExpanded` — `left-nav.tsx`'s INLINE (non-overlay)
+            // mode renders `footer` as `{footer}` directly, with no
+            // `injectExpanded` call at all (only the OVERLAY-mode branch
+            // auto-injects `expanded`), so `NavRail` would otherwise be
+            // stuck on its `expanded = false` default — always the
+            // icon-only collapsed button, even with the nav wide open.
+            // Same reason `AssignmentsSectionCaption`/`EmptyState` below
+            // (in `header`) already take `expanded={navOpen}` explicitly.
+            <NavRail
+              expanded={navOpen}
+              items={(() => {
+                const [, settingsNavItem] = buildNavItems(
+                  Boolean(activeInteraction),
+                  () => { switchActiveInteraction(null); setShowSettings(false); },
+                  showSettings,
+                  () => { setShowSettings(true); switchActiveInteraction(null); }
+                );
+                return [settingsNavItem];
+              })()}
+            />
+          }
           // "New Outbound" itself has moved several times now: started as
           // this exact `pinnedHeader` (fixed at the very TOP of the whole
           // rail, above the "Assignments" caption); moved to a `beforeItems`
@@ -5088,14 +5135,58 @@ export function AgentWorkspaceAdvancedPage({
           }
           header={
             <>
-              <AssignmentsSectionCaption
-                expanded={navOpen}
-                count={interactions.length}
-                sort={assignmentSort}
-                onSortChange={setAssignmentSort}
-                allExpanded={channelsAllExpanded}
-                onToggleAllExpanded={handleToggleAllChannelsExpanded}
-              />
+              {/* Per explicit request ("add a message and icon into the left
+                  nav when there are no assignments indicating that the
+                  agent's assignment queue is empty") — only while expanded;
+                  the icon-only collapsed rail has no room for text (matches
+                  `AssignmentsSectionCaption`'s own "nothing to show" null
+                  return in that state, just above).
+
+                  Wrapped in a `flex-1 min-h-0 items-center justify-center`
+                  container to vertically center it — this only has real
+                  slack to center within because `header` itself now grows
+                  to fill the rail's available height (`headerFillsHeight`
+                  on `LeftNav`, above); without that, this wrapper's
+                  `flex-1` would have nothing to consume and the message
+                  would still sit flush under the caption. `EmptyState`'s
+                  own `h-full`/`py-8` (meant for a bounded box) is still
+                  overridden with `h-auto`/`py-6` — the centering comes
+                  from THIS wrapper now, not from `EmptyState` trying to
+                  size itself.
+
+                  `animate-in fade-in-0 duration-150 delay-200
+                  fill-mode-backwards` — per explicit follow-up ("text
+                  growing/shrinking ... have it fade in"), mirrored from
+                  AgentNextGenPage.tsx (see that file's own comment on this
+                  same block for the full writeup): without it, this message
+                  mounts the instant `navOpen` flips true while the `<aside>`
+                  is still mid-`transition-all duration-200` on its own
+                  width, so it visibly rewraps as the box widens. `delay-200`
+                  waits out that same 200ms before the message starts
+                  becoming visible; `duration-150 fill-mode-backwards` is the
+                  fade-in itself, held at opacity 0 for the whole delay
+                  (approximating the requested `display: none` → `display:
+                  inline`, since `display` can't be transitioned/faded).
+                  Close needs no equivalent — this block unmounts instantly
+                  when `navOpen` goes false, before the aside starts
+                  collapsing, so nothing is ever visible to reflow. */}
+              {interactions.length === 0 && navOpen && (
+                <div className="flex flex-1 min-h-0 items-center justify-center animate-in fade-in-0 duration-150 delay-200 fill-mode-backwards">
+                  <EmptyState
+                    icon={<Inbox className="h-8 w-8" strokeWidth={1.5} />}
+                    message="Your assignment queue is empty"
+                    description="New assignments will appear here."
+                    className="h-auto w-full py-6"
+                    // Per explicit follow-up, with a screenshot comparing
+                    // this to Contact History's own "Nothing to Display"
+                    // placeholder: `EmptyState`'s default `tone`
+                    // (`text-lyra-fg-disabled`) read too dim/low-contrast
+                    // next to it. `tone="secondary"` matches that
+                    // placeholder's own `text-lyra-fg-secondary` exactly.
+                    tone="secondary"
+                  />
+                </div>
+              )}
               {/* No cards until the agent actually starts one above — each
                   card is one contact (or quick-dialed number), with every
                   channel they're being reached on folded into that same
