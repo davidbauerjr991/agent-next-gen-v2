@@ -4,6 +4,8 @@ import {
   AccordionHeadless,
   AccordionHeadlessItem,
   AccordionHeadlessContent,
+  ContactOverview,
+  type ContactOverviewInfo,
   ChatMessage,
   ActionIconButton,
   TagPicker,
@@ -1790,100 +1792,15 @@ export function TranscriptSessionSeparator({
   );
 }
 
-/** Info this component doesn't otherwise have (who the customer previously
- *  worked with, a prior-contact summary) — the caller (`InteractionTranscript`'s
- *  own consumer) resolves this, `ContactOverview` just renders it. See
- *  `InteractionTranscript`'s own `contactOverview` prop doc comment for
- *  when this actually gets passed. */
-export interface ContactOverviewInfo {
-  /** The agent this customer already has history with, if any — omit for a
-   *  customer with genuinely no prior agent on record (the block still
-   *  renders, just without that second sentence). */
-  previousAgent?: { name: string; agentId: string };
-  /** Short "Contact Snapshot" bullet list — prior-contact context an agent
-   *  would otherwise have to dig for (Customer Information panel, Contact
-   *  History) before the conversation even starts. Omit for no snapshot
-   *  (first-ever contact with no history to summarize). */
-  snapshot?: string[];
-}
-
-/* ── ContactOverview ──
-   The "brand-new contact, here's what you need to know before you start
-   typing" block — same plain "label + chevron, no card chrome" toggle
-   `AIProcess` (lyra-ui) uses for its own inline collapsible content, reused
-   here rather than a bespoke accordion so an agent already familiar with
-   that pattern from AI-assisted messages recognizes this one instantly.
-   Deliberately NOT `AIProcess` itself, though — that component's body is a
-   fixed "vertical icon + label steps" shape (its own `AIProcessStep[]`),
-   which doesn't fit a paragraph + bullet list at all.
-
-   Renders as a normal, non-sticky block inside the transcript's own
-   scrollable message column (see this component's call site in
-   `InteractionTranscript` below) — per explicit request, this scrolls away
-   with the rest of the conversation like any other message, rather than
-   staying pinned at the top the way `TranscriptSessionSeparator` does.
-
-   Defaults `expanded` to `true` (unlike `AIProcess`'s own `defaultExpanded
-   = false`) — this is the first thing an agent needs to read on a brand-
-   new contact, not something to opt into revealing. */
-function ContactOverview({
-  customerName,
-  previousAgent,
-  snapshot,
-}: {
-  customerName: string;
-  previousAgent?: { name: string; agentId: string };
-  snapshot?: string[];
-}) {
-  const [expanded, setExpanded] = useState(true);
-  return (
-    <div className="w-full pt-4">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1.5 text-lyra-fg-secondary hover:text-lyra-fg-default transition-colors focus-visible:outline-none group"
-        aria-expanded={expanded}
-      >
-        <span className="lyra-body-md-emphasis">Contact Overview</span>
-        <ChevronDown
-          className={cn("h-4 w-4 transition-transform duration-200", expanded && "rotate-180")}
-          strokeWidth={1.5}
-          aria-hidden="true"
-        />
-      </button>
-      {expanded && (
-        <div className="mt-3 flex flex-col gap-3">
-          <p className="lyra-body-md text-lyra-fg-default">
-            You are now working with {customerName}.
-            {previousAgent ? (
-              <>
-                {" "}This is your first contact with {customerName} although they have already been working with{" "}
-                <span className="lyra-body-md-emphasis text-lyra-fg-default">
-                  {previousAgent.name} ({previousAgent.agentId})
-                </span>
-                .
-              </>
-            ) : (
-              " This is your first contact with them."
-            )}
-          </p>
-          {snapshot && snapshot.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <span className="lyra-body-sm-emphasis text-lyra-fg-secondary">Contact Snapshot</span>
-              <ul className="flex flex-col gap-1 pl-4 list-disc">
-                {snapshot.map((line, i) => (
-                  <li key={i} className="lyra-body-md text-lyra-fg-default">
-                    {line}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+// `ContactOverview` and its `ContactOverviewInfo` type used to live here as
+// a bespoke, hand-rolled block — promoted to lyra-ui (see this file's own
+// import from "@nicecxone/lyra-ui" above) per explicit request, both so
+// other consumers get the same component and so its expand/collapse gets a
+// real height animation (built on the same Radix accordion primitive/
+// `accordion-down`/`accordion-up` keyframes every other accordion in that
+// package already uses) instead of this file's old plain conditional
+// render. See that component's own doc comment (lyra-ui's
+// contact-overview.tsx) for the full reasoning.
 
 export function InteractionTranscript({
   channelType,
