@@ -6838,10 +6838,18 @@ export function AgentWorkspaceAdvancedPage({
                           // association") — see AgentNextGenPage.tsx's
                           // identical gate for the full reasoning: the whole
                           // block, not just the fabricated `previousAgent`/
-                          // `snapshot` fields, is now gated on
-                          // `activeInteractionIsRealCustomer`.
+                          // `snapshot` fields, is gated on
+                          // `activeInteractionIsRealCustomer`. Per a later
+                          // explicit request, no longer ALSO gated on
+                          // `activeChannel?.startedFresh` — see
+                          // AgentNextGenPage.tsx's identical follow-up gate
+                          // for the full reasoning (a real customer's
+                          // Contact Overview now shows for an existing-
+                          // conversation/transfer pickup too, just
+                          // repositioned by `InteractionTranscript`'s own
+                          // `isFreshLaunch` check).
                           contactOverview={
-                            activeChannel?.startedFresh && activeInteractionIsRealCustomer
+                            activeInteractionIsRealCustomer
                               ? {
                                   ...buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer),
                                   journeySummary: buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary,

@@ -2836,8 +2836,22 @@ export function InteractionTranscript({
                 {/* Only on the CURRENT session — see `contactOverview`'s own
                     doc comment above; a reopened/historical session under
                     this same channel already has real messages of its own,
-                    not a fresh-launch moment to summarize. */}
-                {contactOverview && session.id === lastSessionId && (
+                    not a fresh-launch moment to summarize.
+                    `isFreshLaunch` additionally gates WHICH of the two spots
+                    below actually renders it (per explicit request): a
+                    genuinely brand-new, empty conversation shows it up here,
+                    first thing the agent reads before anything else exists
+                    to read. A channel that was picked up already carrying a
+                    conversation — a transfer, or any other "existing
+                    conversation" case `!isFreshLaunch` covers (this app has
+                    no separate transferred flag; a transferred-in channel
+                    looks identical to a resumed one, some pre-existing
+                    messages already sitting on it) — shows it at the OTHER
+                    spot instead, just above the live-messages block below,
+                    so the agent reads the existing history first and this
+                    summary lands right where their own new messages are
+                    about to continue from. */}
+                {contactOverview && session.id === lastSessionId && isFreshLaunch && (
                   <ContactOverview
                     customerName={displayName}
                     previousAgent={contactOverview.previousAgent}
@@ -2919,6 +2933,29 @@ export function InteractionTranscript({
                     "sticky for existing conversations but new conversations
                     ... when the conversation reaches an overflow-y it is
                     not sticky"). */}
+                {/* The OTHER `ContactOverview` spot — see the doc comment on
+                    its sibling occurrence above this session's `messages`
+                    block for the full "which of the two spots" reasoning.
+                    This one covers a transfer/existing-conversation pickup
+                    (`!isFreshLaunch`): it renders AFTER this session's own
+                    existing message history (the `messages.map(...)`/
+                    Voice-Email-placeholder blocks above) and BEFORE the
+                    live-messages block just below, so it reads as the
+                    boundary between "what already happened on this
+                    conversation" and "what the agent sends from here" —
+                    any new live messages land inline right underneath it,
+                    same DOM flow as everything else in this session. */}
+                {contactOverview && session.id === lastSessionId && !isFreshLaunch && (
+                  <ContactOverview
+                    customerName={displayName}
+                    previousAgent={contactOverview.previousAgent}
+                    snapshot={contactOverview.snapshot}
+                    journeySummary={contactOverview.journeySummary}
+                    onViewCustomerInfo={onViewCustomerInfo}
+                    onViewInteractionHistory={onViewInteractionHistory}
+                    onLaunchPreviousAgentInteraction={onLaunchPreviousAgentInteraction}
+                  />
+                )}
                 {(() => {
                   const sessionLiveMessages = liveMessagesBySessionId[session.id] ?? [];
                   // Only the CURRENT session's own trailing edge — see
