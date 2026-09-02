@@ -8,7 +8,7 @@ import { type AppMenuGroup, type CreateNewOutboundConfig, type CreateNewOutbound
 import { CREATE_NEW_AGENTS } from "@nicecxone/lyra-ui/agents-data";
 import { CREATE_NEW_CUSTOMERS } from "@nicecxone/lyra-ui/customers-data";
 import type { ReactNode } from "react";
-import { Phone, Mail, MessageSquare, MessageCircle, User, Headphones, Share2, Users, LayoutGrid } from "lucide-react";
+import { Phone, Mail, MessageSquare, MessageCircle, User, Headphones, Share2, Users, LayoutGrid, Star, Building2 } from "lucide-react";
 
 /* ── Category icons ──
    Shared between the "New Outbound" picker's "Choose group" dropdown
@@ -38,6 +38,19 @@ const customerCategoryIcon = () => <User className="h-4 w-4" strokeWidth={1.5} /
 // shared JSX constant) for the same one-element-per-render-site reason
 // as the four category icons above.
 const dialpadCategoryIcon = () => <LayoutGrid className="h-4 w-4" strokeWidth={1.5} />;
+// Favorites' own icon — a star, matching the concept everywhere else in
+// this app already uses one (`FavoriteButton`, lyra-ui) — per explicit
+// follow-up request giving every row in the group list a leading icon.
+const favoritesCategoryIcon = () => <Star className="h-4 w-4" strokeWidth={1.5} />;
+// Generic "directory" icon shared by the three placeholder groups below
+// (Partner Network/Vendor Directory/Regional Offices) — per explicit
+// request ("generic directory icons"), not a distinct glyph per group,
+// since none of the three has real data/behavior behind it yet to
+// differentiate visually (see their own `kind: "empty"` doc comment).
+// A generic building glyph reads as "some other organization/location,"
+// which fits all three equally well without implying one has more
+// substance than the others.
+const directoryCategoryIcon = () => <Building2 className="h-4 w-4" strokeWidth={1.5} />;
 
 /** Wraps a bare category icon in the same colored circle shell lyra-ui's
  *  own `ListItem` "With leading icon" story hand-builds for each of its
@@ -353,19 +366,16 @@ export const OUTBOUND_GROUPS: CreateNewOutboundConfig["groups"] = [
   // sense as a label sitting alongside "Agents"/"Skills"/etc. `id`/`kind`/
   // `defaultGroupId` (below) are unchanged, so this is still the DEFAULT/
   // starting filter, just relabeled.
-  { id: "all", label: "Favorites", kind: "favorites", emptyMessage: "Search above to find a contact" },
+  { id: "all", label: "Favorites", kind: "favorites", emptyMessage: "Search above to find a contact", icon: favoritesCategoryIcon() },
   // Per explicit request: each group below gets a leading icon in the
   // group list (`CreateNewOutboundGroup.icon`, lyra-ui's create-new.tsx),
   // matched to what that group represents — a headset for Agents
   // (support), a share/network glyph for Skills, a people-group for My
   // Team. `h-4 w-4` here is purely defensive/self-documenting — that list's
   // own icon slot already forces every option icon to that size regardless
-  // of what's authored on the element itself. "Favorites" (above)
-  // intentionally has no icon — it wasn't part of the requested set, and
-  // the plain "Favorites" row reads fine unadorned as the default/catch-all
-  // option. Reordered per the reference mockup: Skills now comes before
-  // "My Team" (previously "Teams," see that entry's own doc comment),
-  // which used to sit right after Agents.
+  // of what's authored on the element itself. Reordered per the reference
+  // mockup: Skills now comes before "My Team" (previously "Teams," see
+  // that entry's own doc comment), which used to sit right after Agents.
   { id: "agents", label: "Agents", contacts: OUTBOUND_AGENTS, icon: agentCategoryIcon() },
   { id: "skills", label: "Skills", contacts: OUTBOUND_SKILLS, icon: skillCategoryIcon() },
   // Relabeled "Teams" → "My Team" per the reference mockup — `id`
@@ -381,10 +391,12 @@ export const OUTBOUND_GROUPS: CreateNewOutboundConfig["groups"] = [
   // `kind`'s own doc comment): the row is fully clickable/real, it just
   // always shows `emptyMessage` instead of a contact list, no favoriting
   // concept. Swap in real `contacts`/`icon` later the same way any other
-  // group here already works, once this app has real data to back them.
-  { id: "partner-network", label: "Partner Network", kind: "empty", emptyMessage: "No partner network contacts yet" },
-  { id: "vendor-directory", label: "Vendor Directory", kind: "empty", emptyMessage: "No vendor directory contacts yet" },
-  { id: "regional-offices", label: "Regional Offices", kind: "empty", emptyMessage: "No regional offices contacts yet" },
+  // group here already works, once this app has real data to back them —
+  // for now all three share the same generic `directoryCategoryIcon`
+  // (own doc comment above) per explicit request.
+  { id: "partner-network", label: "Partner Network", kind: "empty", emptyMessage: "No partner network contacts yet", icon: directoryCategoryIcon() },
+  { id: "vendor-directory", label: "Vendor Directory", kind: "empty", emptyMessage: "No vendor directory contacts yet", icon: directoryCategoryIcon() },
+  { id: "regional-offices", label: "Regional Offices", kind: "empty", emptyMessage: "No regional offices contacts yet", icon: directoryCategoryIcon() },
   // Kept in `OUTBOUND_GROUPS` (not deleted) but hidden from the visible
   // group list via `HIDDEN_OUTBOUND_GROUP_IDS` below — per explicit
   // follow-up request ("keep dial pad but not customers"), Customers no
