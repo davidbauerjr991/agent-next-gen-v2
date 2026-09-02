@@ -52,32 +52,43 @@ const favoritesCategoryIcon = () => <Star className="h-4 w-4" strokeWidth={1.5} 
 // substance than the others.
 const directoryCategoryIcon = () => <Building2 className="h-4 w-4" strokeWidth={1.5} />;
 
-/** Wraps a bare category icon in the same colored circle shell lyra-ui's
- *  own `ListItem` "With leading icon" story hand-builds for each of its
- *  demo rows (`h-9 w-9 rounded-full ... flex items-center justify-center
- *  ...`, ListItem.stories.tsx) — per explicit request, `CreateNewContact.
- *  categoryIcon` (create-new.tsx) reuses that exact treatment rather than
- *  a bare icon sitting inline with the contact's name. One color pair per
- *  category, each an existing token already used elsewhere in this app/
- *  design system (not invented for this): blue "active" for Agents, green
- *  "success" for Skills, purple "accent" for Teams (the same token
- *  `OUTBOUND_TEAMS`'s own `t1` avatar already uses, below), and neutral
- *  "surface shell" gray for Customers. */
-function categoryLeadingIcon(icon: ReactNode, bgClassName: string, textClassName: string): ReactNode {
+/** Per explicit follow-up request ("put the initials of the agents/skill
+ *  names/etc. inside the avatars and randomize the colors using the
+ *  lyra-ui color tokens"): the per-CONTACT leading avatar (`CreateNewContact.
+ *  categoryIcon`) renders that record's own `initials` as text inside a
+ *  `h-9 w-9 rounded-full` shell — the same shell lyra-ui's own `ListItem`
+ *  "With leading icon" story hand-builds for each of its demo rows
+ *  (`ListItem.stories.tsx`), colored by `avatarClassName` — a
+ *  `bg-lyra-accent-{color}-soft text-lyra-accent-{color}-strong` pair
+ *  already varied per record (`CREATE_NEW_AGENTS`/`CREATE_NEW_CUSTOMERS`,
+ *  lyra-ui's own fixtures, cycle through 10 real lyra-ui accent tokens;
+ *  `OUTBOUND_TEAMS`/`OUTBOUND_SKILLS` below set their own per-record pair
+ *  the same way) — rather than one fixed glyph/color shared by every
+ *  record in a category, which made a mixed list (e.g. the "All"/
+ *  favorites group) visually indistinguishable row-to-row within the same
+ *  category. `lyra-label` matches `AgentProfile`'s own `Avatar` component's
+ *  initials treatment (agent-profile.tsx) — `avatarClassName` supplies the
+ *  text color itself, so this only adds the size/weight. */
+function initialsAvatar(initials: string, avatarClassName: string): ReactNode {
   return (
-    <div className={`h-9 w-9 rounded-full ${bgClassName} flex items-center justify-center ${textClassName}`}>
-      {icon}
+    <div className={`h-9 w-9 rounded-full ${avatarClassName} flex items-center justify-center lyra-label`}>
+      {initials}
     </div>
   );
 }
-const agentCategoryLeadingIcon = () =>
-  categoryLeadingIcon(agentCategoryIcon(), "bg-lyra-bg-active-subtle", "text-lyra-fg-active-strong");
-const teamCategoryLeadingIcon = () =>
-  categoryLeadingIcon(teamCategoryIcon(), "bg-lyra-accent-purple-soft", "text-lyra-accent-purple-strong");
-const skillCategoryLeadingIcon = () =>
-  categoryLeadingIcon(skillCategoryIcon(), "bg-lyra-status-success-subtle", "text-lyra-status-success-strong");
-const customerCategoryLeadingIcon = () =>
-  categoryLeadingIcon(customerCategoryIcon(), "bg-lyra-bg-surface-shell", "text-lyra-fg-secondary");
+
+// Same 10 lyra-ui accent tokens `CREATE_NEW_AGENTS`/`CREATE_NEW_CUSTOMERS`
+// (lyra-ui's own fixtures) already cycle through for their own
+// `avatarClassName` — reused here for the few records in THIS file that
+// don't come from one of those fixtures (currently just
+// `contactHistoryOutboundContact` below) and so have no `avatarClassName`
+// of their own to reuse, so they still get a real, varied color instead of
+// one hardcoded shade repeated for every row.
+const OUTBOUND_AVATAR_COLORS = ["blue", "orange", "teal", "purple", "green", "red", "pink", "yellow", "lime", "slate"];
+function randomAvatarClassName(seed: string): string {
+  const color = OUTBOUND_AVATAR_COLORS[hashSeed(seed) % OUTBOUND_AVATAR_COLORS.length];
+  return `bg-lyra-accent-${color}-soft text-lyra-accent-${color}-strong`;
+}
 
 /* ── App menu builder (needs onNavigate so built inside the component) ── */
 
@@ -159,13 +170,15 @@ export const OUTBOUND_AGENTS: NonNullable<CreateNewOutboundConfig["groups"][numb
   // `OUTBOUND_CONFIG.channelOptions`'s new `"chat"` entry below.
   channels: ["voice", "chat"],
   status: a.status,
-  // Per explicit request: same headset icon the "Choose group" dropdown's
-  // own "Agents" row uses (`OUTBOUND_GROUPS` below), now also shown to the
-  // left of EACH agent's name — matters most in the "All"/favorites group,
-  // which mixes agents/teams/skills/customers in one list with no group
-  // heading between them (see `CreateNewContact.categoryIcon`'s own doc
-  // comment, create-new.tsx).
-  categoryIcon: agentCategoryLeadingIcon(),
+  // Per follow-up request, this is now an initials avatar (this agent's own
+  // `avatarClassName`, already one of 10 randomized lyra-ui accent tokens
+  // per `CREATE_NEW_AGENTS`) rather than a shared headset-glyph circle —
+  // see `initialsAvatar`'s own doc comment above for why. Still shown to
+  // the left of EACH agent's name — matters most in the "All"/favorites
+  // group, which mixes agents/teams/skills/customers in one list with no
+  // group heading between them (see `CreateNewContact.categoryIcon`'s own
+  // doc comment, create-new.tsx).
+  categoryIcon: initialsAvatar(initialsFor(a.name), a.avatarClassName),
   // Per explicit request: calling/chatting an agent skips the "Select
   // Phone"/"Outbound Skill" detail screen entirely and launches
   // immediately — an agent has no real per-contact address to choose
@@ -203,7 +216,7 @@ export const OUTBOUND_CUSTOMERS: NonNullable<CreateNewOutboundConfig["groups"][n
     return `${firstName.toLowerCase()}.${lastName.toLowerCase()}@example.com`;
   })(),
   // See `OUTBOUND_AGENTS`'s own identical `categoryIcon` comment above.
-  categoryIcon: customerCategoryLeadingIcon(),
+  categoryIcon: initialsAvatar(initialsFor(c.name), c.avatarClassName),
 }));
 
 /** One `CreateNewOutboundContact` for a single hand-authored `CONTACT_HISTORY`
@@ -218,12 +231,17 @@ export const OUTBOUND_CUSTOMERS: NonNullable<CreateNewOutboundConfig["groups"][n
  *  synthesis for that same card (both key off the same seed). */
 function contactHistoryOutboundContact(entry: ContactHistoryEntry, id: string): CreateNewOutboundContact {
   const { firstName, lastName } = splitCustomerName(entry.name);
+  // Per follow-up request, randomized (not one hardcoded shade for every
+  // entry) — deterministic off `entry.caseId`, same `randomAvatarClassName`
+  // rotation the rest of this file uses for records with no fixture-
+  // provided `avatarClassName` of their own.
+  const avatarClassName = randomAvatarClassName(entry.caseId);
   return {
     id,
     name: entry.name,
     initials: initialsFor(entry.name),
     subtitle: entry.caseId,
-    avatarClassName: "bg-lyra-accent-slate-soft text-lyra-accent-slate-strong",
+    avatarClassName,
     channels: entry.channels ?? [],
     primaryPhone: {
       value: synthesizePhone(hashSeed(entry.caseId)),
@@ -232,7 +250,7 @@ function contactHistoryOutboundContact(entry: ContactHistoryEntry, id: string): 
     email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@example.com`,
     // Every `ContactHistoryEntry` represents a past CUSTOMER contact — see
     // `OUTBOUND_AGENTS`'s own identical `categoryIcon` comment above.
-    categoryIcon: customerCategoryLeadingIcon(),
+    categoryIcon: initialsAvatar(initialsFor(entry.name), avatarClassName),
   };
 }
 
@@ -295,8 +313,8 @@ export const CONTACT_HISTORY_OUTBOUND_CONTACTS: NonNullable<CreateNewOutboundCon
 
 export const OUTBOUND_TEAMS: NonNullable<CreateNewOutboundConfig["groups"][number]["contacts"]> = [
   // See `OUTBOUND_AGENTS`'s own identical `categoryIcon` comment above.
-  { id: "t1", name: "Billing Support",    initials: "BS", subtitle: "TEAM-04", avatarClassName: "bg-lyra-accent-purple-soft text-lyra-accent-purple-strong", channels: ["voice", "email"], categoryIcon: teamCategoryLeadingIcon() },
-  { id: "t2", name: "Tier 2 Escalations", initials: "T2", subtitle: "TEAM-07", avatarClassName: "bg-lyra-accent-red-soft text-lyra-accent-red-strong",       channels: ["voice", "email"], categoryIcon: teamCategoryLeadingIcon() },
+  { id: "t1", name: "Billing Support",    initials: "BS", subtitle: "TEAM-04", avatarClassName: "bg-lyra-accent-purple-soft text-lyra-accent-purple-strong", channels: ["voice", "email"], categoryIcon: initialsAvatar("BS", "bg-lyra-accent-purple-soft text-lyra-accent-purple-strong") },
+  { id: "t2", name: "Tier 2 Escalations", initials: "T2", subtitle: "TEAM-07", avatarClassName: "bg-lyra-accent-red-soft text-lyra-accent-red-strong",       channels: ["voice", "email"], categoryIcon: initialsAvatar("T2", "bg-lyra-accent-red-soft text-lyra-accent-red-strong") },
 ];
 
 // Deterministic (no Math.random) per-team agent roster for the Teams
@@ -320,8 +338,8 @@ export const OUTBOUND_SKILLS: NonNullable<CreateNewOutboundConfig["groups"][numb
   // See `OUTBOUND_AGENTS`'s own identical `categoryIcon`/`quickLaunch`
   // comments above — a skill queue has no real per-contact address to
   // choose either, so it gets the same immediate-launch treatment.
-  { id: "s1", name: "Spanish Language",  initials: "ES", subtitle: "SKL-12", avatarClassName: "bg-lyra-accent-green-soft text-lyra-accent-green-strong", channels: ["voice", "email"], status: "available", queueCount: 4, waitTimeSeconds: 200, categoryIcon: skillCategoryLeadingIcon(), quickLaunch: true },
-  { id: "s2", name: "Technical Support", initials: "TS", subtitle: "SKL-03", avatarClassName: "bg-lyra-accent-blue-soft text-lyra-accent-blue-strong",   channels: ["voice", "email"], status: "busy",      queueCount: 7, waitTimeSeconds: 95, categoryIcon: skillCategoryLeadingIcon(), quickLaunch: true },
+  { id: "s1", name: "Spanish Language",  initials: "ES", subtitle: "SKL-12", avatarClassName: "bg-lyra-accent-green-soft text-lyra-accent-green-strong", channels: ["voice", "email"], status: "available", queueCount: 4, waitTimeSeconds: 200, categoryIcon: initialsAvatar("ES", "bg-lyra-accent-green-soft text-lyra-accent-green-strong"), quickLaunch: true },
+  { id: "s2", name: "Technical Support", initials: "TS", subtitle: "SKL-03", avatarClassName: "bg-lyra-accent-blue-soft text-lyra-accent-blue-strong",   channels: ["voice", "email"], status: "busy",      queueCount: 7, waitTimeSeconds: 95, categoryIcon: initialsAvatar("TS", "bg-lyra-accent-blue-soft text-lyra-accent-blue-strong"), quickLaunch: true },
 ];
 
 // Every group the "New Outbound" flow could show — kept as its own named
