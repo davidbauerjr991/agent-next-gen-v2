@@ -6031,13 +6031,50 @@ export function AgentNextGenPage({
                       // pairing) — so the record header now reads as the
                       // same category-to-color mapping the picker already
                       // established, not a one-off purple used for both.
+                      // Per explicit follow-up request ("display the status
+                      // in the avatar as a badge"), the record header's own
+                      // "Online"/"Closed" pill (that used to sit inline
+                      // after the customer's name, see `badge`/`badgeColor`
+                      // below — now removed) has moved onto this avatar's
+                      // own bottom-right corner instead, matching the
+                      // exact `AgentPresenceBadge` corner treatment the
+                      // Outbound picker's own contact rows already use
+                      // (create-new.tsx) — a `size="sm"` circle `Badge`
+                      // with `px-0`/`border-lyra-bg-surface-base`, holding
+                      // a plain white dot as content. Three states now,
+                      // not two: `hasOpenChatThread` (a genuine live
+                      // presence signal) still means "online" (green); a
+                      // closed interaction is a definite, real "offline"
+                      // (gray) regardless of channel; everything else — an
+                      // open interaction with no live presence signal at
+                      // all (voice/SMS/email/WhatsApp; see the OLD pill's
+                      // own doc comment on why those can't honestly claim
+                      // "Online") — reads as "idle" (amber) instead of
+                      // showing no indicator at all. Only for a real
+                      // customer, not an agent call (`!activeInteractionIsAgentCall`)
+                      // — presence is a customer concept here; an agent's
+                      // own status already has its own dedicated surface
+                      // elsewhere (the status menu).
                       icon={
-                        <Icon
-                          icon={activeInteractionIsAgentCall ? Headphones : User}
-                          background={activeInteractionIsAgentCall ? "active" : "shell"}
-                          shape="circle"
-                          size="md"
-                        />
+                        <span className="relative inline-flex">
+                          <Icon
+                            icon={activeInteractionIsAgentCall ? Headphones : User}
+                            background={activeInteractionIsAgentCall ? "active" : "shell"}
+                            shape="circle"
+                            size="md"
+                          />
+                          {!activeInteractionIsAgentCall && (
+                            <Badge
+                              shape="circle"
+                              variant={activeInteraction.closed ? "neutral" : hasOpenChatThread ? "success" : "warning"}
+                              size="sm"
+                              aria-label={activeInteraction.closed ? "Offline" : hasOpenChatThread ? "Online" : "Idle"}
+                              className="absolute bottom-[-2px] right-[-2px] px-0 border border-lyra-bg-surface-base"
+                            >
+                              <span className="block h-2 w-2 rounded-full bg-white" aria-hidden="true" />
+                            </Badge>
+                          )}
+                        </span>
                       }
                       iconDivider={false}
                       title={activeInteraction.customerName ?? "Customer"}
@@ -6094,36 +6131,19 @@ export function AgentNextGenPage({
                           </span>
                         ) : undefined
                       }
-                      // "Online" (was "Active" — renamed per explicit
-                      // request, same underlying signal) specifically (not
-                      // "Closed", which is a definite, real state regardless
-                      // of channel) only ever shows because of chat — per
-                      // explicit request, every other channel type has no
-                      // way to actually tell whether the customer is still
-                      // there (a call could've been dropped, an SMS/
-                      // WhatsApp/email thread has no presence signal at
-                      // all), so labeling those "Online" overclaims a
-                      // certainty this app doesn't have. `badge={undefined}`
-                      // renders nothing at all (see `PageHeader`'s own
-                      // `{badge && <Badge>...}` guard, page-header.tsx)
-                      // rather than an empty pill.
-                      //
-                      // Per a further explicit follow-up request ("leave the
-                      // active badge visible if the agent switches between
-                      // chat/other channels"): checks whether ANY thread on
-                      // this interaction is chat (`hasOpenChatThread`), not
-                      // just whether the CURRENTLY SELECTED tab
-                      // (`activeChannelType`) happens to be chat. Switching
-                      // the record-header tab bar over to, say, the email
-                      // channel while a chat thread is still open elsewhere
-                      // on the same card used to make the badge disappear
-                      // and reappear as the agent flipped between tabs —
-                      // the chat presence signal itself hasn't actually
-                      // gone anywhere just because a different tab is
-                      // showing, so the badge now stays put for as long as
-                      // that chat thread remains on the card.
-                      badge={activeInteraction.closed ? "Closed" : hasOpenChatThread ? "Online" : undefined}
-                      badgeColor={activeInteraction.closed ? "slate" : "green"}
+                      // `badge`/`badgeColor` (the old inline "Online"/
+                      // "Closed" pill) are gone — see the `icon` prop's own
+                      // doc comment above for where that signal moved to
+                      // (the avatar's own corner badge, three states now
+                      // instead of two). `hasOpenChatThread` still checks
+                      // whether ANY thread on this interaction is chat, not
+                      // just whichever tab is currently selected — per the
+                      // ORIGINAL explicit follow-up request behind that
+                      // check ("leave the active badge visible if the
+                      // agent switches between chat/other channels"),
+                      // switching tabs away from chat shouldn't make the
+                      // presence signal disappear when a chat thread is
+                      // still open elsewhere on the same card.
                       actions={
                         <>
                           {/* Per explicit follow-up request ("let's update
