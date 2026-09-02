@@ -2074,6 +2074,18 @@ export function AgentWorkspace2WithDeskPage({
   // call has no real Open/Pending/Resolved/Closed disposition to log
   // against a colleague the way a genuine customer contact does).
   const activeInteractionIsAgentCall = !!activeInteraction && OUTBOUND_AGENTS.some((a: CreateNewOutboundContact) => a.id === activeInteraction.id);
+  // Per explicit request ("Marcus Webb when initiated should not show
+  // customer information") — the scripted Marcus Webb interaction
+  // (`MARCUS_WEBB_ID`) hides Customer Information the same way
+  // `activeInteractionIsAgentCall` does for an agent-to-agent call (both
+  // the hover-preview toggle and the docked panel itself, below), even
+  // though it otherwise reads as a real customer elsewhere (see the
+  // `showChannelTabRow`/`createdCustomerRecords` doc comment above this
+  // one) — this is scoped narrowly to just those two Customer Information
+  // entry points, not folded into `activeInteractionIsAgentCall` itself,
+  // since Marcus Webb is a real (scripted) customer chat in every other
+  // respect.
+  const activeInteractionIsMarcusWebb = activeInteraction?.id === MARCUS_WEBB_ID;
   // Per explicit request: true when the active interaction is genuinely
   // backed by a real `CREATE_NEW_CUSTOMERS` directory record — every
   // creation path either reuses that real `customer-N` id verbatim
@@ -2737,6 +2749,16 @@ export function AgentWorkspace2WithDeskPage({
     | "search";
 
   const [panelOpen,      setPanelOpen]      = useState(false);
+  // Per explicit request ("go back to auto-closing the app panels when a
+  // new interaction is launched") — see AgentNextGenPage.tsx's identical
+  // effect (same `[activeInteractionId]` dependency, mirroring the
+  // `setShowSettings(false)` effect above) for the full rationale.
+  useEffect(() => {
+    if (activeInteractionId) {
+      setPanelOpen(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeInteractionId]);
   const [panelMounted,   setPanelMounted]   = useState(false);
   const [panelState,     setPanelState]     = useState<PanelState>("closed");
   const [activePanelKey, setActivePanelKey] = useState<PanelKey | null>(null);
@@ -7299,7 +7321,7 @@ export function AgentWorkspace2WithDeskPage({
                               rather than falling back to the Detail-only
                               tab set an "unknown contact" interaction still
                               gets. */}
-                          {!activeInteractionIsAgentCall && !(effectiveSidePanelPinned && sidePanelOpen) && (
+                          {!activeInteractionIsAgentCall && !activeInteractionIsMarcusWebb && !(effectiveSidePanelPinned && sidePanelOpen) && (
                           <Popover
                             open={customerInfoPreviewOpen && !sidePanelOpen}
                             onOpenChange={setCustomerInfoPreviewOpen}
@@ -8871,7 +8893,7 @@ export function AgentWorkspace2WithDeskPage({
                   call hides this docked panel outright (see that const's
                   own doc comment above), not just its Detail-only
                   "unknown contact" fallback. */}
-              {!activeInteractionIsAgentCall && showPanelToggle && activeInteraction && (
+              {!activeInteractionIsAgentCall && !activeInteractionIsMarcusWebb && showPanelToggle && activeInteraction && (
                 // `key`ed on the assignment's own id, same "force a full
                 // remount on every genuine switch" technique the content
                 // column further down already uses (see that div's own

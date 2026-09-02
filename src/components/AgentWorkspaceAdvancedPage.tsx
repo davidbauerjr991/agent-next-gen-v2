@@ -1792,6 +1792,16 @@ export function AgentWorkspaceAdvancedPage({
     | "search";
 
   const [panelOpen,      setPanelOpen]      = useState(false);
+  // Per explicit request ("go back to auto-closing the app panels when a
+  // new interaction is launched") — see AgentNextGenPage.tsx's identical
+  // effect (same `[activeInteractionId]` dependency, mirroring the
+  // `setShowSettings(false)` effect above) for the full rationale.
+  useEffect(() => {
+    if (activeInteractionId) {
+      setPanelOpen(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeInteractionId]);
   const [panelMounted,   setPanelMounted]   = useState(false);
   const [panelState,     setPanelState]     = useState<PanelState>("closed");
   const [activePanelKey, setActivePanelKey] = useState<PanelKey | null>(null);

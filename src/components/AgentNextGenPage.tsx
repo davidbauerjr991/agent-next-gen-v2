@@ -1537,6 +1537,21 @@ export function AgentNextGenPage({
     | "search";
 
   const [panelOpen,      setPanelOpen]      = useState(false);
+  // Per explicit request ("go back to auto-closing the app panels when a
+  // new interaction is launched") — this shared app-header panel (Screen
+  // Pop/Agent Chat/Schedule/etc.) used to auto-close any time the active
+  // interaction changed; that got dropped at some point and is being
+  // restored here, mirroring the `setShowSettings(false)` effect above
+  // (same `[activeInteractionId]` dependency, same "closes on any switch,
+  // not just a brand-new card" shape) rather than special-casing
+  // `handleStartCall` alone, since switching to an EXISTING interaction
+  // via the nav rail should close it too.
+  useEffect(() => {
+    if (activeInteractionId) {
+      setPanelOpen(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeInteractionId]);
   const [panelMounted,   setPanelMounted]   = useState(false);
   const [panelState,     setPanelState]     = useState<PanelState>("closed");
   const [activePanelKey, setActivePanelKey] = useState<PanelKey | null>(null);
