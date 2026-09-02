@@ -2103,9 +2103,24 @@ export function AgentWorkspace2WithDeskPage({
   // see that file's own doc comment), so the first `.some(...)` below
   // already covers him like any other real customer, no different from
   // how `createdCustomerRecords` promotes a freshly-linked/created card.
+  // Per explicit follow-up bug report: a Contact History entry reopened
+  // via `handleReopenContactHistoryEntry` falls back to a synthetic
+  // `history:${entry.id}` id whenever that entry has no `customerId` of
+  // its own (only the 5 hand-authored `CONTACT_HISTORY` rows — fictional
+  // names/case IDs, no backing `CREATE_NEW_CUSTOMERS` record — ever hit
+  // this fallback; every other entry already has a real `customerId` and
+  // is covered by the first `.some(...)` below instead). That
+  // `history:`-prefixed id used to read as NOT a real customer here,
+  // which wrongly hid Contact Overview for it — but a Contact History
+  // entry is by definition a genuine PAST contact with real prior
+  // messages, nothing like a typed/quickdial/redial address with no
+  // identity at all. The `startsWith("history:")` check below covers that
+  // synthetic-id case specifically, without also covering `adhoc:`/
+  // `quickdial:`/`redial:` (still genuinely unknown contacts, unaffected).
   const activeInteractionIsRealCustomer = activeInteraction
     ? CREATE_NEW_CUSTOMERS.some((c) => c.id === activeInteraction.id) ||
-      createdCustomerRecords.some((c) => c.id === activeInteraction.id)
+      createdCustomerRecords.some((c) => c.id === activeInteraction.id) ||
+      activeInteraction.id.startsWith("history:")
     : true;
   // Per explicit follow-up request (superseding the customer-identity
   // version this used to be — see git history for that prior condition):

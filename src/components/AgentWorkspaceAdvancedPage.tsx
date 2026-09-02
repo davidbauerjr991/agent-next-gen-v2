@@ -1301,9 +1301,17 @@ export function AgentWorkspaceAdvancedPage({
   // Information tab set, plain customer-ID subtitle — see
   // `showChannelTabRow` right below) the instant either action resolves,
   // not just at the customer directory's own static, build-time contents.
+  // Per explicit follow-up bug report — see AgentWorkspace2WithDeskPage.tsx's
+  // identical fix for the full reasoning: a Contact History entry with no
+  // `customerId` of its own reopens under a synthetic `history:${entry.id}`
+  // id (`handleReopenContactHistoryEntry`, below); that id used to read as
+  // NOT a real customer here, wrongly hiding Contact Overview for a
+  // genuine past contact. `startsWith("history:")` covers only that case,
+  // not the genuinely-unknown `adhoc:`/`quickdial:`/`redial:` ones.
   const activeInteractionIsRealCustomer = activeInteraction
     ? CREATE_NEW_CUSTOMERS.some((c) => c.id === activeInteraction.id) ||
-      createdCustomerRecords.some((c) => c.id === activeInteraction.id)
+      createdCustomerRecords.some((c) => c.id === activeInteraction.id) ||
+      activeInteraction.id.startsWith("history:")
     : true;
   // Per explicit follow-up request (superseding the customer-identity
   // version this used to be — see git history for that prior condition):

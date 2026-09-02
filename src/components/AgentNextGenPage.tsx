@@ -1269,8 +1269,17 @@ export function AgentNextGenPage({
   // active interaction — unlike those two files' identical constant, this
   // one is ONLY consulted for gating fabricated Contact Overview history,
   // where "no active interaction" should never read as "real customer".
+  // Per explicit follow-up bug report — see AgentWorkspace2WithDeskPage.tsx's
+  // identical fix for the full reasoning: a Contact History entry with no
+  // `customerId` of its own reopens under a synthetic `history:${entry.id}`
+  // id (`handleReopenContactHistoryEntry`, below); that id used to read as
+  // NOT a real customer here, wrongly hiding Contact Overview for a
+  // genuine past contact. `startsWith("history:")` covers only that case,
+  // not the genuinely-unknown `adhoc:`/`quickdial:`/`redial:` ones.
   const activeInteractionIsRealCustomer =
-    !!activeInteraction && CREATE_NEW_CUSTOMERS.some((c) => c.id === activeInteraction.id);
+    !!activeInteraction &&
+    (CREATE_NEW_CUSTOMERS.some((c) => c.id === activeInteraction.id) ||
+      activeInteraction.id.startsWith("history:"));
   // Looks up `threadLaunchTimestamps`' own captured entry (if any) for the
   // ACTIVE channel specifically — see that state's own doc comment for the
   // full "Draft" reasoning. Same `${interactionId}:${channelKey}` scheme
