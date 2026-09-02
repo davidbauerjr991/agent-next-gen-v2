@@ -2175,6 +2175,33 @@ export function InteractionTranscript({
     liveMessagesBySessionId[baseLiveMessageSessionId] = liveMessages;
   }
 
+  // Per explicit follow-up bug report ("you put it above the latest
+  // interaction bubbles - it should be at the bottom"): for the transfer/
+  // existing-conversation `ContactOverview` spot (`!isFreshLaunch`, below),
+  // this session's own `liveMessagesBySessionId` entry can ALREADY contain
+  // pre-existing conversation content when the transcript first renders
+  // (a Contact History resume seeds its whole prior conversation through
+  // `liveMessages`, not the fixed `messages` array) — rendering
+  // `ContactOverview` before ALL of those put it above messages that were
+  // already there before the agent even opened this contact, not "at the
+  // bottom." This ref captures, once per `contactId`, exactly how many of
+  // `lastSessionId`'s live messages already existed at that first render —
+  // everything up to that count renders ABOVE `ContactOverview` (a
+  // continuation of the existing conversation), everything past it renders
+  // BELOW (genuinely new, sent/received after this pickup). Applied during
+  // render (compare against the last-seen `contactId`, same "adjust a ref
+  // when a tracked key changes" pattern `InteractionNavItem`'s own
+  // `channelsExpandedOverride` uses) rather than inside a `useEffect`, so
+  // the very first render after a contact loads already has the correct
+  // split — a `useEffect` would run one render late, letting messages that
+  // were already there sneak in below the line for one frame.
+  const lastContactOverviewBoundaryContactIdRef = useRef<string | undefined>(undefined);
+  const contactOverviewLiveMessageBoundaryRef = useRef(0);
+  if (lastContactOverviewBoundaryContactIdRef.current !== contactId) {
+    lastContactOverviewBoundaryContactIdRef.current = contactId;
+    contactOverviewLiveMessageBoundaryRef.current = (liveMessagesBySessionId[lastSessionId ?? ""] ?? []).length;
+  }
+
   // Local, per-session tag state — removing/adding a tag on one message
   // shouldn't touch any other message's tags (in this session or any
   // other), so this is keyed by session id rather than one flat array.
@@ -2938,59 +2965,76 @@ export function InteractionTranscript({
                     block for the full "which of the two spots" reasoning.
                     This one covers a transfer/existing-conversation pickup
                     (`!isFreshLaunch`): it renders AFTER this session's own
-                    existing message history (the `messages.map(...)`/
-                    Voice-Email-placeholder blocks above) and BEFORE the
-                    live-messages block just below, so it reads as the
-                    boundary between "what already happened on this
-                    conversation" and "what the agent sends from here" —
-                    any new live messages land inline right underneath it,
-                    same DOM flow as everything else in this session. */}
-                {contactOverview && session.id === lastSessionId && !isFreshLaunch && (
-                  <ContactOverview
-                    customerName={displayName}
-                    previousAgent={contactOverview.previousAgent}
-                    snapshot={contactOverview.snapshot}
-                    journeySummary={contactOverview.journeySummary}
-                    onViewCustomerInfo={onViewCustomerInfo}
-                    onViewInteractionHistory={onViewInteractionHistory}
-                    onLaunchPreviousAgentInteraction={onLaunchPreviousAgentInteraction}
-                  />
-                )}
+                    existing message history — the `messages.map(...)`/
+                    Voice-Email-placeholder blocks above AND the "already
+                    existed" slice of live messages just below (see
+                    `contactOverviewLiveMessageBoundaryRef`'s own doc
+                    comment for why live messages need their own split
+                    here too) — and BEFORE the "new" slice, so it reads as
+                    the boundary between "what already happened on this
+                    conversation" and "what the agent sends from here." */}
                 {(() => {
                   const sessionLiveMessages = liveMessagesBySessionId[session.id] ?? [];
+                  const isNonFreshOverviewSession =
+                    !!contactOverview && session.id === lastSessionId && !isFreshLaunch;
+                  const existingLiveMessages = isNonFreshOverviewSession
+                    ? sessionLiveMessages.slice(0, contactOverviewLiveMessageBoundaryRef.current)
+                    : sessionLiveMessages;
+                  const newLiveMessages = isNonFreshOverviewSession
+                    ? sessionLiveMessages.slice(contactOverviewLiveMessageBoundaryRef.current)
+                    : [];
                   // Only the CURRENT session's own trailing edge — see
                   // `isCustomerTyping`'s own doc comment above for the full
                   // `lastSessionId`/`isTextChannel` scoping reasoning.
                   const showTypingIndicator = session.id === lastSessionId && isTextChannel && isCustomerTyping;
+                  const renderBubble = (message: TranscriptMessage) => (
+                    <TranscriptMessageBubble
+                      key={message.id}
+                      message={{
+                        ...message,
+                        ...(message.sender === "customer" ? { name: displayName, initials: displayInitials } : {}),
+                        tags: liveMessageTags[message.id] ?? message.tags,
+                      }}
+                      tagPickerOpen={tagPickerOpenId === message.id}
+                      onTagPickerOpenChange={(open) => setTagPickerOpenId(open ? message.id : null)}
+                      onAddTag={(option) => addLiveTag(message.id, option)}
+                      onRemoveTag={(tagId) => removeLiveTag(message.id, tagId)}
+                      onClearTags={() => clearLiveTags(message.id)}
+                      onCopy={() => copyMessage(message.text)}
+                      narrow={transcriptNarrow}
+                    />
+                  );
                   return (
-                    (sessionLiveMessages.length > 0 || showTypingIndicator) && (
-                      <div className="flex flex-col gap-5 py-4">
-                        {sessionLiveMessages.map((message) => (
-                          <TranscriptMessageBubble
-                            key={message.id}
-                            message={{
-                              ...message,
-                              ...(message.sender === "customer" ? { name: displayName, initials: displayInitials } : {}),
-                              tags: liveMessageTags[message.id] ?? message.tags,
-                            }}
-                            tagPickerOpen={tagPickerOpenId === message.id}
-                            onTagPickerOpenChange={(open) => setTagPickerOpenId(open ? message.id : null)}
-                            onAddTag={(option) => addLiveTag(message.id, option)}
-                            onRemoveTag={(tagId) => removeLiveTag(message.id, tagId)}
-                            onClearTags={() => clearLiveTags(message.id)}
-                            onCopy={() => copyMessage(message.text)}
-                            narrow={transcriptNarrow}
-                          />
-                        ))}
-                        {showTypingIndicator && (
-                          <TypingIndicator
-                            initials={displayInitials}
-                            narrow={transcriptNarrow}
-                            bubbleFullWidth={transcriptBubbleFullWidth}
-                          />
-                        )}
-                      </div>
-                    )
+                    <>
+                      {existingLiveMessages.length > 0 && (
+                        <div className="flex flex-col gap-5 py-4">
+                          {existingLiveMessages.map(renderBubble)}
+                        </div>
+                      )}
+                      {isNonFreshOverviewSession && contactOverview && (
+                        <ContactOverview
+                          customerName={displayName}
+                          previousAgent={contactOverview.previousAgent}
+                          snapshot={contactOverview.snapshot}
+                          journeySummary={contactOverview.journeySummary}
+                          onViewCustomerInfo={onViewCustomerInfo}
+                          onViewInteractionHistory={onViewInteractionHistory}
+                          onLaunchPreviousAgentInteraction={onLaunchPreviousAgentInteraction}
+                        />
+                      )}
+                      {(newLiveMessages.length > 0 || showTypingIndicator) && (
+                        <div className="flex flex-col gap-5 py-4">
+                          {newLiveMessages.map(renderBubble)}
+                          {showTypingIndicator && (
+                            <TypingIndicator
+                              initials={displayInitials}
+                              narrow={transcriptNarrow}
+                              bubbleFullWidth={transcriptBubbleFullWidth}
+                            />
+                          )}
+                        </div>
+                      )}
+                    </>
                   );
                 })()}
                 </div>
