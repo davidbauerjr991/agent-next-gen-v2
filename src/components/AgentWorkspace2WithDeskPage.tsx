@@ -177,6 +177,7 @@ import {
   findPossibleCustomerMatches,
   filterCustomersByQuery,
   CUSTOMER_INFO_ACCORDION_CLASSNAME,
+  buildCopilotSummary,
 } from "@/components/agent-next-gen-customer-info-panel";
 // PROTOTYPE — local-only, not in lyra-ui yet. See CollapsedChannelBadge's
 // own doc comment for why, and CLAUDE.md's lyra-ui rules for the convention
@@ -7904,10 +7905,35 @@ export function AgentWorkspace2WithDeskPage({
                           // scenario.ts) — never gets a fabricated "already
                           // been working with Agent X"; a genuinely
                           // brand-new contact reads as a plain first contact
-                          // instead.
+                          // instead. Per a later explicit request, the same
+                          // "Contact Overview" now also feeds a "Journey
+                          // Summary" card (lyra-ui's `ContactOverview`, its
+                          // own `journeySummary` prop) — the same
+                          // deterministic recap the former Copilot tab used
+                          // to show (`buildCopilotSummary`, agent-next-gen-
+                          // customer-info-panel.tsx) before Copilot itself
+                          // was hidden. Gated on `activeInteractionIsRealCustomer
+                          // || activeInteraction.id === MARCUS_WEBB_ID` —
+                          // ONE OR of those, deliberately different from
+                          // `buildContactOverviewInfo`'s own second argument
+                          // just below: Marcus's own `buildCopilotSummary`
+                          // entry is hand-authored specifically for HIS
+                          // scripted scenario (a real, intentional recap),
+                          // unlike the generic hashed `previousAgent`/
+                          // `snapshot` pool that's inappropriate for a
+                          // contact deliberately "separate from the
+                          // customer database" — so his Journey Summary
+                          // still shows even though his prior-agent history
+                          // correctly doesn't.
                           contactOverview={
                             (activeChannel?.startedFresh || activeInteraction.id === MARCUS_WEBB_ID)
-                              ? buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer)
+                              ? {
+                                  ...buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer),
+                                  journeySummary:
+                                    activeInteractionIsRealCustomer || activeInteraction.id === MARCUS_WEBB_ID
+                                      ? buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary
+                                      : undefined,
+                                }
                               : undefined
                           }
                           // Per explicit request/follow-up clarification —
@@ -8849,14 +8875,13 @@ export function AgentWorkspace2WithDeskPage({
                   recordDraft={activeCustomerRecordDraft}
                   overviewEditing={activeCustomerOverviewEditing}
                   onOverviewEditingChange={setActiveCustomerOverviewEditing}
-                  // Per explicit follow-up request ("only open the customer
-                  // information automatically if a NEW message appears in
-                  // the copilot window") — see `onCopilotFirstAvailable`'s
+                  // The old "only open the customer information
+                  // automatically if a NEW message appears in the copilot
+                  // window" behavior (`onCopilotFirstAvailable`) is gone
+                  // along with Copilot itself — see `CustomerInformationSidePanel`'s
                   // own doc comment (agent-next-gen-customer-info-panel.tsx)
-                  // for exactly which moment this fires on. Reveals the
-                  // panel even if the agent had it closed; a no-op if it
-                  // was already open.
-                  onCopilotFirstAvailable={() => setSidePanelOpen(true)}
+                  // for the "stop launching copilot - hide it completely"
+                  // fix this prop was removed as part of.
                   onStartInteraction={(contact, channel, phone, skillId) =>
                     handleStartCall({ contact, channel, phone, skillId })
                   }

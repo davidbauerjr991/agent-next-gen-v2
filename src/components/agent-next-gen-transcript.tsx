@@ -2819,6 +2819,7 @@ export function InteractionTranscript({
                     customerName={displayName}
                     previousAgent={contactOverview.previousAgent}
                     snapshot={contactOverview.snapshot}
+                    journeySummary={contactOverview.journeySummary}
                   />
                 )}
                 {messages.length > 0 && (

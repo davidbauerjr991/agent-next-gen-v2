@@ -171,6 +171,7 @@ import {
   useCustomerRecordDraft,
   findPossibleCustomerMatches,
   filterCustomersByQuery,
+  buildCopilotSummary,
 } from "@/components/agent-next-gen-customer-info-panel";
 // PROTOTYPE — local-only, not in lyra-ui yet. See CollapsedChannelBadge's
 // own doc comment for why, and CLAUDE.md's lyra-ui rules for the convention
@@ -6805,10 +6806,26 @@ export function AgentWorkspaceAdvancedPage({
                           // `createdCustomerRecords` entry never gets a
                           // fabricated "already been working with Agent X"
                           // — a genuinely brand-new contact reads as a
-                          // plain first contact instead.
+                          // plain first contact instead. Per a later
+                          // explicit request, the same "Contact Overview"
+                          // now also feeds a "Journey Summary" card
+                          // (lyra-ui's `ContactOverview`, its own
+                          // `journeySummary` prop) — the same deterministic
+                          // recap the former Copilot tab used to show
+                          // (`buildCopilotSummary`, agent-next-gen-customer-
+                          // info-panel.tsx) before Copilot itself was
+                          // hidden there; this is that content's new home,
+                          // gated on the same real-customer check for the
+                          // same "no fabricated history for a genuinely new
+                          // contact" reasoning.
                           contactOverview={
                             activeChannel?.startedFresh
-                              ? buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer)
+                              ? {
+                                  ...buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer),
+                                  journeySummary: activeInteractionIsRealCustomer
+                                    ? buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary
+                                    : undefined,
+                                }
                               : undefined
                           }
                           // Per explicit request/follow-up clarification —
@@ -7620,14 +7637,13 @@ export function AgentWorkspaceAdvancedPage({
                   recordDraft={activeCustomerRecordDraft}
                   overviewEditing={activeCustomerOverviewEditing}
                   onOverviewEditingChange={setActiveCustomerOverviewEditing}
-                  // Per explicit follow-up request ("only open the customer
-                  // information automatically if a NEW message appears in
-                  // the copilot window") — see `onCopilotFirstAvailable`'s
+                  // The old "only open the customer information
+                  // automatically if a NEW message appears in the copilot
+                  // window" behavior (`onCopilotFirstAvailable`) is gone
+                  // along with Copilot itself — see `CustomerInformationSidePanel`'s
                   // own doc comment (agent-next-gen-customer-info-panel.tsx)
-                  // for exactly which moment this fires on. Reveals the
-                  // panel even if the agent had it closed; a no-op if it
-                  // was already open.
-                  onCopilotFirstAvailable={() => setSidePanelOpen(true)}
+                  // for the "stop launching copilot - hide it completely"
+                  // fix this prop was removed as part of.
                   onStartInteraction={(contact, channel, phone, skillId) =>
                     handleStartCall({ contact, channel, phone, skillId })
                   }

@@ -485,33 +485,18 @@ export function buildCopilotSummary(customerName: string | undefined, recordId: 
   };
 }
 
-// Placeholder tab set (per reference screenshot). "Copilot" (per explicit
-// follow-up request) is FIRST in this list — the actual leftmost tab
-// button whenever it's showing at all — per a still-later explicit request
-// ("copilot be the first tab displayed"). This is purely a display-ORDER
-// change: the panel still opens on "Overview" by default everywhere
-// (`activeTab`'s own initializer below explicitly resolves
-// `CUSTOMER_PANEL_TABS.indexOf("Overview")` rather than a hardcoded `0`,
-// specifically so reordering this array never silently changes which tab
-// the panel actually lands on) — Copilot only becomes the tab an agent is
-// ALREADY looking at if they click it themselves. Whether Copilot actually
-// SHOWS as a tab button at all still depends entirely on `copilotAvailable`
-// (`CustomerInformationSidePanel`/`CustomerInfoHoverPreview` — see that
-// const's own doc comment on each: unavailable until the customer has
-// actually responded or the conversation was already customer-initiated),
-// unaffected by this reorder — a still-unavailable Copilot is filtered out
-// of `visibleTabs` same as always, leaving Overview as the actual leftmost
-// VISIBLE tab until Copilot has something to show. Per a later explicit
-// follow-up request Copilot was briefly hidden entirely (`copilotAvailable`
-// hardcoded `false`), then re-enabled per a still-later explicit request
-// ("re-add Copilot as one of the tabs") back to its original conditional
-// gating. The "jump to Copilot automatically when the customer replies"
-// behavior a much earlier version of this list's ordering used to set up
-// for stays removed, though (that auto-jump wiring —
-// `copilotFocusSignal`/`copilotFocusRequest` — was reported as annoying and
-// has been removed from this component and all 3 page files, not merely
-// hidden; it isn't reintroduced by this reorder either — Copilot moving to
-// the front changes where its tab BUTTON sits, not which tab is active).
+// Placeholder tab set (per reference screenshot). "Copilot" is still
+// listed FIRST here for history's sake (its display-order journey: added,
+// reordered to the front, briefly hidden entirely, re-enabled, made
+// conditionally available), but per the latest explicit request ("stop
+// launching copilot - hide it completely") it is now unconditionally
+// excluded from `visibleTabs` everywhere (`CustomerInformationSidePanel`/
+// `CustomerInfoHoverPreview`/`CustomerRowInfoPanel`/`AllContactsProfileView`
+// — see each one's own `visibleTabs` doc comment), full stop, regardless
+// of its position in this array or `copilotAvailable`-style gating (which
+// no longer exists) — this array's own order no longer matters for it at
+// all. `buildCopilotSummary`'s underlying recap text didn't go away,
+// though — see `ContactOverview`'s `journeySummary` prop for its new home.
 //
 // "Contacts" (this customer's own session history — was a separate,
 // independently-selectable "Customer History" tab in the record header,
@@ -533,11 +518,11 @@ export type CustomerPanelTabLabel = (typeof CUSTOMER_PANEL_TABS)[number];
 // tab in that app; Directory/Tasks/Accounts/Tickets have no
 // real content behind them, same "not ready to show yet" reasoning other
 // stubbed surfaces in this app already follow). "Copilot" is still listed
-// here — its own ADDITIONAL gating (hidden until the customer actually
-// responds — see `copilotAvailable` on `CustomerInformationSidePanel`/
-// `CustomerInfoHoverPreview` below) is separate from which tabs a given
-// consumer supports at all. Agent Workspace 2.0 With Desk is unaffected —
-// its own call sites pass the full `CUSTOMER_PANEL_TABS` list unchanged.
+// here too, same as `CUSTOMER_PANEL_TABS` above — it's unconditionally
+// excluded from `visibleTabs` regardless of whether a given consumer's own
+// `tabs` prop happens to include it. Agent Workspace 2.0 With Desk is
+// unaffected — its own call sites pass the full `CUSTOMER_PANEL_TABS` list
+// unchanged.
 export const AGENT_WORKSPACE_CUSTOMER_PANEL_TABS: CustomerPanelTabLabel[] = ["Overview", "Copilot", "Detail", "Notes"];
 
 // Temporarily hides the Overview tab's "Ask about this customer..."
@@ -3002,41 +2987,15 @@ export function CustomerInfoHoverPreview({
   // panel does for this same interaction.
   const row = useMemo(() => resolveCustomerListRecord(recordId), [recordId]);
   const copilotSummary = useMemo(() => buildCopilotSummary(customerName, recordId), [customerName, recordId]);
-  // Re-enabled per explicit follow-up request ("re-add Copilot as one of
-  // the tabs") — back to its original conditional gating rather than the
-  // hardcoded `false` this had for a while: a `startedFresh` (blank-slate,
-  // agent-initiated) interaction hasn't had the customer say anything yet,
-  // so Copilot has nothing to summarize; `lastCustomerMessageTick` covers a
-  // genuinely fresh outbound interaction whose customer HAS since replied
-  // within this session (set by `handleSendMessage`'s simulated reply — see
-  // `Thread.lastCustomerMessageTick`'s own doc comment). Either one is
-  // enough — this only needs ONE channel to have heard from the customer,
-  // not all of them. Note: the separate "jump to Copilot automatically the
-  // moment the customer replies" behavior (the old `copilotFocusSignal`
-  // prop) stays removed — that specific auto-jump, not the tab's mere
-  // existence, was what got reported as annoying, and it isn't re-added
-  // here. See `CustomerInformationSidePanel`'s identical computation on its
-  // own matching const, just below in this file, for the shared reasoning.
-  const copilotAvailable = !startedFresh || channels.some((c) => c.lastCustomerMessageTick !== undefined);
-  // Lands on "Copilot" by default whenever it's available (per explicit
-  // follow-up request: "copilot be the first tab displayed") — lyra-ui's
-  // `TabList overflowMenu` collapses to "active tab + N More" the moment
-  // this panel is too narrow to fit every tab (the common case here), so
-  // simply reordering `CUSTOMER_PANEL_TABS` to put "Copilot" first wasn't
-  // enough on its own: that collapsed row always shows the ACTIVE tab, not
-  // array index 0 (confirmed live — a reorder alone left "Overview" as the
-  // one visible pinned tab, with Copilot buried inside "N More", since
-  // Overview was still what actually had `active` set). Falls back to
-  // "Overview" whenever Copilot isn't available yet (still gated by
-  // `copilotAvailable` above — same "hasn't the customer said anything
-  // yet" reasoning), so an agent opening a still-`startedFresh` interaction
-  // keeps landing on Overview like before this change. See
-  // `CustomerInformationSidePanel`'s identical initializer, just below in
-  // this file, for the shared reasoning.
-  const [activeTab, setActiveTab] = useState(() =>
-    CUSTOMER_PANEL_TABS.indexOf(copilotAvailable ? "Copilot" : "Overview")
-  );
-  const visibleTabs = tabs.filter((t) => t !== "Copilot" || copilotAvailable);
+  // Per explicit request ("stop launching copilot - hide it completely")
+  // — Copilot is now unconditionally excluded below (`visibleTabs`), same
+  // as `CustomerInformationSidePanel`'s identical fix just below in this
+  // file (see that component's own doc comment for the full reasoning).
+  // `copilotSummary`/`buildCopilotSummary` above stay computed regardless
+  // — `ContactOverview`'s own `journeySummary` prop now reuses that exact
+  // recap in its new home.
+  const [activeTab, setActiveTab] = useState(() => CUSTOMER_PANEL_TABS.indexOf("Overview"));
+  const visibleTabs = tabs.filter((t) => t !== "Copilot");
   // See `buildCustomerMatchSubhead`'s own doc comment — shared with
   // `CustomerInformationSidePanel` so the docked panel and this hover
   // preview never disagree on the match count/wording or which list is
@@ -3515,7 +3474,6 @@ export function CustomerInformationSidePanel({
   overviewEditing,
   onOverviewEditingChange,
   matchState,
-  onCopilotFirstAvailable,
   copilotExtra,
   onStartInteraction,
 }: {
@@ -3545,14 +3503,12 @@ export function CustomerInformationSidePanel({
   channels: Thread[];
   /** This interaction's own `Interaction.startedFresh` — see that
    *  field's own doc comment (agent-next-gen-interaction-dashboard.tsx).
-   *  Feeds `copilotAvailable` below: a `startedFresh` (blank-slate, agent-
-   *  initiated) interaction hasn't had the customer say anything yet, so
-   *  Copilot has nothing to summarize; anything else (a notification-
-   *  opened case, a reopened history entry, an interaction opened from the
-   *  Search panel's Contacts list, the page's own initially-seeded active
-   *  call) is
-   *  already an existing, already-routed conversation with real prior
-   *  history, so Copilot is available immediately for those. */
+   *  Previously fed the now-removed `copilotAvailable` gate ("hasn't the
+   *  customer said anything yet, so Copilot has nothing to summarize") —
+   *  Copilot itself is unconditionally hidden now (per explicit request,
+   *  see `visibleTabs`' own doc comment below), so this prop currently has
+   *  no live consumer in this component; kept as-is (not removed) since
+   *  every call site already passes it and it costs nothing to keep. */
   startedFresh?: boolean;
   /**
    * Which tabs this panel supports at all, in order — per explicit
@@ -3629,18 +3585,6 @@ export function CustomerInformationSidePanel({
     onBackToSearch: () => void;
     onSaveNewCustomer: () => void;
   };
-  /** Per explicit follow-up request ("only open the customer information
-   *  automatically if a NEW message appears in the copilot window") — the
-   *  caller's hook for revealing a currently-CLOSED docked panel. Fired
-   *  from the SAME false→true `copilotAvailable` edge that already drives
-   *  the "jump to Copilot" `useEffect` just below (see that effect's own
-   *  doc comment) — i.e. the single moment Copilot first has something new
-   *  to show for this interaction, not on every later customer reply on an
-   *  already-`copilotAvailable` conversation (an earlier version of this
-   *  feature opened the panel on EVERY reply, which was too broad — this
-   *  narrows it to match the effect it's paired with). All 3 page files
-   *  wire it to their own `setSidePanelOpen(true)`. */
-  onCopilotFirstAvailable?: () => void;
   /** Passed straight through to `CustomerInformationPanelBody`'s own same-
    *  named prop — see that prop's own doc comment. `undefined` for every
    *  interaction except the Marcus Webb scripted scenario. */
@@ -3669,98 +3613,21 @@ export function CustomerInformationSidePanel({
   // Customers-table row click — still has one to look up.
   const row = useMemo(() => resolveCustomerListRecord(recordId), [recordId]);
   const copilotSummary = useMemo(() => buildCopilotSummary(customerName, recordId), [customerName, recordId]);
-  // Re-enabled per explicit follow-up request ("re-add Copilot as one of
-  // the tabs") — back to its original conditional gating rather than the
-  // hardcoded `false` this had for a while. See `startedFresh`'s own doc
-  // comment above for the "hasn't the customer said anything yet" logic;
-  // `lastCustomerMessageTick` covers a genuinely fresh outbound interaction
-  // whose customer HAS since replied within this session (set by
-  // `handleSendMessage`'s simulated reply — see `Thread.
-  // lastCustomerMessageTick`'s own doc comment). Either one is enough —
-  // this only needs ONE channel to have heard from the customer, not all
-  // of them. Note: the separate "jump to Copilot automatically the moment
-  // the customer replies" behavior (the old `copilotFocusSignal` prop,
-  // removed from this component and all 3 page files) stays removed —
-  // that specific auto-jump, not the tab's mere existence, was what got
-  // reported as annoying, and it isn't re-added here.
-  const copilotAvailable = !startedFresh || channels.some((c) => c.lastCustomerMessageTick !== undefined);
-  // Lands on "Copilot" by default whenever it's available (per explicit
-  // follow-up request: "copilot be the first tab displayed") — lyra-ui's
-  // `TabList overflowMenu` collapses to "active tab + N More" the moment
-  // this panel is too narrow to fit every tab (the common case here), so
-  // simply reordering `CUSTOMER_PANEL_TABS` to put "Copilot" first wasn't
-  // enough on its own: that collapsed row always shows the ACTIVE tab, not
-  // array index 0 (confirmed live — a reorder alone left "Overview" as the
-  // one visible pinned tab, with Copilot buried inside "N More", since
-  // Overview was still what actually had `active` set). Falls back to
-  // "Overview" whenever Copilot isn't available yet (still gated by
-  // `copilotAvailable` above — same "hasn't the customer said anything
-  // yet" reasoning), so an agent opening a still-`startedFresh` interaction
-  // keeps landing on Overview like before this change. See
-  // `CustomerInfoHoverPreview`'s identical initializer, just above in this
-  // file, for the shared reasoning.
-  const [activeTab, setActiveTab] = useState(() =>
-    CUSTOMER_PANEL_TABS.indexOf(copilotAvailable ? "Copilot" : "Overview")
-  );
-  // Tracks `copilotAvailable`'s PRIOR render value — see the false→true
-  // "jump to Copilot" `useEffect`, a bit further below, that reads this.
-  // Seeded from the current value (not `false`) specifically so a panel
-  // that mounts with Copilot ALREADY available doesn't treat that as a
-  // false→true edge and fire a redundant jump on top of what the
-  // `useState` initializer just above already landed on directly.
-  const prevCopilotAvailableRef = useRef(copilotAvailable);
-  // The tabs this panel's own header actually renders — `tabs` (this
-  // consumer's configured support list) minus "Copilot" specifically while
-  // it isn't available yet. Everything else in `tabs` always shows;
-  // Copilot is the only conditionally-gated one.
-  const visibleTabs = tabs.filter((t) => t !== "Copilot" || copilotAvailable);
-
-  // Falls back to Overview if the currently active tab is Copilot but the
-  // interaction THIS panel is now showing doesn't have Copilot available
-  // (e.g. the agent was reading Copilot for a different, already-replied-
-  // to interaction, then switched via the left nav to a freshly-launched
-  // one nobody has responded to yet) — without this, `activeTab` would
-  // keep pointing at Copilot's index even though its own tab button just
-  // disappeared from `visibleTabs`, leaving the panel showing Copilot's
-  // content with no tab looking selected in the header. Keyed on
-  // `recordId` (a new interaction being shown), not `copilotAvailable`
-  // itself — this half is a landing-state correction for switching TO a
-  // different interaction, not the live mid-conversation jump the second
-  // effect below handles.
-  useEffect(() => {
-    if (!copilotAvailable && activeTab === CUSTOMER_PANEL_TABS.indexOf("Copilot")) {
-      setActiveTab(CUSTOMER_PANEL_TABS.indexOf("Overview"));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recordId]);
-  // Jumps TO "Copilot" the moment it first becomes available during an
-  // already-mounted interaction — confirmed necessary live: the lazy
-  // `useState` initializer above only decides where the panel LANDS at
-  // mount time, so a `startedFresh` interaction (Copilot unavailable,
-  // initializer picks "Overview") that the customer then replies to mid-
-  // session never re-evaluates that initial choice on its own —
-  // `copilotAvailable` flips to `true`, Copilot appears in `visibleTabs`,
-  // but `activeTab` just stays wherever it already was, leaving Copilot
-  // sitting unopened behind "N More" exactly when it has something to show
-  // for the first time. `prevCopilotAvailableRef` tracks the PRIOR
-  // render's value so this only fires on the actual false→true edge, not
-  // on every render while already `true` — deliberately narrower than the
-  // old `copilotFocusSignal` auto-jump (removed in §71 for firing
-  // repeatedly and stealing focus mid-conversation): this fires exactly
-  // once per interaction, at the single moment Copilot has anything to
-  // summarize for the first time, not on every subsequent customer
-  // message after that. `onCopilotFirstAvailable` (see that prop's own
-  // doc comment) piggybacks on this exact same edge, for the exact same
-  // "only the first time, not every later reply" reason — the caller uses
-  // it to reveal a currently-closed docked panel.
-  useEffect(() => {
-    if (copilotAvailable && !prevCopilotAvailableRef.current) {
-      setActiveTab(CUSTOMER_PANEL_TABS.indexOf("Copilot"));
-      onCopilotFirstAvailable?.();
-    }
-    prevCopilotAvailableRef.current = copilotAvailable;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [copilotAvailable]);
+  // Per explicit request ("stop launching copilot - hide it completely"):
+  // Copilot is now unconditionally excluded below (`visibleTabs`), same
+  // treatment `CustomerRowInfoPanel`/`AllContactsProfileView` already give
+  // it (see either one's own `visibleTabs` doc comment) — this panel was
+  // the last of the three still showing it conditionally
+  // (`copilotAvailable`, previously). `copilotSummary`/`buildCopilotSummary`
+  // above stay computed regardless — `ContactOverview`'s own
+  // `journeySummary` prop (this file's page-level callers, not this
+  // component) now reuses that exact same deterministic recap in its new
+  // home, so the underlying data still has a real consumer even with the
+  // Copilot tab itself gone.
+  const [activeTab, setActiveTab] = useState(() => CUSTOMER_PANEL_TABS.indexOf("Overview"));
+  // `tabs` (this consumer's configured support list) minus "Copilot"
+  // unconditionally now — see this block's own top comment.
+  const visibleTabs = tabs.filter((t) => t !== "Copilot");
 
   // Never render wider than the parent Container actually is, docked or
   // full-screen — see `containerWidth`'s own doc comment. `Math.max(0, ...)`

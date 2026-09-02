@@ -152,6 +152,7 @@ import {
   AGENT_WORKSPACE_CUSTOMER_PANEL_TABS,
   buildCustomerInfoFields,
   useCustomerRecordDraft,
+  buildCopilotSummary,
 } from "@/components/agent-next-gen-customer-info-panel";
 // PROTOTYPE — local-only, not in lyra-ui yet. See CollapsedChannelBadge's
 // own doc comment for why, and CLAUDE.md's lyra-ui rules for the convention
@@ -1255,6 +1256,20 @@ export function AgentNextGenPage({
   // (`PageHeader`'s `icon` prop, render call site below) needs to tell an
   // agent-to-agent call apart from a real customer interaction too.
   const activeInteractionIsAgentCall = !!activeInteraction && OUTBOUND_AGENTS.some((a: CreateNewOutboundContact) => a.id === activeInteraction.id);
+  // Per explicit follow-up bug fix ("Contact Overview" — see that prop's
+  // own doc comment at the `<InteractionTranscript>` call site below): true
+  // when the active interaction is genuinely backed by a real
+  // `CREATE_NEW_CUSTOMERS` directory record, same "is this a real customer"
+  // membership check `AgentWorkspace2WithDeskPage.tsx`/
+  // `AgentWorkspaceAdvancedPage.tsx`'s own `activeInteractionIsRealCustomer`
+  // already uses (this file has no `createdCustomerRecords`/Create-New-
+  // Customer flow to also account for, so it's just the one membership
+  // check, not that pair's `||`). `false` (not `true`) when there's no
+  // active interaction — unlike those two files' identical constant, this
+  // one is ONLY consulted for gating fabricated Contact Overview history,
+  // where "no active interaction" should never read as "real customer".
+  const activeInteractionIsRealCustomer =
+    !!activeInteraction && CREATE_NEW_CUSTOMERS.some((c) => c.id === activeInteraction.id);
   // Looks up `threadLaunchTimestamps`' own captured entry (if any) for the
   // ACTIVE channel specifically — see that state's own doc comment for the
   // full "Draft" reasoning. Same `${interactionId}:${channelKey}` scheme
@@ -6757,8 +6772,8 @@ export function AgentNextGenPage({
                           // the same prior-agent/snapshot info on every
                           // fresh launch instead of reshuffling on every
                           // render. Per explicit follow-up bug fix: only a
-                          // genuinely real contact (backed by a
-                          // `CREATE_NEW_CUSTOMERS` directory record) ever
+                          // genuinely real contact
+                          // (`activeInteractionIsRealCustomer`, above) ever
                           // gets a fabricated "already been working with
                           // Agent X" — an outbound/inbound with no backing
                           // record (a typed address via lyra-ui's `adhoc:`
@@ -6767,13 +6782,26 @@ export function AgentNextGenPage({
                           // see `handleQuickDial`/`handleRedial`'s own doc
                           // comments) is a genuinely brand-new contact, not
                           // a returning one, so it must read as a plain
-                          // first contact instead.
+                          // first contact instead. Per a later explicit
+                          // request, the same gate now also feeds a
+                          // "Journey Summary" card (lyra-ui's
+                          // `ContactOverview`, its own `journeySummary`
+                          // prop) — the exact same deterministic recap the
+                          // former Copilot tab used to show
+                          // (`buildCopilotSummary`, agent-next-gen-
+                          // customer-info-panel.tsx) before Copilot itself
+                          // was hidden there; this is that content's new
+                          // home, so it stays gated on the same real-
+                          // customer check for the same "no fabricated
+                          // history for a genuinely new contact" reasoning.
                           contactOverview={
                             activeChannel?.startedFresh
-                              ? buildContactOverviewInfo(
-                                  activeInteraction.id,
-                                  CREATE_NEW_CUSTOMERS.some((c) => c.id === activeInteraction.id)
-                                )
+                              ? {
+                                  ...buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer),
+                                  journeySummary: activeInteractionIsRealCustomer
+                                    ? buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary
+                                    : undefined,
+                                }
                               : undefined
                           }
                           // Per explicit request/follow-up clarification —
@@ -7582,14 +7610,13 @@ export function AgentNextGenPage({
                   recordDraft={activeCustomerRecordDraft}
                   overviewEditing={activeCustomerOverviewEditing}
                   onOverviewEditingChange={setActiveCustomerOverviewEditing}
-                  // Per explicit follow-up request ("only open the customer
-                  // information automatically if a NEW message appears in
-                  // the copilot window") — see `onCopilotFirstAvailable`'s
+                  // The old "only open the customer information
+                  // automatically if a NEW message appears in the copilot
+                  // window" behavior (`onCopilotFirstAvailable`) is gone
+                  // along with Copilot itself — see `CustomerInformationSidePanel`'s
                   // own doc comment (agent-next-gen-customer-info-panel.tsx)
-                  // for exactly which moment this fires on. Reveals the
-                  // panel even if the agent had it closed; a no-op if it
-                  // was already open.
-                  onCopilotFirstAvailable={() => setSidePanelOpen(true)}
+                  // for the "stop launching copilot - hide it completely"
+                  // fix this prop was removed as part of.
                   onStartInteraction={(contact, channel, phone, skillId) =>
                     handleStartCall({ contact, channel, phone, skillId })
                   }
