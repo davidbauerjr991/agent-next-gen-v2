@@ -379,34 +379,34 @@ export const OUTBOUND_GROUPS: CreateNewOutboundConfig["groups"] = [
   { id: "partner-network", label: "Partner Network", kind: "empty", emptyMessage: "No partner network contacts yet" },
   { id: "vendor-directory", label: "Vendor Directory", kind: "empty", emptyMessage: "No vendor directory contacts yet" },
   { id: "regional-offices", label: "Regional Offices", kind: "empty", emptyMessage: "No regional offices contacts yet" },
+  // Kept in `OUTBOUND_GROUPS` (not deleted) but hidden from the visible
+  // group list via `HIDDEN_OUTBOUND_GROUP_IDS` below — per explicit
+  // follow-up request ("keep dial pad but not customers"), Customers no
+  // longer appears as a row. Definition left intact so it can be restored
+  // by simply removing its id from that array, same as any other
+  // hide/restore case that mechanism already supports.
   { id: "customers", label: "Customers", contacts: OUTBOUND_CUSTOMERS, icon: customerCategoryIcon() },
-  // No longer hidden via `HIDDEN_OUTBOUND_GROUP_IDS` (see that constant's
-  // updated doc comment below) — per explicit follow-up request, this
-  // group is reachable again, just via a small ghost button below the
-  // "Choose group" Select instead of a dropdown entry. lyra-ui's own
-  // create-new.tsx filters `kind === "dialpad"` out of the Select's
-  // `options` specifically (not this array), so this group still flows
-  // through to `outbound.groups` for that ghost button (and
+  // Reachable via a small ghost button below the group list instead of a
+  // row in it. lyra-ui's own create-new.tsx filters `kind === "dialpad"`
+  // out of the list specifically (not this array), so this group still
+  // flows through to `outbound.groups` for that ghost button (and
   // `activeGroup`/`onQuickDial`/`handleQuickDial` below) to find, it just
-  // never appears as a Select option. `icon` now set (`dialpadCategoryIcon`)
-  // so the ghost button renders the same grid glyph the reference mockup
-  // showed, reusing the group's own icon like every other group already
-  // does rather than hardcoding one in create-new.tsx.
+  // never appears as a row. `icon` set (`dialpadCategoryIcon`) so the
+  // ghost button renders the same grid glyph the reference mockup showed,
+  // reusing the group's own icon like every other group already does
+  // rather than hardcoding one in create-new.tsx.
   { id: "dialpad", label: "Dial Pad", kind: "dialpad", icon: dialpadCategoryIcon() },
 ];
 
-// Group ids hidden from the "New Outbound" filter dropdown without being
+// Group ids hidden from the "New Outbound" group list without being
 // removed from `OUTBOUND_GROUPS` above — see that constant's own doc
 // comment for why. Add/remove ids here to hide/restore a group; the
-// group's own definition never needs to change. Empty for now — "dialpad"
-// was the only entry here, and per the most recent explicit request it's
-// no longer hidden from `OUTBOUND_CONFIG.groups` (see that group's own
-// updated doc comment above); it's excluded from the Select's own
-// dropdown options a different way now (lyra-ui's create-new.tsx, keyed
-// off `kind` rather than this array). Kept in place, not deleted, as the
-// general-purpose "hide a group from the dropdown without deleting it"
-// mechanism for any future group that needs it.
-export const HIDDEN_OUTBOUND_GROUP_IDS: string[] = [];
+// group's own definition never needs to change. "customers" is hidden
+// here per explicit request ("keep dial pad but not customers") — Dial
+// Pad is excluded from the list a different way (lyra-ui's create-new.tsx,
+// keyed off `kind` rather than this array), since it's still reachable via
+// its own ghost button and shouldn't count as "hidden."
+export const HIDDEN_OUTBOUND_GROUP_IDS: string[] = ["customers"];
 
 export const OUTBOUND_CONFIG: CreateNewOutboundConfig = {
   outboundTitle: "New Outbound",
