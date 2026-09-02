@@ -429,13 +429,17 @@ export const OUTBOUND_CONFIG: CreateNewOutboundConfig = {
   // explicit follow-up. See `CreateNewOutboundConfig.searchLabel`'s own
   // doc comment in create-new.tsx.
   searchLabel: "Enter phone, email or search term",
-  // Per explicit request: the New Outbound picker's contact list isn't
-  // ready to show yet — hide it (and its pagination footer) for every
-  // group, leaving just the group dropdown ("Choose group" — Favorites/
-  // Agents/Teams/Skills/Customers) and its search field visible above an
-  // empty body. See `CreateNewOutboundConfig.hideContactList`'s own doc
-  // comment in create-new.tsx. Remove this once the real list is ready.
-  hideContactList: true,
+  // Per a later explicit request ("display all of the agents when
+  // agents list item is clicked ... paginate ... filter as the agent
+  // searches"), the real list is ready now — idle browsing into a
+  // contacts-kind group (Agents/Skills/My Team/Customers) shows that
+  // group's FULL roster with its own pagination footer, not just
+  // already-favorited contacts. "Favorites" itself is unaffected either
+  // way — it's a distinct `kind` create-new.tsx's `activeGroupContacts`
+  // never gates on this flag (see that const's own doc comment): idle
+  // Favorites always shows only starred contacts, searching from it
+  // always searches every group, in both states of this flag.
+  hideContactList: false,
   channelOptions: [
     { id: "voice",    label: "Call",     selectLabel: "Voice", icon: <Phone       className="h-5 w-5" strokeWidth={1.5} /> },
     // Per explicit request: agents' only other reachable channel besides
