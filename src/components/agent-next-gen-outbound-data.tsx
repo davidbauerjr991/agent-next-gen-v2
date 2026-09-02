@@ -157,7 +157,12 @@ export const OUTBOUND_AGENTS: NonNullable<CreateNewOutboundConfig["groups"][numb
   id: a.id,
   name: a.name,
   initials: initialsFor(a.name),
-  subtitle: a.agentId,
+  // Per explicit follow-up request: the row subhead is now this agent's
+  // job title ("Support Agent"/"Team Supervisor") rather than the raw
+  // `agentId` — reads as "who is this person" at a glance, matching a
+  // reference mockup. `agentId` itself is untouched elsewhere (still each
+  // agent's own real internal identifier), just no longer surfaced here.
+  subtitle: a.role,
   avatarClassName: a.avatarClassName,
   // Per explicit request: an agent is only reachable by Voice or Chat from
   // this picker — overrides whatever `CREATE_NEW_AGENTS` itself lists (that
