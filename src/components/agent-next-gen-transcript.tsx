@@ -1030,6 +1030,7 @@ export function TranscriptSessionSeparator({
   collapsed = false,
   onToggleCollapsed,
   compactHeader = false,
+  hideFade = false,
 }: {
   session: Contact;
   open: boolean;
@@ -1174,6 +1175,16 @@ export function TranscriptSessionSeparator({
    *  own width a second time. Defaults `false` — every other call site (if
    *  any are ever added) keeps the full label. */
   compactHeader?: boolean;
+  /** Suppresses this separator's own trailing bottom fade (see that div's
+   *  doc comment just below for what it normally does). Only ever needed
+   *  for a session whose FIRST piece of scrolling content underneath is
+   *  the `ContactOverview` block (`InteractionTranscript`'s own
+   *  `contactOverview` prop) — that block sits flush against this
+   *  separator, so the fade's `-bottom-8` band was painting straight over
+   *  its "Contact Overview" heading instead of just softening real
+   *  message bubbles further down. Every other session (fade landing on
+   *  actual messages, which is the whole point) leaves this `false`. */
+  hideFade?: boolean;
 }) {
   const isClosed = !isCurrentSession || !!channelClosed;
   // Local to the Outcome popover's own "Status" field — same "one popover
@@ -1769,10 +1780,12 @@ export function TranscriptSessionSeparator({
           </div>
         </AccordionHeadlessContent>
       </AccordionHeadlessItem>
-      <div
-        className="pointer-events-none absolute inset-x-0 -bottom-8 h-8 bg-gradient-to-b from-lyra-bg-surface-base to-transparent"
-        aria-hidden="true"
-      />
+      {!hideFade && (
+        <div
+          className="pointer-events-none absolute inset-x-0 -bottom-8 h-8 bg-gradient-to-b from-lyra-bg-surface-base to-transparent"
+          aria-hidden="true"
+        />
+      )}
     </AccordionHeadless>
   );
 }
@@ -2651,6 +2664,11 @@ export function InteractionTranscript({
                     className now instead — see that component's own doc
                     comment. */}
                 <TranscriptSessionSeparator
+                  // Per explicit bug fix — this separator's own trailing
+                  // fade otherwise paints straight over the `ContactOverview`
+                  // block's heading when it's the first thing rendered
+                  // right underneath (see `hideFade`'s own doc comment).
+                  hideFade={!!contactOverview && session.id === lastSessionId}
                   session={sessionWithCurrentStatus}
                   open={openSessionIds.has(session.id)}
                   onToggle={() => toggleSession(session.id)}
