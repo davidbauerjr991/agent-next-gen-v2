@@ -8048,6 +8048,35 @@ export function AgentWorkspace2WithDeskPage({
                               ? {
                                   ...buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer),
                                   journeySummary: buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary,
+                                  // Identity card (avatar/subtitle/balance/
+                                  // tags) — see `ContactOverviewInfo.
+                                  // customerCard`'s own doc comment
+                                  // (contact-overview.tsx) for why this is a
+                                  // plain, non-success-styled card. Looked
+                                  // up from `customerDirectoryPool` (the
+                                  // static directory plus anything
+                                  // `createdCustomerRecords` added this
+                                  // session — same pool the unknown-contact
+                                  // matching flow already uses) rather than
+                                  // `CREATE_NEW_CUSTOMERS` alone, so a
+                                  // freshly linked/created record gets this
+                                  // card too. `avatarInitials`/
+                                  // `avatarClassName`/`balance` come
+                                  // straight off the real record; only the
+                                  // subtitle/tags need synthesizing
+                                  // (`buildContactOverviewCustomerCard`,
+                                  // agent-next-gen-shared-utils.ts).
+                                  customerCard: (() => {
+                                    const record = customerDirectoryPool.find((c) => c.id === activeInteraction.id);
+                                    return record
+                                      ? {
+                                          avatarInitials: initialsFor(record.name),
+                                          avatarClassName: record.avatarClassName,
+                                          balance: record.paymentBalance,
+                                          ...buildContactOverviewCustomerCard(activeInteraction.id, record.group),
+                                        }
+                                      : undefined;
+                                  })(),
                                 }
                               : undefined
                           }

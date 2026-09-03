@@ -87,6 +87,7 @@ import {
   synthesizeChannelAddress,
   SHOW_ADD_CHANNEL_HEADER_BUTTON,
   buildContactOverviewInfo,
+  buildContactOverviewCustomerCard,
   type Page,
 } from "@/components/agent-next-gen-shared-utils";
 import {
@@ -6915,6 +6916,19 @@ export function AgentWorkspaceAdvancedPage({
                               ? {
                                   ...buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer),
                                   journeySummary: buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary,
+                                  // Identity card — see AgentWorkspace2WithDeskPage.tsx's
+                                  // identical wiring for the full reasoning.
+                                  customerCard: (() => {
+                                    const record = customerDirectoryPool.find((c) => c.id === activeInteraction.id);
+                                    return record
+                                      ? {
+                                          avatarInitials: initialsFor(record.name),
+                                          avatarClassName: record.avatarClassName,
+                                          balance: record.paymentBalance,
+                                          ...buildContactOverviewCustomerCard(activeInteraction.id, record.group),
+                                        }
+                                      : undefined;
+                                  })(),
                                 }
                               : undefined
                           }

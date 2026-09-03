@@ -644,6 +644,42 @@ function buildContactOverviewInfo(
   };
 }
 
+// Mixed in alongside a customer's own `group` (their real segment — VIP/
+// Standard/Enterprise/Prospect) to build the 3-tag set on Contact
+// Overview's identity card (`buildContactOverviewCustomerCard` below) —
+// purely decorative situational context, not a real CRM tag system, same
+// spirit as `CONTACT_OVERVIEW_SNAPSHOTS` above.
+const CONTACT_OVERVIEW_SITUATIONAL_TAGS = [
+  "Escalated Case", "Repeat Contact", "Priority Queue", "Loyalty Review",
+  "Multi-Channel", "Recent Complaint", "Pending Refund", "New to Product",
+];
+
+/** Builds the small identity-card summary — subtitle + tags — shown atop
+ *  lyra-ui's `ContactOverview` (its own `customerCard` prop) for a
+ *  customer with a real directory record behind them. Takes the record's
+ *  own `group` (segment/tag) and `seed` (e.g. the Interaction's own id)
+ *  as plain strings rather than the whole `CreateNewCustomerRecord` —
+ *  keeps this file dependency-free (see its own top-of-file note) instead
+ *  of importing that type just for this. Callers still resolve
+ *  `avatarInitials`/`avatarClassName`/`balance` straight off the record
+ *  themselves — those need no synthesizing, unlike tenure/tags here.
+ *  Deterministic (hashed via `hashSeed`, same as `buildContactOverviewInfo`
+ *  above) so the same customer always reads back the same tenure/tags. */
+function buildContactOverviewCustomerCard(seed: string, group: string): { subtitle: string; tags: string[] } {
+  const hash = hashSeed(seed);
+  const tenureYears = 1 + (hash % 15);
+  const tagPool = CONTACT_OVERVIEW_SITUATIONAL_TAGS;
+  const secondIdx = hash % tagPool.length;
+  // Stride by a fixed offset (not re-hashing `hash` itself) so the third
+  // tag reliably lands on a DIFFERENT index than the second rather than
+  // risking the same one twice.
+  const thirdIdx = (secondIdx + 1 + (Math.floor(hash / tagPool.length) % (tagPool.length - 1))) % tagPool.length;
+  return {
+    subtitle: `${group} · ${tenureYears} yr${tenureYears === 1 ? "" : "s"} tenure`,
+    tags: [group, tagPool[secondIdx], tagPool[thirdIdx]],
+  };
+}
+
 /** Which of the three top-level views `AgentNextGenPage` is currently
  *  showing — the Desk dashboard, an active interaction's record, or
  *  Settings. */
@@ -702,6 +738,7 @@ export {
   quickReplyFieldDisplayValue,
   hashSeed,
   buildContactOverviewInfo,
+  buildContactOverviewCustomerCard,
   synthesizePhone,
   splitCustomerName,
   synthesizeChannelAddress,
