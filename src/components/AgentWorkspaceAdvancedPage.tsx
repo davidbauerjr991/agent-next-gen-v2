@@ -87,7 +87,6 @@ import {
   synthesizeChannelAddress,
   SHOW_ADD_CHANNEL_HEADER_BUTTON,
   buildContactOverviewInfo,
-  buildContactOverviewCustomerCard,
   type Page,
 } from "@/components/agent-next-gen-shared-utils";
 import {
@@ -2030,14 +2029,7 @@ export function AgentWorkspaceAdvancedPage({
     conversations: true,
     schedule: true,
     screenpop: false,
-    // Pinned per explicit request ("add a new icon button in the top
-    // right app space ... inbox lucide icon ... display the contacts
-    // table") — this key already existed (its own `contentByPanelKey`
-    // entry was a placeholder `blankPanelContent`) but was fully
-    // unreachable (`false` here, plus excluded from `HIDDEN_FROM_APPS_
-    // MENU` below). Now a normal, pinned-by-default app header icon like
-    // Notifications/Agent Chat/Schedule above.
-    customers: true,
+    customers: false,
     accounts: false,
     tickets: false,
     wem: false,
@@ -4266,69 +4258,12 @@ export function AgentWorkspaceAdvancedPage({
       panelTabs: AGENT_WORKSPACE_CUSTOMER_PANEL_TABS,
     },
   });
-  // Content for the pinned "Customers" app-header icon (Inbox icon, per
-  // explicit request — see `PANEL_KEY_METADATA.customers` above). Bundles
-  // its own `CustomersListView` + `CustomerRowInfoPanel` pair rather than
-  // reusing the Dashboard's own "Customers" desk-tab instance, since that
-  // instance only survives desk-tab switches (mounted-but-hidden), not a
-  // full navigation away from the Dashboard — this panel must work from
-  // any top-level view. Props mirror this tier's own Dashboard instance
-  // (`leadingChannelStack`, `isRowOpen`, `tabs={AGENT_WORKSPACE_CUSTOMER_
-  // PANEL_TABS}`, `onAddToast`, `hidePrevNext`, no `onOpenFullScreenTab` —
-  // this tier has no customer full-screen tabs), except `onRowClick` here
-  // actually opens `CustomerRowInfoPanel` (unlike the Dashboard's own
-  // no-op instance) since there's no other way to view row detail from
-  // within this docked panel.
-  const customersPanelContent: EmbeddablePanelContent = {
-    title: "Customers",
-    body: (
-      <div className="relative flex flex-1 overflow-hidden">
-        <CustomersListView
-          onStartInteraction={(contact, channel, phone, skillId) =>
-            handleStartCall({ contact, channel, phone, skillId })
-          }
-          addedFilterKeys={customerAddedFilterKeys}
-          onAddedFilterKeysChange={setCustomerAddedFilterKeys}
-          filterValues={customerFilterValues}
-          onFilterValuesChange={setCustomerFilterValues}
-          onRowClick={(row) =>
-            setSelectedCustomerRow((prev) =>
-              prev?.contactNumber === row.contactNumber ? null : row
-            )
-          }
-          searchQuery={customerSearchQuery}
-          onSearchChange={setCustomerSearchQuery}
-          sortKey={customerSortKey}
-          sortDir={customerSortDir}
-          onSort={handleCustomerSort}
-          sortedRows={customerSortedRows}
-          openRowId={selectedCustomerRow?.contactNumber ?? null}
-          leadingChannelStack
-          isRowOpen={(row) => interactions.some((i) => i.customerId === row.contactNumber)}
-        />
-        <CustomerRowInfoPanel
-          row={selectedCustomerRow}
-          onClose={() => setSelectedCustomerRow(null)}
-          onPrevious={() => handleCustomerRowNav(-1)}
-          onNext={() => handleCustomerRowNav(1)}
-          hasPrevious={selectedCustomerIndex > 0}
-          hasNext={selectedCustomerIndex !== -1 && selectedCustomerIndex < customerSortedRows.length - 1}
-          onStartInteraction={(contact, channel, phone, skillId) =>
-            handleStartCall({ contact, channel, phone, skillId })
-          }
-          tabs={AGENT_WORKSPACE_CUSTOMER_PANEL_TABS}
-          onAddToast={addToast}
-          hidePrevNext
-        />
-      </div>
-    ),
-  };
   const contentByPanelKey: Record<PanelKey, EmbeddablePanelContent> = {
     notif: notifContent,
     conversations: blankPanelContent("Agent Chat"),
     schedule: scheduleContent,
     screenpop: screenPopContent,
-    customers: customersPanelContent,
+    customers: blankPanelContent("Customers"),
     accounts: blankPanelContent("Accounts"),
     tickets: blankPanelContent("Tickets"),
     // WEM = Workforce Engagement Management
@@ -4412,10 +4347,7 @@ export function AgentWorkspaceAdvancedPage({
     conversations: { label: "Agent Chat", icon: MessageSquare },
     schedule: { label: "Schedule", icon: CalendarDays },
     screenpop: { label: "Screen Pop", icon: MonitorUp },
-    // `Inbox`, not `Users` — per explicit request for this specific icon
-    // once "customers" became a real, reachable app header button (see
-    // `pinnedKeys.customers`'s own doc comment above).
-    customers: { label: "Customers", icon: Inbox },
+    customers: { label: "Customers", icon: Users },
     accounts: { label: "Accounts", icon: Building2 },
     tickets: { label: "Tickets", icon: Ticket },
     wem: { label: "WEM", icon: UserCog },
@@ -4449,18 +4381,16 @@ export function AgentWorkspaceAdvancedPage({
   // here to reorder it moves the same underlying `panelOrder` array the
   // header reads, and vice versa.
   //
-  // Accounts/Tickets are hidden from this menu specifically (per explicit
-  // request) — `panelOrder`/`pinnedKeys` themselves are untouched, so
-  // Accounts/Tickets (unpinned) simply have no way to open them anymore,
-  // since this menu was their only entry point. WEM is deliberately NOT in
-  // this list (dropped per a follow-up explicit request, "Add WEM to the
-  // top right app area") — it's now pinned (see `pinnedKeys` above) AND
-  // listed here, a fully reachable, discoverable app like Notifications/
-  // Agent Chat/etc. Customers is no longer in this list either, per the
-  // later explicit request that made it a real, pinned, reachable app
-  // header button (`pinnedKeys.customers`'s own doc comment above) — same
-  // full reachability WEM already has.
-  const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["accounts", "tickets"];
+  // Customers/Accounts/Tickets are hidden from this menu specifically (per
+  // explicit request) — `panelOrder`/`pinnedKeys` themselves are untouched,
+  // so Accounts/Tickets (unpinned) simply have no way to open them anymore,
+  // since this menu was their only entry point; Customers (also unpinned)
+  // is the same, but has its Search-panel Customers tab as a real
+  // alternative entry point. WEM is deliberately NOT in this list (dropped
+  // per a follow-up explicit request, "Add WEM to the top right app area")
+  // — it's now pinned (see `pinnedKeys` above) AND listed here, a fully
+  // reachable, discoverable app like Notifications/Agent Chat/etc.
+  const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["customers", "accounts", "tickets"];
   const appsMenuItems: MenuEntry[] = panelOrder.filter((key: PanelKey) => !HIDDEN_FROM_APPS_MENU.includes(key)).map((key) => {
     const { label, icon: KeyIcon } = PANEL_KEY_METADATA[key];
     return {
@@ -6985,21 +6915,6 @@ export function AgentWorkspaceAdvancedPage({
                               ? {
                                   ...buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer),
                                   journeySummary: buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary,
-                                  // Identity card — see AgentWorkspace2WithDeskPage.tsx's
-                                  // identical wiring for the full reasoning
-                                  // (including the fallback-synthesis fix
-                                  // for known contacts with no backing
-                                  // directory record, e.g. Priya Shah).
-                                  customerCard: (() => {
-                                    const record = customerDirectoryPool.find((c) => c.id === activeInteraction.id);
-                                    return buildContactOverviewCustomerCard(
-                                      activeInteraction.id,
-                                      activeInteraction.customerName,
-                                      record?.avatarClassName,
-                                      record?.group,
-                                      record?.paymentBalance
-                                    );
-                                  })(),
                                 }
                               : undefined
                           }

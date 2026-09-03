@@ -644,85 +644,6 @@ function buildContactOverviewInfo(
   };
 }
 
-// Mixed in alongside a customer's own `group` (their real segment — VIP/
-// Standard/Enterprise/Prospect) to build the 3-tag set on Contact
-// Overview's identity card (`buildContactOverviewCustomerCard` below) —
-// purely decorative situational context, not a real CRM tag system, same
-// spirit as `CONTACT_OVERVIEW_SNAPSHOTS` above.
-const CONTACT_OVERVIEW_SITUATIONAL_TAGS = [
-  "Escalated Case", "Repeat Contact", "Priority Queue", "Loyalty Review",
-  "Multi-Channel", "Recent Complaint", "Pending Refund", "New to Product",
-];
-
-// Fallback pools for a "known" contact with NO real `CREATE_NEW_CUSTOMERS`
-// directory record behind them — the 5 hand-authored, fictional
-// `CONTACT_HISTORY` rows (Nathan Cole/Priya Shah/Omar Farooq/Lauren
-// Briggs/Mei Tanaka) are the actual case this covers: `activeInteraction
-// IsRealCustomer` reads them as "real" (via its own `startsWith("history:")`
-// clause) so they still get a full Contact Overview, including
-// `previousAgent`/`snapshot` above — but there's no backing record to pull
-// an avatar color/segment/balance from. Rather than skip the identity card
-// for exactly these 5 (which is what silently happened before this fix —
-// confirmed via screenshot against Priya Shah specifically), synthesize
-// the same fields a real record would have supplied, same "fabricate
-// whatever's missing" spirit `buildContactOverviewInfo` above already
-// uses for its own previousAgent/snapshot. Small, duplicate pools rather
-// than importing the real ones from create-new-customers-data.ts — keeps
-// this file dependency-free (see its own top-of-file note).
-const CONTACT_OVERVIEW_FALLBACK_AVATAR_COLORS = [
-  "blue", "purple", "green", "orange", "teal", "red", "pink", "yellow", "lime", "slate",
-];
-const CONTACT_OVERVIEW_FALLBACK_GROUPS = ["VIP", "Standard", "Enterprise", "Prospect"];
-const CONTACT_OVERVIEW_FALLBACK_BALANCES = ["$0.00", "$24.99", "$49.50", "$99.00", "$149.99", "$249.50"];
-
-/** Builds the full identity-card summary shown atop lyra-ui's
- *  `ContactOverview` (its own `customerCard` prop) for any "known"
- *  contact — real directory record or not (see the fallback pools' own
- *  doc comment for why "not" still needs a full card, not a skipped one).
- *  `seed` (e.g. the Interaction's own id) drives every hashed/synthesized
- *  field, same deterministic convention as `buildContactOverviewInfo`
- *  above, so the same contact always reads back the same card.
- *
- *  Takes the record's own `avatarClassName`/`group`/`balance` as plain,
- *  individually-optional strings rather than the whole
- *  `CreateNewCustomerRecord` — keeps this file dependency-free (see its
- *  own top-of-file note) instead of importing that type just for this,
- *  and lets a caller with a real record for SOME of these (never actually
- *  happens today, but no reason to require all-or-nothing) pass through
- *  only what it has. Any omitted field falls back to this function's own
- *  synthesized value instead of the whole card silently disappearing. */
-function buildContactOverviewCustomerCard(
-  seed: string,
-  name: string,
-  knownAvatarClassName?: string,
-  knownGroup?: string,
-  knownBalance?: string
-): { avatarInitials: string; avatarClassName: string; subtitle: string; balance: string; tags: string[] } {
-  const hash = hashSeed(seed);
-  const group = knownGroup ?? CONTACT_OVERVIEW_FALLBACK_GROUPS[hash % CONTACT_OVERVIEW_FALLBACK_GROUPS.length];
-  const avatarClassName =
-    knownAvatarClassName ??
-    (() => {
-      const color = CONTACT_OVERVIEW_FALLBACK_AVATAR_COLORS[hash % CONTACT_OVERVIEW_FALLBACK_AVATAR_COLORS.length];
-      return `bg-lyra-accent-${color}-soft text-lyra-accent-${color}-strong`;
-    })();
-  const balance = knownBalance ?? CONTACT_OVERVIEW_FALLBACK_BALANCES[hash % CONTACT_OVERVIEW_FALLBACK_BALANCES.length];
-  const tenureYears = 1 + (hash % 15);
-  const tagPool = CONTACT_OVERVIEW_SITUATIONAL_TAGS;
-  const secondIdx = hash % tagPool.length;
-  // Stride by a fixed offset (not re-hashing `hash` itself) so the third
-  // tag reliably lands on a DIFFERENT index than the second rather than
-  // risking the same one twice.
-  const thirdIdx = (secondIdx + 1 + (Math.floor(hash / tagPool.length) % (tagPool.length - 1))) % tagPool.length;
-  return {
-    avatarInitials: initialsFor(name),
-    avatarClassName,
-    subtitle: `${group} · ${tenureYears} yr${tenureYears === 1 ? "" : "s"} tenure`,
-    balance,
-    tags: [group, tagPool[secondIdx], tagPool[thirdIdx]],
-  };
-}
-
 /** Which of the three top-level views `AgentNextGenPage` is currently
  *  showing — the Desk dashboard, an active interaction's record, or
  *  Settings. */
@@ -781,7 +702,6 @@ export {
   quickReplyFieldDisplayValue,
   hashSeed,
   buildContactOverviewInfo,
-  buildContactOverviewCustomerCard,
   synthesizePhone,
   splitCustomerName,
   synthesizeChannelAddress,

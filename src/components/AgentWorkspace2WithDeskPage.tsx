@@ -2982,14 +2982,7 @@ export function AgentWorkspace2WithDeskPage({
     conversations: true,
     schedule: true,
     screenpop: false,
-    // Pinned per explicit request ("add a new icon button in the top
-    // right app space ... inbox lucide icon ... display the contacts
-    // table") — this key already existed (its own `contentByPanelKey`
-    // entry was a placeholder `blankPanelContent`) but was fully
-    // unreachable (`false` here, plus excluded from `HIDDEN_FROM_APPS_
-    // MENU` below). Now a normal, pinned-by-default app header icon like
-    // Notifications/Agent Chat/Schedule above.
-    customers: true,
+    customers: false,
     accounts: false,
     tickets: false,
     wem: false,
@@ -5281,68 +5274,12 @@ export function AgentWorkspace2WithDeskPage({
       panelTabs: CUSTOMER_PANEL_TABS,
     },
   });
-  // Customers — per explicit request ("add a new icon button in the top
-  // right app space and use an inbox lucide icon - when clicked open a
-  // container for contacts and display the contacts table"). See
-  // AgentNextGenPage.tsx's identical `customersPanelContent` for the full
-  // reasoning (bundling `CustomersListView` + its own `CustomerRowInfoPanel`
-  // together HERE rather than relying on the Dashboard tab's own instance,
-  // since this panel is reachable from any top-level view). Matches this
-  // tier's own Dashboard "Customers" tab render call further down —
-  // `leadingChannelStack`/`isRowOpen`/`hidePrevNext` included, same as that
-  // instance — just a second render location sharing the same lifted state.
-  const customersPanelContent: EmbeddablePanelContent = {
-    title: "Customers",
-    body: (
-      <div className="relative flex flex-1 overflow-hidden">
-        <CustomersListView
-          onStartInteraction={(contact, channel, phone, skillId) =>
-            handleStartCall({ contact, channel, phone, skillId })
-          }
-          addedFilterKeys={customerAddedFilterKeys}
-          onAddedFilterKeysChange={setCustomerAddedFilterKeys}
-          filterValues={customerFilterValues}
-          onFilterValuesChange={setCustomerFilterValues}
-          onRowClick={(row) =>
-            setSelectedCustomerRow((prev) => (prev?.contactNumber === row.contactNumber ? null : row))
-          }
-          searchQuery={customerSearchQuery}
-          onSearchChange={setCustomerSearchQuery}
-          sortKey={customerSortKey}
-          sortDir={customerSortDir}
-          onSort={handleCustomerSort}
-          sortedRows={customerSortedRows}
-          openRowId={selectedCustomerRow?.contactNumber ?? null}
-          leadingChannelStack
-          isRowOpen={(row) =>
-            interactions.some((i) => i.customerId === row.contactNumber) ||
-            openCustomerTabs.some((t) => t.row.contactNumber === row.contactNumber)
-          }
-        />
-        <CustomerRowInfoPanel
-          row={selectedCustomerRow}
-          onClose={() => setSelectedCustomerRow(null)}
-          onPrevious={() => handleCustomerRowNav(-1)}
-          onNext={() => handleCustomerRowNav(1)}
-          hasPrevious={selectedCustomerIndex > 0}
-          hasNext={selectedCustomerIndex !== -1 && selectedCustomerIndex < customerSortedRows.length - 1}
-          onStartInteraction={(contact, channel, phone, skillId) =>
-            handleStartCall({ contact, channel, phone, skillId })
-          }
-          tabs={CUSTOMER_PANEL_TABS}
-          onAddToast={addToast}
-          onOpenFullScreenTab={handleOpenCustomerFullScreenTab}
-          hidePrevNext
-        />
-      </div>
-    ),
-  };
   const contentByPanelKey: Record<PanelKey, EmbeddablePanelContent> = {
     notif: notifContent,
     conversations: blankPanelContent("Agent Chat"),
     schedule: scheduleContent,
     screenpop: screenPopContent,
-    customers: customersPanelContent,
+    customers: blankPanelContent("Customers"),
     accounts: blankPanelContent("Accounts"),
     tickets: blankPanelContent("Tickets"),
     // WEM = Workforce Engagement Management
@@ -5425,10 +5362,7 @@ export function AgentWorkspace2WithDeskPage({
     conversations: { label: "Agent Chat", icon: MessageSquare },
     schedule: { label: "Schedule", icon: CalendarDays },
     screenpop: { label: "Screen Pop", icon: MonitorUp },
-    // `Inbox`, not `Users` — per explicit request for this specific icon
-    // once "customers" became a real, reachable app header button (see
-    // `pinnedKeys.customers`'s own doc comment above).
-    customers: { label: "Customers", icon: Inbox },
+    customers: { label: "Customers", icon: Users },
     accounts: { label: "Accounts", icon: Building2 },
     tickets: { label: "Tickets", icon: Ticket },
     wem: { label: "WEM", icon: Gauge },
@@ -5462,15 +5396,11 @@ export function AgentWorkspace2WithDeskPage({
   // here to reorder it moves the same underlying `panelOrder` array the
   // header reads, and vice versa.
   //
-  // Accounts/Tickets are hidden from this menu specifically (per explicit
-  // request) — `panelOrder`/`pinnedKeys` themselves are untouched, so
-  // Accounts/Tickets (already unpinned) simply have no way to open them
-  // anymore, since this menu was their only entry point. Customers is no
-  // longer in this list — per the later explicit request that made it a
-  // real, pinned, reachable app header button (`pinnedKeys.customers`'s
-  // own doc comment above), it's now fully reachable/discoverable here
-  // too, same as Notifications/Agent Chat/etc. WEM has bounced in and out
-  // of this
+  // Customers/Accounts/Tickets are hidden from this menu specifically (per
+  // explicit request) — `panelOrder`/`pinnedKeys` themselves are untouched,
+  // so Customers (already pinned) keeps its header icon; Accounts/Tickets
+  // (already unpinned) simply have no way to open them anymore, since this
+  // menu was their only entry point. WEM has bounced in and out of this
   // list across several follow-ups in the same vein — briefly removed
   // ("add wem... into the apps top right... like in 2.0 basic"), put back
   // ("remove the wem and interactions tabs in premium"), and now removed
@@ -5480,7 +5410,7 @@ export function AgentWorkspace2WithDeskPage({
   // dropdown is WEM's only entry point in Premium now). Still unpinned
   // (`pinnedKeys.wem` stays `false`), so it has no permanent header icon —
   // just a row here, matching Schedule/Screen Pop.
-  const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["accounts", "tickets"];
+  const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["customers", "accounts", "tickets"];
   const appsMenuItems: MenuEntry[] = panelOrder.filter((key: PanelKey) => !HIDDEN_FROM_APPS_MENU.includes(key)).map((key) => {
     const { label, icon: KeyIcon } = PANEL_KEY_METADATA[key];
     return {
@@ -8118,42 +8048,6 @@ export function AgentWorkspace2WithDeskPage({
                               ? {
                                   ...buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer),
                                   journeySummary: buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary,
-                                  // Identity card (avatar/subtitle/balance/
-                                  // tags) — see `ContactOverviewInfo.
-                                  // customerCard`'s own doc comment
-                                  // (contact-overview.tsx). Looked up from
-                                  // `customerDirectoryPool` (the static
-                                  // directory plus anything
-                                  // `createdCustomerRecords` added this
-                                  // session — same pool the unknown-contact
-                                  // matching flow already uses) rather than
-                                  // `CREATE_NEW_CUSTOMERS` alone, so a
-                                  // freshly linked/created record gets this
-                                  // card too — but per explicit bug report
-                                  // (confirmed against Priya Shah, one of
-                                  // the 5 hand-authored Contact History
-                                  // rows with no backing directory record),
-                                  // `buildContactOverviewCustomerCard`
-                                  // itself now ALWAYS returns a full card
-                                  // rather than this call site skipping it
-                                  // entirely on a lookup miss — see that
-                                  // function's own doc comment
-                                  // (agent-next-gen-shared-utils.ts) for why
-                                  // a "known" contact with no real record
-                                  // still needs one, same as
-                                  // `buildContactOverviewInfo` above already
-                                  // fabricates its own previousAgent/
-                                  // snapshot for exactly this case.
-                                  customerCard: (() => {
-                                    const record = customerDirectoryPool.find((c) => c.id === activeInteraction.id);
-                                    return buildContactOverviewCustomerCard(
-                                      activeInteraction.id,
-                                      activeInteraction.customerName,
-                                      record?.avatarClassName,
-                                      record?.group,
-                                      record?.paymentBalance
-                                    );
-                                  })(),
                                 }
                               : undefined
                           }
