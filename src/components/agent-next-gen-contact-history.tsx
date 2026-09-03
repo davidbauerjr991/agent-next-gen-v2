@@ -1111,7 +1111,7 @@ export function ContactHistoryCard({
           // later ("make it an outline button - it's too prominent") back
           // to the original outline treatment, keeping only the height fix.
           <Button variant="outline" size="md" onClick={onOpenAllContacts}>
-            View All Contacts
+            All Contacts
           </Button>
         )
       }
