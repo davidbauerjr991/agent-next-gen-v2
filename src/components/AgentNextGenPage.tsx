@@ -1789,7 +1789,15 @@ export function AgentNextGenPage({
     conversations: true,
     schedule: true,
     screenpop: false,
-    customers: false,
+    // Pinned per explicit request ("add a new icon button in the top
+    // right app space ... inbox lucide icon ... display the contacts
+    // table") — this key already existed (its own `contentByPanelKey`
+    // entry was a placeholder `blankPanelContent`) but was fully
+    // unreachable (`false` here, plus excluded from `HIDDEN_FROM_APPS_
+    // MENU` below in a way that hid it from BOTH the header and the
+    // "View All Apps" menu). Now a normal, pinned-by-default app header
+    // icon like Notifications/Agent Chat/Schedule above.
+    customers: true,
     accounts: false,
     tickets: false,
     wem: false,
@@ -4214,12 +4222,75 @@ export function AgentNextGenPage({
       panelTabs: AGENT_WORKSPACE_CUSTOMER_PANEL_TABS,
     },
   });
+  // Customers — per explicit request ("add a new icon button in the top
+  // right app space and use an inbox lucide icon - when clicked open a
+  // container for contacts and display the contacts table"). Renders the
+  // real `CustomersListView` (the same table/filters/search the Desk
+  // dashboard's own "Customers" tab uses) plus its own `CustomerRowInfoPanel`
+  // companion — bundled together HERE, in this panel's own content, rather
+  // than relying on the Dashboard tab's already-mounted instance: this
+  // shared docked panel is reachable from ANY top-level view (an active
+  // interaction, Settings), not just the Dashboard, and the Dashboard's own
+  // "customers" tab section fully unmounts outside the Dashboard (unlike
+  // its own opacity-0/inert survival trick, which only covers switching
+  // BETWEEN desk tabs while still on the Dashboard) — so this panel needs
+  // its own always-available copy to reliably show a row's detail
+  // regardless of what page the agent opened it from.
+  //
+  // Reuses the exact same lifted `customerXxx`/`selectedCustomerRow` state
+  // the Dashboard's own instance does (see that render call further down)
+  // — both instances read/write the one shared source of truth, same
+  // "starting a call from either instance now closes both" precedent
+  // already established for `selectedCustomerRow` elsewhere in this file.
+  // `onRowClick` here actually opens `CustomerRowInfoPanel` (unlike the
+  // Dashboard tab's own deliberately no-op `onRowClick` — see that call
+  // site's own doc comment) since this panel has no OTHER way to view a
+  // row's detail.
+  const customersPanelContent: EmbeddablePanelContent = {
+    title: "Customers",
+    body: (
+      <div className="relative flex flex-1 overflow-hidden">
+        <CustomersListView
+          onStartInteraction={(contact, channel, phone, skillId) =>
+            handleStartCall({ contact, channel, phone, skillId })
+          }
+          addedFilterKeys={customerAddedFilterKeys}
+          onAddedFilterKeysChange={setCustomerAddedFilterKeys}
+          filterValues={customerFilterValues}
+          onFilterValuesChange={setCustomerFilterValues}
+          onRowClick={(row) =>
+            setSelectedCustomerRow((prev) => (prev?.contactNumber === row.contactNumber ? null : row))
+          }
+          searchQuery={customerSearchQuery}
+          onSearchChange={setCustomerSearchQuery}
+          sortKey={customerSortKey}
+          sortDir={customerSortDir}
+          onSort={handleCustomerSort}
+          sortedRows={customerSortedRows}
+          openRowId={selectedCustomerRow?.contactNumber ?? null}
+        />
+        <CustomerRowInfoPanel
+          row={selectedCustomerRow}
+          onClose={() => setSelectedCustomerRow(null)}
+          onPrevious={() => handleCustomerRowNav(-1)}
+          onNext={() => handleCustomerRowNav(1)}
+          hasPrevious={selectedCustomerIndex > 0}
+          hasNext={selectedCustomerIndex !== -1 && selectedCustomerIndex < customerSortedRows.length - 1}
+          onStartInteraction={(contact, channel, phone, skillId) =>
+            handleStartCall({ contact, channel, phone, skillId })
+          }
+          tabs={AGENT_WORKSPACE_CUSTOMER_PANEL_TABS}
+          onAddToast={addToast}
+        />
+      </div>
+    ),
+  };
   const contentByPanelKey: Record<PanelKey, EmbeddablePanelContent> = {
     notif: notifContent,
     conversations: blankPanelContent("Agent Chat"),
     schedule: scheduleContent,
     screenpop: screenPopContent,
-    customers: blankPanelContent("Customers"),
+    customers: customersPanelContent,
     accounts: blankPanelContent("Accounts"),
     tickets: blankPanelContent("Tickets"),
     // WEM = Workforce Engagement Management
@@ -4304,7 +4375,10 @@ export function AgentNextGenPage({
     conversations: { label: "Agent Chat", icon: MessageSquare },
     schedule: { label: "Schedule", icon: CalendarDays },
     screenpop: { label: "Screen Pop", icon: MonitorUp },
-    customers: { label: "Customers", icon: Users },
+    // `Inbox`, not `Users` — per explicit request for this specific icon
+    // once "customers" became a real, reachable app header button (see
+    // `pinnedKeys.customers`'s own doc comment above).
+    customers: { label: "Customers", icon: Inbox },
     accounts: { label: "Accounts", icon: Building2 },
     tickets: { label: "Tickets", icon: Ticket },
     wem: { label: "WEM", icon: UserCog },
@@ -4338,27 +4412,29 @@ export function AgentNextGenPage({
   // here to reorder it moves the same underlying `panelOrder` array the
   // header reads, and vice versa.
   //
-  // Customers/Accounts/Tickets are hidden from this menu specifically (per
-  // explicit request) — `panelOrder`/`pinnedKeys` themselves are untouched,
-  // so Accounts/Tickets (unpinned) simply have no way to open them anymore,
-  // since this menu was their only entry point; Customers (also unpinned)
-  // is the same, but has its Search-panel Customers tab as a real
-  // alternative entry point. WEM is deliberately NOT in this list (dropped
-  // per a follow-up explicit request, "Add WEM to the top right app area")
-  // — it's now pinned (see `pinnedKeys` above) AND listed here, a fully
-  // reachable, discoverable app like Notifications/Agent Chat/etc.
+  // Accounts/Tickets are hidden from this menu specifically (per explicit
+  // request) — `panelOrder`/`pinnedKeys` themselves are untouched, so
+  // Accounts/Tickets (unpinned) simply have no way to open them anymore,
+  // since this menu was their only entry point. WEM is deliberately NOT in
+  // this list (dropped per a follow-up explicit request, "Add WEM to the
+  // top right app area") — it's now pinned (see `pinnedKeys` above) AND
+  // listed here, a fully reachable, discoverable app like Notifications/
+  // Agent Chat/etc. Customers is no longer in this list either, per the
+  // later explicit request that made it a real, pinned, reachable app
+  // header button (`pinnedKeys.customers`'s own doc comment above) — same
+  // full reachability WEM already has.
   //
   // "search" added per explicit follow-up request ("hide the search app",
-  // clarified as "Fully hidden" — same treatment as Customers/Accounts/
-  // Tickets, not the WEM-style unpin-only). Its own `pinnedKeys.search` is
-  // also now `false` above, so this is now completely unreachable from the
-  // AppHeader — the `activePanelKey === "search"` render branches
-  // elsewhere in this file (main content area / interior panel) become
-  // dead code that never fires, left in place rather than deleted since
-  // they're harmless and the underlying `useSearchPanelContent` hook this
-  // page's own `searchContent` still calls stays valid for a future
-  // request to re-surface it.
-  const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["customers", "accounts", "tickets", "search"];
+  // clarified as "Fully hidden" — same treatment Customers/Accounts/
+  // Tickets used to get, not the WEM-style unpin-only). Its own
+  // `pinnedKeys.search` is also now `false` above, so this is now
+  // completely unreachable from the AppHeader — the `activePanelKey ===
+  // "search"` render branches elsewhere in this file (main content area /
+  // interior panel) become dead code that never fires, left in place
+  // rather than deleted since they're harmless and the underlying
+  // `useSearchPanelContent` hook this page's own `searchContent` still
+  // calls stays valid for a future request to re-surface it.
+  const HIDDEN_FROM_APPS_MENU: PanelKey[] = ["accounts", "tickets", "search"];
   const appsMenuItems: MenuEntry[] = panelOrder.filter((key: PanelKey) => !HIDDEN_FROM_APPS_MENU.includes(key)).map((key) => {
     const { label, icon: KeyIcon } = PANEL_KEY_METADATA[key];
     return {
