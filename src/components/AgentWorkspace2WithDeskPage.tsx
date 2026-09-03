@@ -8051,31 +8051,38 @@ export function AgentWorkspace2WithDeskPage({
                                   // Identity card (avatar/subtitle/balance/
                                   // tags) — see `ContactOverviewInfo.
                                   // customerCard`'s own doc comment
-                                  // (contact-overview.tsx) for why this is a
-                                  // plain, non-success-styled card. Looked
-                                  // up from `customerDirectoryPool` (the
-                                  // static directory plus anything
+                                  // (contact-overview.tsx). Looked up from
+                                  // `customerDirectoryPool` (the static
+                                  // directory plus anything
                                   // `createdCustomerRecords` added this
                                   // session — same pool the unknown-contact
                                   // matching flow already uses) rather than
                                   // `CREATE_NEW_CUSTOMERS` alone, so a
                                   // freshly linked/created record gets this
-                                  // card too. `avatarInitials`/
-                                  // `avatarClassName`/`balance` come
-                                  // straight off the real record; only the
-                                  // subtitle/tags need synthesizing
-                                  // (`buildContactOverviewCustomerCard`,
-                                  // agent-next-gen-shared-utils.ts).
+                                  // card too — but per explicit bug report
+                                  // (confirmed against Priya Shah, one of
+                                  // the 5 hand-authored Contact History
+                                  // rows with no backing directory record),
+                                  // `buildContactOverviewCustomerCard`
+                                  // itself now ALWAYS returns a full card
+                                  // rather than this call site skipping it
+                                  // entirely on a lookup miss — see that
+                                  // function's own doc comment
+                                  // (agent-next-gen-shared-utils.ts) for why
+                                  // a "known" contact with no real record
+                                  // still needs one, same as
+                                  // `buildContactOverviewInfo` above already
+                                  // fabricates its own previousAgent/
+                                  // snapshot for exactly this case.
                                   customerCard: (() => {
                                     const record = customerDirectoryPool.find((c) => c.id === activeInteraction.id);
-                                    return record
-                                      ? {
-                                          avatarInitials: initialsFor(record.name),
-                                          avatarClassName: record.avatarClassName,
-                                          balance: record.paymentBalance,
-                                          ...buildContactOverviewCustomerCard(activeInteraction.id, record.group),
-                                        }
-                                      : undefined;
+                                    return buildContactOverviewCustomerCard(
+                                      activeInteraction.id,
+                                      activeInteraction.customerName,
+                                      record?.avatarClassName,
+                                      record?.group,
+                                      record?.paymentBalance
+                                    );
                                   })(),
                                 }
                               : undefined

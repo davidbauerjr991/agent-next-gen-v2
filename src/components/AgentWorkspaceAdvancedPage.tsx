@@ -6917,17 +6917,19 @@ export function AgentWorkspaceAdvancedPage({
                                   ...buildContactOverviewInfo(activeInteraction.id, activeInteractionIsRealCustomer),
                                   journeySummary: buildCopilotSummary(activeInteraction.customerName, activeInteraction.customerId).journeySummary,
                                   // Identity card — see AgentWorkspace2WithDeskPage.tsx's
-                                  // identical wiring for the full reasoning.
+                                  // identical wiring for the full reasoning
+                                  // (including the fallback-synthesis fix
+                                  // for known contacts with no backing
+                                  // directory record, e.g. Priya Shah).
                                   customerCard: (() => {
                                     const record = customerDirectoryPool.find((c) => c.id === activeInteraction.id);
-                                    return record
-                                      ? {
-                                          avatarInitials: initialsFor(record.name),
-                                          avatarClassName: record.avatarClassName,
-                                          balance: record.paymentBalance,
-                                          ...buildContactOverviewCustomerCard(activeInteraction.id, record.group),
-                                        }
-                                      : undefined;
+                                    return buildContactOverviewCustomerCard(
+                                      activeInteraction.id,
+                                      activeInteraction.customerName,
+                                      record?.avatarClassName,
+                                      record?.group,
+                                      record?.paymentBalance
+                                    );
                                   })(),
                                 }
                               : undefined
